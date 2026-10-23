@@ -21,10 +21,8 @@ pub fn render_markdown(report: &Report) -> String {
     let _ = writeln!(out, "### {}\n", s.title);
     let _ = writeln!(out, "{}\n", summary_line(report));
 
-    let (changed, quiet): (Vec<&Row>, Vec<&Row>) = report
-        .rows
-        .iter()
-        .partition(|r| is_interesting(r, report.has_base));
+    let (changed, quiet): (Vec<&Row>, Vec<&Row>) =
+        report.rows.iter().partition(|r| is_interesting(r));
     let shown = s.max_rows.map_or(changed.len(), |n| n.min(changed.len()));
     render_groups(&mut out, &changed[..shown], false, report.has_base);
     if shown < changed.len() {
@@ -49,8 +47,7 @@ pub fn render_markdown(report: &Report) -> String {
 }
 
 /// Without a base there is nothing to call "changed": show the numbers up front.
-fn is_interesting(r: &Row, has_base: bool) -> bool {
-    let _ = has_base;
+fn is_interesting(r: &Row) -> bool {
     r.verdict != Verdict::Unchanged
 }
 
