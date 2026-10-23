@@ -1,0 +1,98 @@
+name: Release benchmarks
+
+# Reusable workflow: run a repo's benchmarks, attach `benchmarks.json` to a release, and diff
+# against the previous release's asset. Call it from `on: release: types: [published]`:
+#
+#   jobs:
+#     bench:
+#       permissions: { contents: write }
+#       uses: tstapler/benchdiff/.github/workflows/release-benchmarks.yml@main
+#       with:
+#         bench-command: go test -bench . -benchmem -count=10 ./... | tee bench.txt
+#         results: bench.txt
+#         format: go
+
+on:
+  workflow_call:
+    inputs:
+      bench-command:
+        description: Shell command that runs the benchmarks and writes the file named by `results`.
+        type: string
+        required: true
+      results:
+        description: File (or glob) the benchmarks produce.
+        type: string
+        required: true
+      format:
+        description: benchdiff input format.
+        type: string
+        default: auto
+      setup:
+        description: Optional shell command run before the benchmarks (install toolchains, build, ...).
+        type: string
+        default: ''
+      asset-name:
+        description: Release asset name for the canonical results.
+        type: string
+        default: benchmarks.json
+      threshold:
+        type: string
+        default: '5'
+      runs-on:
+        type: string
+        default: ubuntu-latest
+      benchdiff-ref:
+        description: Ref of tstapler/benchdiff to run (pin a commit SHA for reproducibility).
+        type: string
+        default: main
+
+permissions:
+  contents: write
+
+jobs:
+  benchmarks:
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: tstapler/benchdiff
+          ref: ${{ inputs.benchdiff-ref }}
+          path: .benchdiff-action
+      - name: Setup
+        if: inputs.setup != ''
+        run: ${{ inputs.setup }}
+      - name: Run benchmarks
+        run: ${{ inputs.bench-command }}
+      - name: Find the previous release's results
+        id: previous
+        run: |
+          # The release before this one, by creation date, ignoring drafts and prereleases of this tag.
+          prev="$(gh release list --exclude-drafts --limit 20 --json tagName,createdAt \
+            --jq "[.[] | select(.tagName != \"$TAG\")] | sort_by(.createdAt) | reverse | .[0].tagName // empty")"
+          if [ -n "$prev" ] && gh release download "$prev" --pattern "${{ inputs.asset-name }}" --dir "$RUNNER_TEMP/prev" 2>/dev/null; then
+            echo "base=$RUNNER_TEMP/prev/${{ inputs.asset-name }}" >> "$GITHUB_OUTPUT"
+            echo "previous=$prev" >> "$GITHUB_OUTPUT"
+          else
+            echo "No previous release asset ${{ inputs.asset-name }}; reporting head only."
+          fi
+      - name: Diff
+        id: diff
+        uses: ./.benchdiff-action
+        with:
+          head: ${{ inputs.results }}
+          base: ${{ steps.previous.outputs.base }}
+          format: ${{ inputs.format }}
+          threshold: ${{ inputs.threshold }}
+          title: Benchmarks ${{ steps.previous.outputs.previous && format('{0} → {1}', steps.previous.outputs.previous, github.event.release.tag_name) || github.event.release.tag_name }}
+          tag: release
+          comment: 'false'
+      - name: Attach to the release
+        run: |
+          cp "${{ steps.diff.outputs.head-json-path }}" "${{ inputs.asset-name }}"
+          cp "${{ steps.diff.outputs.report-path }}" benchmark-diff.md
+          gh release upload "$TAG" "${{ inputs.asset-name }}" benchmark-diff.md --clobber
