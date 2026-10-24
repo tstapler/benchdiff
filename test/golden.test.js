@@ -166,7 +166,7 @@ test('a read-only token (fork PR) degrades to a result the caller turns into a w
 
 test('outside a pull request the comment is skipped without any request', async () => {
   const f = fakeFetch({});
-  const r = await upsertComment({ token: 't', marker, body: marker, fetchImpl: f.impl, env, number: undefined });
+  const r = await upsertComment({ token: 't', marker, body: marker, fetchImpl: f.impl, env, number: null });
   assert.equal(r.status, 'skipped');
   assert.equal(f.calls.length, 0);
 });
