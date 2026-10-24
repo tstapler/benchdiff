@@ -1,6 +1,6 @@
 //! Importers for the JSON-shaped tools. Specs and the fixtures' provenance are in `docs/research.md`.
 
-use crate::model::{Better, Metric, MetricSet};
+use crate::model::{Better, Metric, MetricSet, Skipped};
 use crate::stats::median;
 use serde_json::Value;
 
@@ -26,6 +26,7 @@ fn finite_samples(values: impl Iterator<Item = f64>) -> Vec<f64> {
 /// `cargo criterion --message-format=json`: one JSON object per line; only `benchmark-complete` matters.
 pub(super) fn criterion(text: &str) -> Result<MetricSet, String> {
     let mut metrics = Vec::new();
+    let mut skipped = Skipped::default();
     for (i, line) in text
         .lines()
         .enumerate()
@@ -43,6 +44,7 @@ pub(super) fn criterion(text: &str) -> Result<MetricSet, String> {
             .ok_or_else(|| format!("criterion line {}: no `typical` estimate", i + 1))?;
         let unit = str_of(typical, "unit");
         let Some(estimate) = typical.get("estimate").and_then(num) else {
+            skipped.push(group, name, "time");
             continue;
         };
         let mut m = Metric::new(group, name, "time", unit, estimate, Better::Lower);
@@ -72,6 +74,7 @@ pub(super) fn criterion(text: &str) -> Result<MetricSet, String> {
     Ok(MetricSet {
         env: Default::default(),
         metrics,
+        skipped,
     })
 }
 
@@ -81,6 +84,7 @@ pub(super) fn criterion(text: &str) -> Result<MetricSet, String> {
 /// max - min, not a confidence interval, so it is deliberately not turned into bounds.
 pub(super) fn cargo_bench(text: &str) -> Result<MetricSet, String> {
     let mut metrics = Vec::new();
+    let mut skipped = Skipped::default();
     for line in text.lines() {
         let Some(rest) = line.strip_prefix("test ") else {
             continue;
@@ -89,14 +93,16 @@ pub(super) fn cargo_bench(text: &str) -> Result<MetricSet, String> {
             continue;
         };
         let mut words = tail.split_whitespace();
+        let (group, bench) = name.trim().rsplit_once("::").unwrap_or(("", name.trim()));
         let Some(value) = words
             .next()
             .and_then(|w| w.replace(',', "").parse::<f64>().ok())
+            .filter(|v| v.is_finite())
         else {
+            skipped.push(group, bench, "time");
             continue;
         };
         let unit = words.next().unwrap_or("ns/iter");
-        let (group, bench) = name.trim().rsplit_once("::").unwrap_or(("", name.trim()));
         metrics.push(Metric::new(
             group,
             bench,
@@ -112,6 +118,7 @@ pub(super) fn cargo_bench(text: &str) -> Result<MetricSet, String> {
     Ok(MetricSet {
         env: Default::default(),
         metrics,
+        skipped,
     })
 }
 
@@ -122,6 +129,7 @@ pub(super) fn jmh(text: &str) -> Result<MetricSet, String> {
     let runs = v.as_array().ok_or("JMH JSON must be a top-level array")?;
     let mut env = std::collections::BTreeMap::new();
     let mut metrics = Vec::new();
+    let mut skipped = Skipped::default();
     for run in runs {
         let full = str_of(run, "benchmark");
         let (group, name) = full.rsplit_once('.').unwrap_or(("", full));
@@ -147,11 +155,17 @@ pub(super) fn jmh(text: &str) -> Result<MetricSet, String> {
             format!("{name}[{params}]")
         };
         if let Some(pm) = run.get("primaryMetric") {
-            metrics.extend(jmh_metric(group, &name, mode, better, pm));
+            match jmh_metric(group, &name, mode, better, pm) {
+                Some(m) => metrics.push(m),
+                None => skipped.push(group, &name, mode),
+            }
         }
         if let Some(secondary) = run.get("secondaryMetrics").and_then(Value::as_object) {
             for (label, sm) in secondary {
-                metrics.extend(jmh_metric(group, &name, label, Better::Lower, sm));
+                match jmh_metric(group, &name, label, Better::Lower, sm) {
+                    Some(m) => metrics.push(m),
+                    None => skipped.push(group, &name, label),
+                }
             }
         }
         for (key, field) in [("jvm", "jdkVersion"), ("vm", "vmName")] {
@@ -163,7 +177,11 @@ pub(super) fn jmh(text: &str) -> Result<MetricSet, String> {
     if metrics.is_empty() {
         return Err("JMH JSON contains no benchmarks".into());
     }
-    Ok(MetricSet { env, metrics })
+    Ok(MetricSet {
+        env,
+        metrics,
+        skipped,
+    })
 }
 
 /// `None` when the score is missing or non-finite (e.g. `"NaN"`), so one bad metric is skipped.
@@ -210,13 +228,17 @@ pub(super) fn hyperfine(text: &str) -> Result<MetricSet, String> {
         env.insert("hyperfine".into(), ver.into());
     }
     let mut metrics = Vec::new();
+    let mut skipped = Skipped::default();
     for r in results {
         let command = str_of(r, "command");
         if let Some(summary) = r.get("summary").and_then(Value::as_object) {
             // hyperfine >= 2: per-metric summaries plus per-run `measurements`.
             for (metric, s) in summary {
                 if metric.starts_with("time_") || metric == "memory_peak_resident" {
-                    metrics.extend(hyperfine_v2(command, metric, s, r));
+                    match hyperfine_v2(command, metric, s, r) {
+                        Some(m) => metrics.push(m),
+                        None => skipped.push("", command, metric),
+                    }
                 }
             }
         } else if let Some(median_s) = r.get("median").and_then(num) {
@@ -231,12 +253,18 @@ pub(super) fn hyperfine(text: &str) -> Result<MetricSet, String> {
                     .filter_map(num),
             );
             metrics.push(m);
+        } else if r.get("median").is_some() {
+            skipped.push("", command, "time_wall_clock");
         }
     }
     if metrics.is_empty() {
         return Err("hyperfine JSON contains no usable results".into());
     }
-    Ok(MetricSet { env, metrics })
+    Ok(MetricSet {
+        env,
+        metrics,
+        skipped,
+    })
 }
 
 /// `None` when neither the summary median nor the samples give a finite value.
@@ -283,6 +311,7 @@ pub(super) fn google_bench(text: &str) -> Result<MetricSet, String> {
     }
     // Repetitions arrive as repeated "iteration" entries; aggregates (mean/median/stddev/cv) are
     // derived from them and would double-count, so only raw iterations are kept.
+    let mut skipped = Skipped::default();
     let mut order: Vec<String> = Vec::new();
     let mut by_name: std::collections::HashMap<String, (Metric, Vec<f64>)> =
         std::collections::HashMap::new();
@@ -299,6 +328,7 @@ pub(super) fn google_bench(text: &str) -> Result<MetricSet, String> {
         let unit = str_of(e, "time_unit");
         let unit = if unit.is_empty() { "ns" } else { unit };
         let Some(real) = e.get("real_time").and_then(num) else {
+            skipped.push("", &name, "real_time");
             continue;
         };
         let entry = by_name.entry(name.clone()).or_insert_with(|| {
@@ -323,7 +353,11 @@ pub(super) fn google_bench(text: &str) -> Result<MetricSet, String> {
     if metrics.is_empty() {
         return Err("Google Benchmark JSON contains no iteration results".into());
     }
-    Ok(MetricSet { env, metrics })
+    Ok(MetricSet {
+        env,
+        metrics,
+        skipped,
+    })
 }
 
 // ---------------------------------------------------------------- Bencher Metric Format
@@ -335,15 +369,17 @@ pub(super) fn bmf(text: &str) -> Result<MetricSet, String> {
         .as_object()
         .ok_or("BMF must be a JSON object of benchmarks")?;
     let mut metrics = Vec::new();
+    let mut skipped = Skipped::default();
     for (bench, measures) in benches {
         let measures = measures
             .as_object()
             .ok_or_else(|| format!("BMF benchmark {bench:?} must be an object of measures"))?;
         for (measure, leaf) in measures {
+            let (group, name) = bench.rsplit_once("::").unwrap_or(("", bench));
             let Some(value) = leaf.get("value").and_then(num) else {
+                skipped.push(group, name, measure);
                 continue;
             };
-            let (group, name) = bench.rsplit_once("::").unwrap_or(("", bench));
             let mut m = Metric::new(group, name, measure, "", value, bmf_direction(measure));
             m.lower = leaf.get("lower_value").and_then(num);
             m.upper = leaf.get("upper_value").and_then(num);
@@ -356,6 +392,7 @@ pub(super) fn bmf(text: &str) -> Result<MetricSet, String> {
     Ok(MetricSet {
         env: Default::default(),
         metrics,
+        skipped,
     })
 }
 

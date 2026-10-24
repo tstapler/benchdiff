@@ -75,12 +75,77 @@ impl Metric {
     }
 }
 
+/// Most skipped identities stored per set, so a huge broken file cannot bloat memory.
+pub(crate) const MAX_SKIPPED: usize = 50;
+
+/// Identity of a metric an importer dropped for lacking a usable value.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct SkippedKey {
+    pub group: String,
+    pub name: String,
+    pub measure: String,
+}
+
+impl SkippedKey {
+    /// `group/name [measure]`, omitting empty parts.
+    pub(crate) fn label(&self) -> String {
+        let mut out = if self.group.is_empty() {
+            self.name.clone()
+        } else {
+            format!("{}/{}", self.group, self.name)
+        };
+        if !self.measure.is_empty() {
+            out.push_str(&format!(" [{}]", self.measure));
+        }
+        out
+    }
+}
+
+/// Metrics dropped on import: the first [`MAX_SKIPPED`] identities plus the full count.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Skipped {
+    pub(crate) keys: Vec<SkippedKey>,
+    pub total: usize,
+}
+
+impl Skipped {
+    pub(crate) fn push(&mut self, group: &str, name: &str, measure: &str) {
+        self.total += 1;
+        if self.keys.len() < MAX_SKIPPED {
+            self.keys.push(SkippedKey {
+                group: group.into(),
+                name: name.into(),
+                measure: measure.into(),
+            });
+        }
+    }
+
+    pub(crate) fn extend(&mut self, other: Skipped) {
+        self.total += other.total;
+        let room = MAX_SKIPPED.saturating_sub(self.keys.len());
+        self.keys.extend(other.keys.into_iter().take(room));
+    }
+
+    pub fn labels(&self) -> Vec<String> {
+        self.keys.iter().map(SkippedKey::label).collect()
+    }
+
+    pub(crate) fn contains(&self, key: (&str, &str, &str)) -> bool {
+        self.keys
+            .iter()
+            .any(|k| (k.group.as_str(), k.name.as_str(), k.measure.as_str()) == key)
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct MetricSet {
     /// Free-form context (commit, runner, ...) shown with the report.
     #[serde(default)]
     pub env: BTreeMap<String, String>,
     pub metrics: Vec<Metric>,
+    /// Entries an importer dropped; not part of the canonical file.
+    #[serde(skip)]
+    pub skipped: Skipped,
 }
 
 impl MetricSet {
@@ -103,6 +168,7 @@ impl MetricSet {
         let set = MetricSet {
             env: f.env,
             metrics: f.metrics,
+            skipped: Skipped::default(),
         };
         set.validate()?;
         Ok(set)
@@ -129,6 +195,7 @@ impl MetricSet {
         for set in sets {
             merged.env.extend(set.env);
             merged.metrics.extend(set.metrics);
+            merged.skipped.extend(set.skipped);
         }
         merged.validate()?;
         Ok(merged)
@@ -210,6 +277,7 @@ mod tests {
         let m = Metric::new("grp", "nm", "msr", "ms", f64::NAN, Better::Lower);
         let err = MetricSet {
             env: Default::default(),
+            skipped: Default::default(),
             metrics: vec![m],
         }
         .validate()
@@ -226,8 +294,32 @@ mod tests {
         m.samples = vec![1.0, 2.0];
         let set = MetricSet {
             env: [("k".to_string(), "v".to_string())].into(),
+            skipped: Default::default(),
             metrics: vec![m],
         };
         assert_eq!(MetricSet::parse(&set.to_json()).unwrap(), set);
+    }
+
+    #[test]
+    fn merge_concatenates_skipped() {
+        let mk = |n: &str| {
+            let mut s = MetricSet::default();
+            s.skipped.push("g", n, "");
+            s
+        };
+        let m = MetricSet::merge([mk("a"), mk("b")]).unwrap();
+        assert_eq!(m.skipped.labels(), ["g/a", "g/b"]);
+        assert_eq!(m.skipped.total, 2);
+    }
+
+    #[test]
+    fn skipped_keeps_at_most_fifty_labels_but_counts_all() {
+        let mut s = Skipped::default();
+        for i in 0..MAX_SKIPPED + 25 {
+            s.push("", &format!("b{i}"), "ns/op");
+        }
+        assert_eq!(s.labels().len(), MAX_SKIPPED);
+        assert_eq!(s.total, MAX_SKIPPED + 25);
+        assert_eq!(s.labels()[0], "b0 [ns/op]");
     }
 }

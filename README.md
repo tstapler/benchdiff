@@ -29,7 +29,7 @@ side, Mann-Whitney) -> non-overlapping intervals -> threshold. Background and so
     format: auto                  # or go | criterion | cargo-bench | jmh | hyperfine | googlebench | gab-smaller | gab-bigger | bmf | benchdiff
 ```
 
-Needs `permissions: pull-requests: write` for the sticky comment. On fork PRs the token is
+Needs `permissions: pull-requests: write` for the sticky comment. The comment is found by its marker on a Bot-authored comment, so a personal access token as `github-token` creates a new comment each run; use the default `GITHUB_TOKEN` or an App token. On fork PRs the token is
 read-only: the action logs a warning and the report still lands in the job summary.
 
 | Input | Default | |
@@ -43,7 +43,7 @@ read-only: the action logs a warning and the report still lands in the job summa
 | `only-changed` | `false` | hide unchanged rows |
 | `sort` | `delta` | `delta` (worst regression first), `name`, `input` |
 | `max-rows` | | cap on changed rows shown; the JSON report keeps all |
-| `title` / `tag` | `Benchmark comparison` / `default` | heading; the sticky comment is keyed by `<!-- benchdiff:TAG -->` |
+| `title` / `tag` | `Benchmark comparison` / `default` | heading; the sticky comment is keyed by `<!-- benchdiff:TAG -->` (tag: letters, digits, `- _ . : /`). `title` is rendered as Markdown, so treat it as trusted: never pass PR titles or other event data |
 | `fail-on-regression` | `false` | `true` = any regression, a number = at least that many percent |
 | `comment` | `true` | post/update the PR comment |
 

@@ -2,7 +2,7 @@
 //! <https://github.com/benchmark-action/github-action-benchmark>. The direction comes from
 //! which tool name the user picked, so the caller passes it.
 
-use crate::model::{Better, Metric, MetricSet};
+use crate::model::{Better, Metric, MetricSet, Skipped};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -18,24 +18,27 @@ struct Entry {
 pub(super) fn parse(text: &str, better: Better) -> Result<MetricSet, String> {
     let entries: Vec<Entry> =
         serde_json::from_str(text).map_err(|e| format!("github-action-benchmark JSON: {e}"))?;
-    let metrics: Vec<Metric> = entries
-        .into_iter()
-        .filter(|e| e.value.is_finite())
-        .map(|e| {
-            let mut m = Metric::new("", &e.name, "", &e.unit, e.value, better);
-            if let Some(r) = e.range.as_deref().and_then(parse_range) {
-                m.lower = Some(e.value - r);
-                m.upper = Some(e.value + r);
-            }
-            m
-        })
-        .collect();
+    let mut skipped = Skipped::default();
+    let mut metrics: Vec<Metric> = Vec::new();
+    for e in entries {
+        if !e.value.is_finite() {
+            skipped.push("", &e.name, "");
+            continue;
+        }
+        let mut m = Metric::new("", &e.name, "", &e.unit, e.value, better);
+        if let Some(r) = e.range.as_deref().and_then(parse_range) {
+            m.lower = Some(e.value - r);
+            m.upper = Some(e.value + r);
+        }
+        metrics.push(m);
+    }
     if metrics.is_empty() {
         return Err("github-action-benchmark JSON contains no benchmarks".into());
     }
     Ok(MetricSet {
         env: Default::default(),
         metrics,
+        skipped,
     })
 }
 

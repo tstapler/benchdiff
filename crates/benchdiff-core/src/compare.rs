@@ -79,6 +79,8 @@ pub enum Verdict {
     Removed,
     /// Present on both sides but in units that cannot be converted.
     Incomparable,
+    /// In base, but the head run produced no usable (finite) value for it.
+    Invalid,
 }
 
 /// How a row's verdict was reached.
@@ -137,6 +139,11 @@ pub struct Summary {
     pub fail_on_regression_pct: Option<f64>,
     pub base_env: Vec<(String, String)>,
     pub head_env: Vec<(String, String)>,
+    /// Labels of metrics the importer dropped for lacking a usable value (first 50).
+    pub skipped_head: Vec<String>,
+    pub skipped_head_total: usize,
+    pub skipped_base: Vec<String>,
+    pub skipped_base_total: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -160,7 +167,8 @@ impl Report {
             return false;
         };
         self.rows.iter().any(|r| {
-            r.verdict == Verdict::Regressed && r.delta_pct.is_none_or(|p| p.abs() >= limit)
+            r.verdict == Verdict::Invalid
+                || (r.verdict == Verdict::Regressed && r.delta_pct.is_none_or(|p| p.abs() >= limit))
         })
     }
 }
@@ -185,7 +193,17 @@ pub fn compare(base: Option<&MetricSet>, head: &MetricSet, opts: &Options) -> Re
             b.metrics
                 .iter()
                 .filter(|m| !head_keys.contains(&m.key()))
-                .map(|m| one_sided_row(m, Verdict::Removed)),
+                .map(|m| {
+                    let dropped = head.skipped.contains(m.key());
+                    one_sided_row(
+                        m,
+                        if dropped {
+                            Verdict::Invalid
+                        } else {
+                            Verdict::Removed
+                        },
+                    )
+                }),
         );
     }
     sort_rows(&mut rows, opts.sort);
@@ -208,6 +226,10 @@ pub fn compare(base: Option<&MetricSet>, head: &MetricSet, opts: &Options) -> Re
             fail_on_regression_pct: opts.fail_on_regression_pct,
             base_env: env_of(base),
             head_env: env_of(Some(head)),
+            skipped_head: head.skipped.labels(),
+            skipped_head_total: head.skipped.total,
+            skipped_base: base.map(|b| b.skipped.labels()).unwrap_or_default(),
+            skipped_base_total: base.map_or(0, |b| b.skipped.total),
         },
         rows,
     }
@@ -215,6 +237,7 @@ pub fn compare(base: Option<&MetricSet>, head: &MetricSet, opts: &Options) -> Re
 
 fn one_sided_row(m: &Metric, verdict: Verdict) -> Row {
     let is_new = verdict == Verdict::New;
+    debug_assert!(is_new || matches!(verdict, Verdict::Removed | Verdict::Invalid));
     Row {
         group: m.group.clone(),
         name: m.name.clone(),
@@ -332,6 +355,7 @@ fn sort_rows(rows: &mut [Row], sort: Sort) {
 fn delta_key(r: &Row) -> (u8, f64) {
     let magnitude = r.delta_pct.map_or(f64::INFINITY, f64::abs);
     match r.verdict {
+        Verdict::Invalid => (0, f64::INFINITY),
         Verdict::Regressed => (0, magnitude),
         Verdict::Improved => (1, magnitude),
         _ => (2, 0.0),
@@ -349,6 +373,7 @@ mod tests {
     fn set(items: &[(&str, f64, Better)]) -> MetricSet {
         MetricSet {
             env: Default::default(),
+            skipped: Default::default(),
             metrics: items.iter().map(|(n, v, b)| metric(n, *v, *b)).collect(),
         }
     }
@@ -368,6 +393,7 @@ mod tests {
         m.samples = values.to_vec();
         MetricSet {
             env: Default::default(),
+            skipped: Default::default(),
             metrics: vec![m],
         }
     }
@@ -530,6 +556,7 @@ mod tests {
         b.unit = "B".into();
         let mk = |m| MetricSet {
             env: Default::default(),
+            skipped: Default::default(),
             metrics: vec![m],
         };
         let r = compare(
@@ -587,10 +614,12 @@ mod tests {
         let r = compare(
             Some(&MetricSet {
                 env: Default::default(),
+                skipped: Default::default(),
                 metrics: vec![b],
             }),
             &MetricSet {
                 env: Default::default(),
+                skipped: Default::default(),
                 metrics: vec![h],
             },
             &Options::default(),
@@ -608,10 +637,12 @@ mod tests {
         let r = compare(
             Some(&MetricSet {
                 env: Default::default(),
+                skipped: Default::default(),
                 metrics: vec![b],
             }),
             &MetricSet {
                 env: Default::default(),
+                skipped: Default::default(),
                 metrics: vec![h],
             },
             &Options::default(),
@@ -693,6 +724,7 @@ mod tests {
         (h.lower, h.upper) = (Some(110.0), Some(150.0));
         let mk = |m| MetricSet {
             env: Default::default(),
+            skipped: Default::default(),
             metrics: vec![m],
         };
         let r = compare(Some(&mk(b.clone())), &mk(h.clone()), &Options::default());
@@ -715,6 +747,7 @@ mod tests {
             b.samples.clear();
             MetricSet {
                 env: Default::default(),
+                skipped: Default::default(),
                 metrics: vec![a, b],
             }
         };

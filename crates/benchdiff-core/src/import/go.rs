@@ -1,7 +1,7 @@
 //! Go benchmark format (golang.org/x/perf benchfmt):
 //! <https://go.googlesource.com/proposal/+/master/design/14313-benchmark-format.md>
 
-use crate::model::{Better, Metric, MetricSet};
+use crate::model::{Better, Metric, MetricSet, Skipped};
 use crate::stats::median;
 use std::collections::{BTreeSet, HashMap};
 
@@ -22,7 +22,7 @@ fn parse_result_line(line: &str) -> Option<(&str, Vec<(f64, &str)>)> {
     fields[1].parse::<u64>().ok()?;
     let mut pairs = Vec::new();
     for pair in fields[2..].chunks(2) {
-        let value = pair[0].parse::<f64>().ok().filter(|v| v.is_finite())?;
+        let value = pair[0].parse::<f64>().ok()?;
         pairs.push((value, pair[1]));
     }
     Some((fields[0], pairs))
@@ -68,16 +68,16 @@ pub(super) fn parse(text: &str) -> Result<MetricSet, String> {
                 if !series.contains_key(&key) {
                     order.push(key.clone());
                 }
-                series
-                    .entry(key)
-                    .or_insert_with(|| Series {
-                        group: group.clone(),
-                        name: bench.clone(),
-                        unit: unit.to_string(),
-                        values: Vec::new(),
-                    })
-                    .values
-                    .push(value);
+                let s = series.entry(key).or_insert_with(|| Series {
+                    group: group.clone(),
+                    name: bench.clone(),
+                    unit: unit.to_string(),
+                    values: Vec::new(),
+                });
+                // NaN/inf lines still register the series so an all-bad one is reported as skipped.
+                if value.is_finite() {
+                    s.values.push(value);
+                }
             }
         } else if let Some(rest) = line.strip_prefix("Unit ") {
             let mut parts = rest.split_whitespace();
@@ -115,10 +115,15 @@ pub(super) fn parse(text: &str) -> Result<MetricSet, String> {
         env.insert("pkg".into(), pkgs.into_iter().next().unwrap_or_default());
     }
     let mut metrics = Vec::with_capacity(order.len());
+    let mut skipped = Skipped::default();
     for key in order {
         let Some(s) = series.remove(&key) else {
             continue;
         };
+        if s.values.is_empty() {
+            skipped.push(&s.group, &s.name, &s.unit);
+            continue;
+        }
         let better = unit_better
             .get(&s.unit)
             .copied()
@@ -141,7 +146,11 @@ pub(super) fn parse(text: &str) -> Result<MetricSet, String> {
             "no Go benchmark result lines found (expected `BenchmarkX-8  N  v ns/op`)".into(),
         );
     }
-    Ok(MetricSet { env, metrics })
+    Ok(MetricSet {
+        env,
+        metrics,
+        skipped,
+    })
 }
 
 #[cfg(test)]
@@ -215,7 +224,7 @@ mod tests {
             ("BenchmarkFoo-8 many 5 ns/op", None),
             ("Benchmarkfoo-8 100 5 ns/op", None),
             ("BenchmarkFoo-8 --- FAIL", None),
-            ("BenchmarkFoo-8 100 NaN ns/op", None),
+            ("BenchmarkFoo-8 100 NaN ns/op", Some(("BenchmarkFoo-8", 1))),
             ("BenchmarkFoo-8 100", None),
         ];
         for (line, want) in cases {

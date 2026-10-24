@@ -99,3 +99,13 @@ test('an accepted tag yields the same marker in the wasm report as in index.js',
   assert.equal(r.code, 0, r.stderr);
   assert.equal(fs.readFileSync(path.join(dir, 'report.md'), 'utf8').split('\n', 1)[0], `<!-- benchdiff:${tag} -->`);
 });
+
+test('buildArgs passes free-text values inline so a title starting with -- is not read as a flag', () => {
+  const args = buildArgs({ ...base, title: '--- x ---' });
+  assert.ok(args.includes('--title=--- x ---'));
+});
+
+test('parseFailOnRegression rejects hex and other non-decimal numbers', () => {
+  for (const bad of ['0x10', '1e3', '-1', 'abc']) assert.throws(() => parseFailOnRegression(bad), /fail-on-regression/);
+  assert.equal(parseFailOnRegression('12.5'), '12.5');
+});

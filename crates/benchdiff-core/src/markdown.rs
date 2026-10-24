@@ -58,6 +58,8 @@ pub fn render_markdown(report: &Report) -> String {
     let _ = writeln!(out, "{}", marker(&s.tag));
     let _ = writeln!(out, "### {}\n", flatten(&s.title));
     let _ = writeln!(out, "{}\n", summary_line(report));
+    render_skipped(&mut out, "head", &s.skipped_head, s.skipped_head_total);
+    render_skipped(&mut out, "base", &s.skipped_base, s.skipped_base_total);
 
     let (changed, quiet): (Vec<&Row>, Vec<&Row>) =
         report.rows.iter().partition(|r| is_interesting(r));
@@ -84,6 +86,25 @@ pub fn render_markdown(report: &Report) -> String {
     out
 }
 
+const SKIPPED_SHOWN: usize = 10;
+
+fn render_skipped(out: &mut String, side: &str, labels: &[String], total: usize) {
+    if total == 0 {
+        return;
+    }
+    let shown: Vec<String> = labels.iter().take(SKIPPED_SHOWN).map(|l| code(l)).collect();
+    let more = if total > shown.len() {
+        format!(" (first {})", shown.len())
+    } else {
+        String::new()
+    };
+    let _ = writeln!(
+        out,
+        "⚠️ {total} metric(s) in {side} had no usable value and were ignored: {}{more}\n",
+        shown.join(", ")
+    );
+}
+
 /// Without a base there is nothing to call "changed": show the numbers up front.
 fn is_interesting(r: &Row) -> bool {
     r.verdict != Verdict::Unchanged
@@ -105,6 +126,9 @@ fn summary_line(report: &Report) -> String {
         n(Verdict::New),
         n(Verdict::Removed)
     );
+    if n(Verdict::Invalid) > 0 {
+        let _ = write!(line, " · {} invalid", n(Verdict::Invalid));
+    }
     if n(Verdict::Incomparable) > 0 {
         let _ = write!(line, " · {} incomparable", n(Verdict::Incomparable));
     }
@@ -207,6 +231,7 @@ fn change(r: &Row) -> String {
         Verdict::New => return "🆕 new".into(),
         Verdict::Removed => return "🗑️ removed".into(),
         Verdict::Incomparable => return "⚠️ units differ".into(),
+        Verdict::Invalid => return "⛔ no valid value".into(),
         Verdict::Unchanged => "⚪",
     };
     match r.delta_pct {
@@ -357,6 +382,7 @@ mod tests {
     fn set(items: &[(&str, &str, f64)]) -> MetricSet {
         MetricSet {
             env: [("sha".to_string(), "abc".to_string())].into(),
+            skipped: Default::default(),
             metrics: items
                 .iter()
                 .map(|(g, n, v)| Metric::new(g, n, "", "ms", *v, Better::Lower))
@@ -509,6 +535,7 @@ mod tests {
             m.samples = vals.to_vec();
             MetricSet {
                 env: Default::default(),
+                skipped: Default::default(),
                 metrics: vec![m],
             }
         };
@@ -564,6 +591,7 @@ mod tests {
                     value,
                     Better::Lower,
                 )],
+                skipped: Default::default(),
             }
         };
         render(Some(&mk(100.0)), &mk(200.0), &Options::default())
@@ -623,6 +651,7 @@ mod tests {
             .collect();
         let head = MetricSet {
             env: Default::default(),
+            skipped: Default::default(),
             metrics: items
                 .iter()
                 .map(|(g, n)| Metric::new(g, n, "", "ms", 1.0, Better::Lower))

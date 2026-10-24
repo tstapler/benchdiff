@@ -79,7 +79,7 @@ function buildArgs({ head, base, format, baseFormat, threshold, minAbs, onlyChan
   const args = [];
   head.forEach((f) => args.push('--head', f));
   base.forEach((f) => args.push('--base', f));
-  args.push('--format', format, '--threshold', threshold, '--min-abs', minAbs, '--sort', sort, '--title', title, '--tag', tag);
+  args.push('--format', format, '--threshold', threshold, '--min-abs', minAbs, '--sort', sort, `--title=${title}`, `--tag=${tag}`);
   if (baseFormat) args.push('--base-format', baseFormat);
   if (onlyChanged) args.push('--only-changed');
   if (maxRows) args.push('--max-rows', maxRows);
@@ -94,8 +94,7 @@ function parseFailOnRegression(raw) {
   const v = String(raw ?? '').trim().toLowerCase();
   if (v === '' || v === 'false') return 'false';
   if (v === 'true') return 'true';
-  const n = Number(v);
-  if (!Number.isFinite(n) || n < 0) throw new Error(`fail-on-regression must be true, false or a number >= 0, got ${JSON.stringify(raw)}`);
+  if (!/^\d+(\.\d+)?$/.test(v)) throw new Error(`fail-on-regression must be true, false or a number >= 0, got ${JSON.stringify(raw)}`);
   return v;
 }
 
