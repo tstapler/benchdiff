@@ -13,7 +13,7 @@ wasm:
 
 golden: wasm
 	cargo build --release -p benchdiff
-	node --disable-warning=ExperimentalWarning --test test/
+	node --disable-warning=ExperimentalWarning --test "test/*.test.js"
 
 ready:
 	cargo fmt --all --check
