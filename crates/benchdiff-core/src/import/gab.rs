@@ -18,8 +18,9 @@ struct Entry {
 pub(super) fn parse(text: &str, better: Better) -> Result<MetricSet, String> {
     let entries: Vec<Entry> =
         serde_json::from_str(text).map_err(|e| format!("github-action-benchmark JSON: {e}"))?;
-    let metrics = entries
+    let metrics: Vec<Metric> = entries
         .into_iter()
+        .filter(|e| e.value.is_finite())
         .map(|e| {
             let mut m = Metric::new("", &e.name, "", &e.unit, e.value, better);
             if let Some(r) = e.range.as_deref().and_then(parse_range) {
@@ -29,6 +30,9 @@ pub(super) fn parse(text: &str, better: Better) -> Result<MetricSet, String> {
             m
         })
         .collect();
+    if metrics.is_empty() {
+        return Err("github-action-benchmark JSON contains no benchmarks".into());
+    }
     Ok(MetricSet {
         env: Default::default(),
         metrics,
@@ -82,6 +86,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(set.metrics[0].lower, None);
+    }
+
+    #[test]
+    fn entry_without_a_unit_is_an_error() {
+        assert!(parse(r#"[{"name":"a","value":1}]"#, Better::Lower).is_err());
+        assert!(parse("[]", Better::Lower).is_err());
     }
 
     #[test]

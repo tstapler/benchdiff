@@ -3,22 +3,60 @@
 //! (no clock), so native and wasm builds agree byte for byte.
 
 use crate::compare::{Method, Report, Row, Verdict};
+use std::collections::HashMap;
 use std::fmt::Write;
 
 const BAR_CELLS: usize = 5;
 /// Percent change at which the bar is full.
 const BAR_FULL_PCT: f64 = 50.0;
 
-/// The hidden marker that identifies this report's sticky comment.
+/// The hidden marker that identifies this report's sticky comment. The tag is reduced to
+/// `[alphanumeric - _ . : /]` (anything else becomes `_`) so it can neither close the comment
+/// (`-->` needs a `>`) nor split across lines.
 pub fn marker(tag: &str) -> String {
+    let tag: String = tag
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | ':' | '/') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
     format!("<!-- benchdiff:{tag} -->")
+}
+
+/// Control characters (newlines included) become spaces, so text stays on one line; HTML
+/// comment delimiters get an invisible break so untrusted text can never forge a marker.
+fn flatten(text: &str) -> String {
+    let one_line: String = text
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    one_line
+        .replace("<!--", "<!\u{200b}--")
+        .replace("-->", "--\u{200b}>")
+}
+
+/// Untrusted text as an inline code span: links, mentions, HTML and headings stay literal.
+fn code(text: &str) -> String {
+    let flat = flatten(text);
+    if flat.is_empty() {
+        return "—".into();
+    }
+    format!("`{}`", flat.replace('`', "'").replace('|', "\\|"))
+}
+
+fn plural(n: usize, noun: &str) -> String {
+    format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
 }
 
 pub fn render_markdown(report: &Report) -> String {
     let s = &report.summary;
     let mut out = String::new();
     let _ = writeln!(out, "{}", marker(&s.tag));
-    let _ = writeln!(out, "### {}\n", s.title);
+    let _ = writeln!(out, "### {}\n", flatten(&s.title));
     let _ = writeln!(out, "{}\n", summary_line(report));
 
     let (changed, quiet): (Vec<&Row>, Vec<&Row>) =
@@ -54,8 +92,8 @@ fn is_interesting(r: &Row) -> bool {
 fn summary_line(report: &Report) -> String {
     if !report.has_base {
         return format!(
-            "**{} benchmarks** (no base to compare with)",
-            report.rows.len()
+            "**{}** (no base to compare with)",
+            plural(report.rows.len(), "benchmark")
         );
     }
     let n = |v| report.count(v);
@@ -75,21 +113,26 @@ fn summary_line(report: &Report) -> String {
 
 fn render_groups(out: &mut String, rows: &[&Row], collapsed: bool, has_base: bool) {
     let mut groups: Vec<&str> = Vec::new();
-    for r in rows {
-        if !groups.contains(&r.group.as_str()) {
-            groups.push(&r.group);
-        }
+    let mut by_group: HashMap<&str, Vec<&Row>> = HashMap::new();
+    for &r in rows {
+        by_group
+            .entry(r.group.as_str())
+            .or_insert_with(|| {
+                groups.push(r.group.as_str());
+                Vec::new()
+            })
+            .push(r);
     }
     let show_test = rows
         .iter()
         .any(|r| r.method.is_some_and(|m| m != Method::Threshold));
-    for group in &groups {
-        let in_group: Vec<&&Row> = rows.iter().filter(|r| r.group == *group).collect();
+    for group in groups {
+        let in_group = &by_group[group];
         if !group.is_empty() {
             let _ = if collapsed {
-                writeln!(out, "**`{group}`**\n")
+                writeln!(out, "**{}**\n", code(group))
             } else {
-                writeln!(out, "#### `{group}`\n")
+                writeln!(out, "#### {}\n", code(group))
             };
         }
         if !has_base {
@@ -98,7 +141,7 @@ fn render_groups(out: &mut String, rows: &[&Row], collapsed: bool, has_base: boo
                 let _ = writeln!(
                     out,
                     "| {} | {} | {} |",
-                    cell(&r.label()),
+                    code(&r.label()),
                     value(r.head, &r.unit),
                     r.head_range.map_or("—".to_string(), |(lo, hi)| format!(
                         "{} – {}",
@@ -124,7 +167,7 @@ fn render_groups(out: &mut String, rows: &[&Row], collapsed: bool, has_base: boo
             let _ = writeln!(
                 out,
                 "| {} | {} | {} | {} |{}",
-                cell(&r.label()),
+                code(&r.label()),
                 value(r.base, &r.unit),
                 value(r.head, &r.unit),
                 change(r),
@@ -139,15 +182,21 @@ fn render_groups(out: &mut String, rows: &[&Row], collapsed: bool, has_base: boo
     }
 }
 
-fn cell(text: &str) -> String {
-    format!("`{}`", text.replace('|', "\\|").replace('`', "'"))
-}
-
 fn value(v: Option<f64>, unit: &str) -> String {
     match v {
         None => "—".into(),
         Some(v) if unit.is_empty() => fmt_num(v),
-        Some(v) => format!("{} {}", fmt_num(v), unit),
+        Some(v) => format!("{} {}", fmt_num(v), code(unit)),
+    }
+}
+
+/// Signed percent with one decimal; a value that rounds to zero prints as plain `0.0%`.
+fn fmt_pct(p: f64) -> String {
+    let s = format!("{p:+.1}");
+    if s.trim_start_matches(['+', '-']) == "0.0" {
+        "0.0%".into()
+    } else {
+        format!("{s}%")
     }
 }
 
@@ -161,7 +210,7 @@ fn change(r: &Row) -> String {
         Verdict::Unchanged => "⚪",
     };
     match r.delta_pct {
-        Some(p) => format!("{icon} {:+.1}% {}", p, bar(p, r.verdict)),
+        Some(p) => format!("{icon} {} {}", fmt_pct(p), bar(p, r.verdict)),
         None => format!("{icon} n/a (base is 0)"),
     }
 }
@@ -229,7 +278,7 @@ fn render_env(out: &mut String, report: &Report) {
     let get = |env: &[(String, String)], k: &str| {
         env.iter()
             .find(|(key, _)| key == k)
-            .map_or("—".to_string(), |(_, v)| v.replace('|', "\\|"))
+            .map_or("—".to_string(), |(_, v)| code(v))
     };
     let _ = writeln!(out, "<details>\n<summary>Environment</summary>\n");
     if report.has_base {
@@ -237,7 +286,8 @@ fn render_env(out: &mut String, report: &Report) {
         for k in keys {
             let _ = writeln!(
                 out,
-                "| {k} | {} | {} |",
+                "| {} | {} | {} |",
+                code(k),
                 get(&s.base_env, k),
                 get(&s.head_env, k)
             );
@@ -245,7 +295,7 @@ fn render_env(out: &mut String, report: &Report) {
     } else {
         let _ = writeln!(out, "| | Head |\n|---|---|");
         for k in keys {
-            let _ = writeln!(out, "| {k} | {} |", get(&s.head_env, k));
+            let _ = writeln!(out, "| {} | {} |", code(k), get(&s.head_env, k));
         }
     }
     let _ = writeln!(out, "\n</details>\n");
@@ -422,10 +472,19 @@ mod tests {
     fn head_only_report_lists_values_and_explains_the_missing_base() {
         let md = render(None, &set(&[("g", "a", 1.5)]), &Options::default());
         assert!(
-            md.contains("**1 benchmarks** (no base to compare with)"),
+            md.contains("**1 benchmark** (no base to compare with)"),
             "{md}"
         );
-        assert!(md.contains("1.5 ms") && md.contains("add a `base`"), "{md}");
+        assert!(
+            md.contains("1.5 `ms`") && md.contains("add a `base`"),
+            "{md}"
+        );
+        let md = render(
+            None,
+            &set(&[("g", "a", 1.0), ("g", "b", 2.0)]),
+            &Options::default(),
+        );
+        assert!(md.contains("**2 benchmarks**"), "{md}");
     }
 
     #[test]
@@ -433,7 +492,7 @@ mod tests {
         let mut base = set(&[("g", "a", 1.0)]);
         base.env.insert("sha".into(), "base123".into());
         let md = render(Some(&base), &set(&[("g", "a", 1.0)]), &Options::default());
-        assert!(md.contains("| sha | base123 | abc |"), "{md}");
+        assert!(md.contains("| `sha` | `base123` | `abc` |"), "{md}");
     }
 
     #[test]
@@ -472,6 +531,121 @@ mod tests {
     fn pipes_and_backticks_in_names_cannot_break_the_table() {
         let md = render(None, &set(&[("g", "a|b`c", 1.0)]), &Options::default());
         assert!(md.contains("`a\\|b'c`"), "{md}");
+    }
+
+    const PAYLOAD: &str =
+        "x\n</details>\n# FAKE `t` | [x](https://evil) @team <!-- benchdiff:default -->";
+
+    /// Head and base each carry `PAYLOAD` in one field; returns the rendered report.
+    fn render_with_payload(field: &str) -> String {
+        let p = PAYLOAD;
+        let mk = |value: f64| {
+            let (mut group, mut name, mut measure, mut unit) = ("g", "n", "m", "ms");
+            let mut env = std::collections::BTreeMap::new();
+            match field {
+                "group" => group = p,
+                "name" => name = p,
+                "measure" => measure = p,
+                "unit" => unit = p,
+                "env key" => {
+                    env.insert(p.to_string(), "v".to_string());
+                }
+                _ => {
+                    env.insert("k".to_string(), p.to_string());
+                }
+            }
+            MetricSet {
+                env,
+                metrics: vec![Metric::new(
+                    group,
+                    name,
+                    measure,
+                    unit,
+                    value,
+                    Better::Lower,
+                )],
+            }
+        };
+        render(Some(&mk(100.0)), &mk(200.0), &Options::default())
+    }
+
+    #[test]
+    fn untrusted_fields_cannot_inject_markup_or_forge_the_marker() {
+        for field in ["group", "name", "measure", "unit", "env key", "env value"] {
+            let md = render_with_payload(field);
+            assert!(md.starts_with("<!-- benchdiff:default -->\n"), "{field}");
+            assert_eq!(md.matches("<!-- benchdiff").count(), 1, "{field}: {md}");
+            assert_eq!(md.matches("-->").count(), 1, "{field}: {md}");
+            assert!(
+                md.lines().all(|l| !l.starts_with("# FAKE")),
+                "{field}: {md}"
+            );
+            for line in md.lines().filter(|l| l.contains("evil")) {
+                // Inside a code span: opened before the link text, backticks balanced.
+                assert!(line.find('`') < line.find("[x]"), "{field}: {line}");
+                assert_eq!(line.matches('`').count() % 2, 0, "{field}: {line}");
+                assert!(
+                    !line.contains(" | [x]"),
+                    "{field}: pipe not escaped: {line}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn title_is_flattened_and_cannot_forge_the_marker() {
+        let md = render(
+            None,
+            &set(&[("g", "a", 1.0)]),
+            &Options {
+                title: "A\n# FAKE <!-- benchdiff:default --> end".into(),
+                ..Options::default()
+            },
+        );
+        assert_eq!(md.matches("<!-- benchdiff").count(), 1, "{md}");
+        assert!(md.lines().all(|l| !l.starts_with("# FAKE")), "{md}");
+        assert!(md.lines().nth(1).unwrap().starts_with("### A "), "{md}");
+    }
+
+    #[test]
+    fn marker_tag_cannot_close_the_comment_or_span_lines() {
+        let m = marker("a b\n--> <x>\r");
+        assert_eq!(m.lines().count(), 1, "{m}");
+        assert_eq!(m.matches("-->").count(), 1, "{m}");
+        assert!(m.ends_with(" -->") && !m["<!-- benchdiff:".len()..m.len() - 4].contains(' '));
+        assert_eq!(marker("perf-1.x"), "<!-- benchdiff:perf-1.x -->");
+    }
+
+    #[test]
+    fn two_thousand_groups_render_once_each_in_input_order() {
+        let items: Vec<(String, String)> = (0..2000)
+            .map(|i| (format!("grp{i}"), format!("bench{i}")))
+            .collect();
+        let head = MetricSet {
+            env: Default::default(),
+            metrics: items
+                .iter()
+                .map(|(g, n)| Metric::new(g, n, "", "ms", 1.0, Better::Lower))
+                .collect(),
+        };
+        let md = render(
+            None,
+            &head,
+            &Options {
+                sort: crate::compare::Sort::Input,
+                ..Options::default()
+            },
+        );
+        assert_eq!(md.matches("#### `grp").count(), 2000);
+        assert!(md.find("`grp0`").unwrap() < md.find("`grp1999`").unwrap());
+    }
+
+    #[test]
+    fn percent_that_rounds_to_zero_has_no_sign() {
+        assert_eq!(fmt_pct(0.04), "0.0%");
+        assert_eq!(fmt_pct(-0.04), "0.0%");
+        assert_eq!(fmt_pct(-0.06), "-0.1%");
+        assert_eq!(fmt_pct(12.34), "+12.3%");
     }
 
     #[test]

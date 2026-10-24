@@ -124,15 +124,23 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
             _ => (arg.clone(), None),
         };
         let mut value = |name: &str| -> Result<String, String> {
-            inline
-                .clone()
-                .or_else(|| raw.next())
+            if inline.is_some() {
+                return Ok(inline.clone().unwrap_or_default());
+            }
+            // A following flag means the value was forgotten, not that it starts with `--`.
+            raw.next_if(|next| !next.starts_with("--"))
                 .ok_or_else(|| format!("{name} needs a value"))
         };
         let number = |name: &str, text: String| {
             text.trim()
                 .parse::<f64>()
-                .map_err(|_| format!("{name}: {text:?} is not a number"))
+                .ok()
+                .filter(|n| n.is_finite() && *n >= 0.0)
+                .ok_or_else(|| format!("{name}: {text:?} is not a non-negative number"))
+        };
+        let reject_inline = |name: &str| match &inline {
+            Some(_) => Err(format!("{name} does not take a value")),
+            None => Ok(()),
         };
         match flag.as_str() {
             "-h" | "--help" => return Ok(None),
@@ -142,9 +150,21 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
             "--base-format" => a.base_format = Some(Format::from_name(&value("--base-format")?)?),
             "--threshold" => a.opts.threshold_pct = number("--threshold", value("--threshold")?)?,
             "--min-abs" => a.opts.min_abs = number("--min-abs", value("--min-abs")?)?,
-            "--alpha" => a.opts.alpha = number("--alpha", value("--alpha")?)?,
-            "--no-stats" => a.opts.use_stats = false,
-            "--only-changed" => a.opts.only_changed = true,
+            "--alpha" => {
+                let alpha = number("--alpha", value("--alpha")?)?;
+                if alpha == 0.0 || alpha > 1.0 {
+                    return Err(format!("--alpha: {alpha} must be in (0, 1]"));
+                }
+                a.opts.alpha = alpha;
+            }
+            "--no-stats" => {
+                reject_inline("--no-stats")?;
+                a.opts.use_stats = false;
+            }
+            "--only-changed" => {
+                reject_inline("--only-changed")?;
+                a.opts.only_changed = true;
+            }
             "--sort" => a.opts.sort = Sort::from_name(&value("--sort")?)?,
             "--max-rows" => {
                 let n = value("--max-rows")?;
@@ -213,7 +233,46 @@ mod tests {
             .contains("unknown"));
         assert!(args(&["--head", "a", "--threshold", "x"])
             .unwrap_err()
-            .contains("not a number"));
+            .contains("non-negative number"));
+    }
+
+    fn err(list: &[&str]) -> String {
+        args(list).unwrap_err()
+    }
+
+    #[test]
+    fn a_flag_where_a_value_belongs_is_a_missing_value() {
+        assert_eq!(err(&["--head", "--base", "b"]), "--head needs a value");
+        assert_eq!(err(&["--head"]), "--head needs a value");
+    }
+
+    #[test]
+    fn numbers_must_be_finite_and_non_negative() {
+        for bad in ["NaN", "inf", "-1", "-0.5"] {
+            let e = err(&["--head", "a", "--threshold", bad]);
+            assert!(e.contains("non-negative number"), "{bad}: {e}");
+            let e = err(&["--head", "a", &format!("--min-abs={bad}")]);
+            assert!(e.contains("non-negative number"), "{bad}: {e}");
+            let e = err(&["--head", "a", &format!("--fail-on-regression={bad}")]);
+            assert!(e.contains("non-negative number"), "{bad}: {e}");
+        }
+    }
+
+    #[test]
+    fn alpha_must_be_in_the_half_open_unit_interval() {
+        for bad in ["0", "1.5", "-0.1", "NaN"] {
+            assert!(args(&["--head", "a", "--alpha", bad]).is_err(), "{bad}");
+        }
+        let a = args(&["--head", "a", "--alpha", "1"]).unwrap().unwrap();
+        assert_eq!(a.opts.alpha, 1.0);
+    }
+
+    #[test]
+    fn boolean_flags_reject_an_inline_value() {
+        for flag in ["--no-stats=false", "--only-changed=0"] {
+            assert!(err(&["--head", "a", flag]).contains("does not take a value"));
+        }
+        assert!(args(&["--head", "a", "--no-stats", "--only-changed"]).is_ok());
     }
 
     #[test]

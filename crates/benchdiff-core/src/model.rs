@@ -11,6 +11,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+const SCHEMA_VERSION: u64 = 1;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Better {
@@ -86,11 +88,18 @@ impl MetricSet {
     pub fn parse(text: &str) -> Result<Self, String> {
         #[derive(Deserialize)]
         struct File {
+            // Policy: v1 only gains optional fields; unknown fields are ignored on read.
+            schema: Option<u64>,
             #[serde(default)]
             env: BTreeMap<String, String>,
             metrics: Vec<Metric>,
         }
         let f: File = serde_json::from_str(text).map_err(|e| e.to_string())?;
+        if let Some(n) = f.schema.filter(|&n| n > SCHEMA_VERSION) {
+            return Err(format!(
+                "benchdiff JSON schema {n} is newer than this tool supports ({SCHEMA_VERSION})"
+            ));
+        }
         let set = MetricSet {
             env: f.env,
             metrics: f.metrics,
@@ -102,12 +111,12 @@ impl MetricSet {
     pub fn to_json(&self) -> String {
         #[derive(Serialize)]
         struct File<'a> {
-            schema: u32,
+            schema: u64,
             #[serde(flatten)]
             set: &'a MetricSet,
         }
         serde_json::to_string_pretty(&File {
-            schema: 1,
+            schema: SCHEMA_VERSION,
             set: self,
         })
         .expect("model serializes")
@@ -133,7 +142,10 @@ impl MetricSet {
                 || m.upper.is_some_and(|v| !v.is_finite())
                 || m.samples.iter().any(|v| !v.is_finite());
             if bad {
-                return Err(format!("metric {:?} has a non-finite number", m.name));
+                return Err(format!(
+                    "metric {:?} (group {:?}, measure {:?}) has a non-finite number",
+                    m.name, m.group, m.measure
+                ));
             }
             if !seen.insert(m.key()) {
                 return Err(format!(
@@ -179,6 +191,33 @@ mod tests {
                            {"group":"b","name":"x","measure":"p95","value":3}]}"#,
         );
         assert!(set.is_ok());
+    }
+
+    #[test]
+    fn parse_should_accept_missing_or_v1_schema_and_reject_newer() {
+        let body = r#""metrics":[{"name":"x","value":1}]"#;
+        assert!(MetricSet::parse(&format!("{{{body}}}")).is_ok());
+        assert!(MetricSet::parse(&format!(r#"{{"schema":1,{body}}}"#)).is_ok());
+        let err = MetricSet::parse(&format!(r#"{{"schema":2,{body}}}"#)).unwrap_err();
+        assert_eq!(
+            err,
+            "benchdiff JSON schema 2 is newer than this tool supports (1)"
+        );
+    }
+
+    #[test]
+    fn validate_error_names_the_offending_metric() {
+        let m = Metric::new("grp", "nm", "msr", "ms", f64::NAN, Better::Lower);
+        let err = MetricSet {
+            env: Default::default(),
+            metrics: vec![m],
+        }
+        .validate()
+        .unwrap_err();
+        assert!(
+            err.contains("grp") && err.contains("nm") && err.contains("msr"),
+            "{err}"
+        );
     }
 
     #[test]

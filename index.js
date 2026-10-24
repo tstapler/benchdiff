@@ -51,7 +51,14 @@ async function runWasm(args, workDir) {
     });
     const module = await WebAssembly.compile(fs.readFileSync(WASM_PATH));
     const instance = await WebAssembly.instantiate(module, wasi.getImportObject());
-    const code = wasi.start(instance);
+    let code;
+    try {
+      code = wasi.start(instance);
+    } catch (e) {
+      if (!(e instanceof WebAssembly.RuntimeError)) throw e;
+      const stderr = fs.readFileSync(errPath, 'utf8').trim();
+      throw new Error(`benchdiff wasm trapped: ${e.message}${stderr ? `\n${stderr}` : ''}`);
+    }
     return { code, stderr: fs.readFileSync(errPath, 'utf8'), stdout: fs.readFileSync(outPath, 'utf8') };
   } finally {
     fs.closeSync(errFd);
@@ -68,17 +75,36 @@ function stage(files, dir, prefix) {
   });
 }
 
-function buildArgs({ head, base, format, threshold, minAbs, onlyChanged, sort, maxRows, title, tag, failOnRegression }) {
+function buildArgs({ head, base, format, baseFormat, threshold, minAbs, onlyChanged, sort, maxRows, title, tag, failOnRegression }) {
   const args = [];
   head.forEach((f) => args.push('--head', f));
   base.forEach((f) => args.push('--base', f));
   args.push('--format', format, '--threshold', threshold, '--min-abs', minAbs, '--sort', sort, '--title', title, '--tag', tag);
+  if (baseFormat) args.push('--base-format', baseFormat);
   if (onlyChanged) args.push('--only-changed');
   if (maxRows) args.push('--max-rows', maxRows);
   if (failOnRegression === 'true') args.push('--fail-on-regression');
   else if (failOnRegression !== 'false' && failOnRegression !== '') args.push(`--fail-on-regression=${failOnRegression}`);
   args.push('--markdown', '/work/report.md', '--json', '/work/report.json', '--head-json', '/work/head.json');
   return args;
+}
+
+/** Normalizes the fail-on-regression input to 'true', 'false' or a non-negative number string. */
+function parseFailOnRegression(raw) {
+  const v = String(raw ?? '').trim().toLowerCase();
+  if (v === '' || v === 'false') return 'false';
+  if (v === 'true') return 'true';
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) throw new Error(`fail-on-regression must be true, false or a number >= 0, got ${JSON.stringify(raw)}`);
+  return v;
+}
+
+/** The tag is embedded in an HTML comment; the same charset as the Rust `marker()` keeps both markers identical. */
+function validateTag(tag) {
+  if (!/^[\p{L}\p{N}\-_.:/]+$/u.test(tag)) {
+    throw new Error(`tag may only contain letters, digits and - _ . : /, got ${JSON.stringify(tag)}`);
+  }
+  return tag;
 }
 
 function setOutputs(values) {
@@ -99,7 +125,11 @@ function pullRequestNumber() {
 function clip(body, marker) {
   if (body.length <= COMMENT_LIMIT) return body;
   const cut = body.lastIndexOf('\n', COMMENT_LIMIT);
-  return `${body.slice(0, cut > 0 ? cut : COMMENT_LIMIT)}\n\n_Report truncated to fit GitHub's comment limit; the job summary has the full text._\n${marker}\n`;
+  const kept = body.slice(0, cut > 0 ? cut : COMMENT_LIMIT);
+  // A cut inside <details> would swallow the footer and marker into the collapsed block.
+  const open = Math.max(0, (kept.match(/<details>/g) || []).length - (kept.match(/<\/details>/g) || []).length);
+  const closers = '\n</details>'.repeat(open);
+  return `${kept}${closers}\n\n_Report truncated to fit GitHub's comment limit; the job summary has the full text._\n${marker}\n`;
 }
 
 /** Creates or updates the one comment carrying `marker`. Returns what happened, never throws. */
@@ -127,7 +157,8 @@ async function upsertComment({ token, marker, body, fetchImpl = fetch, env = pro
     let existing;
     for (let page = 1; !existing; page++) {
       const batch = await call(`${base}/${number}/comments?per_page=100&page=${page}`);
-      existing = batch.find((c) => typeof c.body === 'string' && c.body.includes(marker));
+      // Bot-authored and marker-first, so a user quoting the marker is never overwritten.
+      existing = batch.find((c) => c.user?.type === 'Bot' && typeof c.body === 'string' && c.body.startsWith(marker));
       if (batch.length < 100) break;
     }
     const payload = JSON.stringify({ body: clip(body, marker) });
@@ -150,12 +181,14 @@ async function main() {
   const base = basePattern ? expand(basePattern) : [];
   if (basePattern && !base.length) warning(`no base files match ${JSON.stringify(basePattern)}; reporting head only`);
 
-  const tag = input('tag', 'default');
+  const tag = validateTag(input('tag', 'default'));
+  const failOnRegression = parseFailOnRegression(input('fail-on-regression', 'false'));
   const workDir = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'benchdiff-'));
   const args = buildArgs({
     head: stage(head, workDir, 'head'),
     base: stage(base, workDir, 'base'),
     format: input('format', 'auto'),
+    baseFormat: input('base-format'),
     threshold: input('threshold', '5'),
     minAbs: input('min-abs', '0'),
     onlyChanged: input('only-changed', 'false') === 'true',
@@ -163,7 +196,7 @@ async function main() {
     maxRows: input('max-rows'),
     title: input('title', 'Benchmark comparison'),
     tag,
-    failOnRegression: input('fail-on-regression', 'false'),
+    failOnRegression,
   });
 
   const { code, stderr } = await runWasm(args, workDir);
@@ -201,7 +234,7 @@ async function main() {
   if (report.failed) throw new Error(`${report.counts.regressed} benchmark regression(s) exceed the fail-on-regression limit`);
 }
 
-module.exports = { expand, runWasm, stage, buildArgs, upsertComment, clip, main };
+module.exports = { expand, runWasm, stage, buildArgs, parseFailOnRegression, validateTag, upsertComment, clip, main };
 
 if (require.main === module) {
   main().catch((e) => {

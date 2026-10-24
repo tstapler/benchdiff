@@ -15,6 +15,9 @@ inputs:
   format:
     description: "Input format: auto, benchdiff, go, criterion, cargo-bench, jmh, hyperfine, googlebench, gab-smaller, gab-bigger, bmf."
     default: auto
+  base-format:
+    description: "Input format of the base files (same values as format). Defaults to the value of format; set `benchdiff` when the base is a previous release's canonical JSON."
+    required: false
   threshold:
     description: Changes smaller than this many percent are treated as noise.
     default: '5'

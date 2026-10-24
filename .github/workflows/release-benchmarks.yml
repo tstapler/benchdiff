@@ -11,6 +11,10 @@ name: Release benchmarks
 #         bench-command: go test -bench . -benchmem -count=10 ./... | tee bench.txt
 #         results: bench.txt
 #         format: go
+#         benchdiff-ref: <full commit SHA of tstapler/benchdiff>
+#
+# Pin both the `uses:` ref and `benchdiff-ref` to a commit SHA. `setup` and `bench-command` run
+# verbatim in the shell: never build them from `github.event.*` or other attacker-influenced data.
 
 on:
   workflow_call:
@@ -42,9 +46,9 @@ on:
         type: string
         default: ubuntu-latest
       benchdiff-ref:
-        description: Ref of tstapler/benchdiff to run (pin a commit SHA for reproducibility).
+        description: Ref of tstapler/benchdiff to run; pin a full commit SHA.
         type: string
-        default: main
+        required: true
 
 permissions:
   contents: write
@@ -54,12 +58,15 @@ jobs:
     runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 90
     env:
-      GH_TOKEN: ${{ github.token }}
       TAG: ${{ github.event.release.tag_name }}
+      ASSET: ${{ inputs.asset-name }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
           repository: tstapler/benchdiff
           ref: ${{ inputs.benchdiff-ref }}
           path: .benchdiff-action
@@ -70,16 +77,29 @@ jobs:
         run: ${{ inputs.bench-command }}
       - name: Find the previous release's results
         id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # The release before this one, by creation date, ignoring drafts and prereleases of this tag.
-          prev="$(gh release list --exclude-drafts --limit 20 --json tagName,createdAt \
-            --jq "[.[] | select(.tagName != \"$TAG\")] | sort_by(.createdAt) | reverse | .[0].tagName // empty")"
-          if [ -n "$prev" ] && gh release download "$prev" --pattern "${{ inputs.asset-name }}" --dir "$RUNNER_TEMP/prev" 2>/dev/null; then
-            echo "base=$RUNNER_TEMP/prev/${{ inputs.asset-name }}" >> "$GITHUB_OUTPUT"
-            echo "previous=$prev" >> "$GITHUB_OUTPUT"
-          else
-            echo "No previous release asset ${{ inputs.asset-name }}; reporting head only."
+          # Newest non-draft, non-prerelease published before this one; the current tag is excluded
+          # by its own publishedAt so a re-run of an older release diffs against its true predecessor.
+          cur="$(gh release view "$TAG" --json publishedAt --jq .publishedAt)"
+          prev="$(gh release list --exclude-drafts --limit 50 --json tagName,publishedAt,isPrerelease \
+            | jq -r --arg tag "$TAG" --arg cur "$cur" \
+              '[.[] | select(.tagName != $tag and (.isPrerelease | not) and .publishedAt < $cur)]
+               | sort_by(.publishedAt) | reverse | .[0].tagName // empty')"
+          if [ -z "$prev" ]; then
+            echo "No previous release; reporting head only."
+            exit 0
           fi
+          mkdir -p "$RUNNER_TEMP/prev"
+          if ! err="$(gh release download "$prev" --pattern "$ASSET" --dir "$RUNNER_TEMP/prev" 2>&1)"; then
+            case "$err" in
+              *"no assets match"*) echo "Release $prev has no asset $ASSET; reporting head only."; exit 0 ;;
+              *) echo "$err" >&2; exit 1 ;;
+            esac
+          fi
+          echo "base=$RUNNER_TEMP/prev/$ASSET" >> "$GITHUB_OUTPUT"
+          echo "previous=$prev" >> "$GITHUB_OUTPUT"
       - name: Diff
         id: diff
         uses: ./.benchdiff-action
@@ -87,12 +107,17 @@ jobs:
           head: ${{ inputs.results }}
           base: ${{ steps.previous.outputs.base }}
           format: ${{ inputs.format }}
+          base-format: benchdiff   # the previous release's asset is canonical JSON
           threshold: ${{ inputs.threshold }}
           title: Benchmarks ${{ steps.previous.outputs.previous && format('{0} → {1}', steps.previous.outputs.previous, github.event.release.tag_name) || github.event.release.tag_name }}
           tag: release
           comment: 'false'
       - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_JSON: ${{ steps.diff.outputs.head-json-path }}
+          REPORT_MD: ${{ steps.diff.outputs.report-path }}
         run: |
-          cp "${{ steps.diff.outputs.head-json-path }}" "${{ inputs.asset-name }}"
-          cp "${{ steps.diff.outputs.report-path }}" benchmark-diff.md
-          gh release upload "$TAG" "${{ inputs.asset-name }}" benchmark-diff.md --clobber
+          cp "$HEAD_JSON" "$ASSET"
+          cp "$REPORT_MD" benchmark-diff.md
+          gh release upload "$TAG" "$ASSET" benchmark-diff.md --clobber

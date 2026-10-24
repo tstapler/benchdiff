@@ -166,6 +166,30 @@ mod tests {
     }
 
     #[test]
+    fn head_json_output_is_redetected_and_compares_as_unchanged() {
+        use crate::compare::{compare, Options, Verdict};
+        let head = parse(Format::Auto, &fixture("go/bench.txt")).unwrap();
+        let json = head.to_json();
+        assert_eq!(detect(&json).unwrap(), Format::Benchdiff);
+        let reparsed = parse(Format::Auto, &json).unwrap();
+        let report = compare(Some(&reparsed), &head, &Options::default());
+        assert!(report.rows.iter().all(|r| r.verdict == Verdict::Unchanged));
+        assert_eq!(report.rows.len(), head.metrics.len());
+    }
+
+    #[test]
+    fn bmf_lookalike_with_a_non_numeric_value_is_not_detected_as_bmf() {
+        assert!(detect(r#"{"b":{"latency":{"value":"fast"}}}"#).is_err());
+    }
+
+    #[test]
+    fn gab_like_array_missing_unit_is_an_error_not_a_panic() {
+        let text = r#"[{"name":"a","value":1}]"#;
+        assert_eq!(detect(text).unwrap(), Format::GabSmaller);
+        assert!(parse(Format::Auto, text).is_err());
+    }
+
+    #[test]
     fn from_name_should_accept_aliases_and_reject_unknowns() {
         assert_eq!(Format::from_name("kotlinx-benchmark").unwrap(), Format::Jmh);
         assert_eq!(

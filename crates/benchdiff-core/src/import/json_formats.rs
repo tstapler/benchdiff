@@ -4,10 +4,11 @@ use crate::model::{Better, Metric, MetricSet};
 use crate::stats::median;
 use serde_json::Value;
 
+/// A finite JSON number. JMH writes non-finite values as the strings "NaN", "-INF",
+/// "+INF"; those (and anything else) yield `None`, so no NaN reaches `validate`.
 fn num(v: &Value) -> Option<f64> {
     match v {
-        Value::Number(n) => n.as_f64(),
-        // JMH writes non-finite numbers as the strings "NaN", "-INF", "+INF".
+        Value::Number(n) => n.as_f64().filter(|x| x.is_finite()),
         _ => None,
     }
 }
@@ -41,14 +42,10 @@ pub(super) fn criterion(text: &str) -> Result<MetricSet, String> {
             .get("typical")
             .ok_or_else(|| format!("criterion line {}: no `typical` estimate", i + 1))?;
         let unit = str_of(typical, "unit");
-        let mut m = Metric::new(
-            group,
-            name,
-            "time",
-            unit,
-            typical.get("estimate").and_then(num).unwrap_or(f64::NAN),
-            Better::Lower,
-        );
+        let Some(estimate) = typical.get("estimate").and_then(num) else {
+            continue;
+        };
+        let mut m = Metric::new(group, name, "time", unit, estimate, Better::Lower);
         m.lower = typical.get("lower_bound").and_then(num);
         m.upper = typical.get("upper_bound").and_then(num);
         // Each sample measures `iteration_count[i]` iterations in `measured_values[i]` (in `unit`).
@@ -150,11 +147,11 @@ pub(super) fn jmh(text: &str) -> Result<MetricSet, String> {
             format!("{name}[{params}]")
         };
         if let Some(pm) = run.get("primaryMetric") {
-            metrics.push(jmh_metric(group, &name, mode, better, pm));
+            metrics.extend(jmh_metric(group, &name, mode, better, pm));
         }
         if let Some(secondary) = run.get("secondaryMetrics").and_then(Value::as_object) {
             for (label, sm) in secondary {
-                metrics.push(jmh_metric(group, &name, label, Better::Lower, sm));
+                metrics.extend(jmh_metric(group, &name, label, Better::Lower, sm));
             }
         }
         for (key, field) in [("jvm", "jdkVersion"), ("vm", "vmName")] {
@@ -169,15 +166,16 @@ pub(super) fn jmh(text: &str) -> Result<MetricSet, String> {
     Ok(MetricSet { env, metrics })
 }
 
-fn jmh_metric(group: &str, name: &str, measure: &str, better: Better, pm: &Value) -> Metric {
-    let mut m = Metric::new(
-        group,
-        name,
-        measure,
-        str_of(pm, "scoreUnit"),
-        pm.get("score").and_then(num).unwrap_or(f64::NAN),
-        better,
-    );
+/// `None` when the score is missing or non-finite (e.g. `"NaN"`), so one bad metric is skipped.
+fn jmh_metric(
+    group: &str,
+    name: &str,
+    measure: &str,
+    better: Better,
+    pm: &Value,
+) -> Option<Metric> {
+    let score = pm.get("score").and_then(num)?;
+    let mut m = Metric::new(group, name, measure, str_of(pm, "scoreUnit"), score, better);
     if let Some(ci) = pm.get("scoreConfidence").and_then(Value::as_array) {
         m.lower = ci.first().and_then(num);
         m.upper = ci.get(1).and_then(num);
@@ -193,7 +191,7 @@ fn jmh_metric(group: &str, name: &str, measure: &str, better: Better, pm: &Value
                 .filter_map(num),
         );
     }
-    m
+    Some(m)
 }
 
 // ---------------------------------------------------------------- hyperfine
@@ -217,16 +215,14 @@ pub(super) fn hyperfine(text: &str) -> Result<MetricSet, String> {
         if let Some(summary) = r.get("summary").and_then(Value::as_object) {
             // hyperfine >= 2: per-metric summaries plus per-run `measurements`.
             for (metric, s) in summary {
-                if metric == "time_wall_clock"
-                    || metric.starts_with("time_")
-                    || metric == "memory_peak_resident"
-                {
-                    metrics.push(hyperfine_v2(command, metric, s, r));
+                if metric.starts_with("time_") || metric == "memory_peak_resident" {
+                    metrics.extend(hyperfine_v2(command, metric, s, r));
                 }
             }
-        } else if let Some(mean) = r.get("median").and_then(num) {
-            // hyperfine 1.x: seconds, `times` holds the wall-clock runs.
-            let mut m = Metric::new("", command, "wall_clock", "s", mean, Better::Lower);
+        } else if let Some(median_s) = r.get("median").and_then(num) {
+            // hyperfine 1.x: seconds, `times` holds the wall-clock runs. Same measure name as v2
+            // so v1 and v2 files compare.
+            let mut m = Metric::new("", command, "time_wall_clock", "s", median_s, Better::Lower);
             m.samples = finite_samples(
                 r.get("times")
                     .and_then(Value::as_array)
@@ -243,21 +239,14 @@ pub(super) fn hyperfine(text: &str) -> Result<MetricSet, String> {
     Ok(MetricSet { env, metrics })
 }
 
-fn hyperfine_v2(command: &str, metric: &str, summary: &Value, result: &Value) -> Metric {
+/// `None` when neither the summary median nor the samples give a finite value.
+fn hyperfine_v2(command: &str, metric: &str, summary: &Value, result: &Value) -> Option<Metric> {
     let unit = match str_of(summary, "unit") {
         "second" => "s",
         "byte" => "B",
         other => other,
     };
-    let mut m = Metric::new(
-        "",
-        command,
-        metric,
-        unit,
-        summary.get("median").and_then(num).unwrap_or(f64::NAN),
-        Better::Lower,
-    );
-    m.samples = finite_samples(
+    let samples = finite_samples(
         result
             .get("measurements")
             .and_then(Value::as_array)
@@ -265,10 +254,14 @@ fn hyperfine_v2(command: &str, metric: &str, summary: &Value, result: &Value) ->
             .flatten()
             .filter_map(|run| run.pointer(&format!("/{metric}/value")).and_then(num)),
     );
-    if m.samples.len() > 1 {
-        m.value = median(&m.samples);
-    }
-    m
+    let value = if samples.len() > 1 {
+        median(&samples)
+    } else {
+        summary.get("median").and_then(num)?
+    };
+    let mut m = Metric::new("", command, metric, unit, value, Better::Lower);
+    m.samples = samples;
+    Some(m)
 }
 
 // ---------------------------------------------------------------- Google Benchmark
@@ -347,10 +340,9 @@ pub(super) fn bmf(text: &str) -> Result<MetricSet, String> {
             .as_object()
             .ok_or_else(|| format!("BMF benchmark {bench:?} must be an object of measures"))?;
         for (measure, leaf) in measures {
-            let value = leaf
-                .get("value")
-                .and_then(num)
-                .ok_or_else(|| format!("BMF {bench:?}/{measure:?} has no numeric `value`"))?;
+            let Some(value) = leaf.get("value").and_then(num) else {
+                continue;
+            };
             let (group, name) = bench.rsplit_once("::").unwrap_or(("", bench));
             let mut m = Metric::new(group, name, measure, "", value, bmf_direction(measure));
             m.lower = leaf.get("lower_value").and_then(num);
@@ -494,6 +486,35 @@ mod tests {
         let set = hyperfine(&fixture("hyperfine/hyperfine-v1.json")).unwrap();
         assert_eq!(set.metrics.len(), 1);
         assert_eq!(set.metrics[0].samples.len(), 5);
+        assert_eq!(set.metrics[0].measure, "time_wall_clock");
+    }
+
+    const JMH_NAN_SECONDARY: &str = r#"[{"benchmark":"a.B.run","mode":"avgt",
+        "primaryMetric":{"score":1.5,"scoreUnit":"ns/op","scoreConfidence":["NaN","NaN"],"rawData":[[1.0,"NaN"]]},
+        "secondaryMetrics":{"gc":{"score":"NaN","scoreUnit":"MB/s"}}}]"#;
+
+    #[test]
+    fn jmh_secondary_metric_with_nan_score_is_skipped_and_the_rest_parse() {
+        let set = jmh(JMH_NAN_SECONDARY).unwrap();
+        assert_eq!(set.metrics.len(), 1);
+        assert_eq!(set.metrics[0].measure, "avgt");
+        assert!(set.validate().is_ok());
+    }
+
+    #[test]
+    fn jmh_non_finite_confidence_becomes_no_interval() {
+        let m = &jmh(JMH_NAN_SECONDARY).unwrap().metrics[0];
+        assert_eq!((m.lower, m.upper), (None, None));
+        assert_eq!(m.samples, vec![1.0]);
+    }
+
+    #[test]
+    fn a_file_where_every_metric_is_skipped_reports_no_benchmarks() {
+        let err = jmh(r#"[{"benchmark":"a.B.run","mode":"avgt","primaryMetric":{"score":"NaN"}}]"#)
+            .unwrap_err();
+        assert!(err.contains("no benchmarks"), "{err}");
+        let err = bmf(r#"{"b":{"latency":{"value":"x"}}}"#).unwrap_err();
+        assert!(err.contains("no benchmarks"), "{err}");
     }
 
     #[test]

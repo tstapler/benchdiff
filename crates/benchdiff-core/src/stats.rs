@@ -173,6 +173,20 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_side_gives_p_of_one() {
+        assert_eq!(mann_whitney_p(&[], &[1.0, 2.0]), 1.0);
+        assert_eq!(mann_whitney_p(&[1.0, 2.0], &[]), 1.0);
+    }
+
+    #[test]
+    fn fifty_one_vs_fifty_one_uses_the_normal_approximation() {
+        let a: Vec<f64> = (0..51).map(f64::from).collect();
+        let b: Vec<f64> = (25..76).map(f64::from).collect();
+        let p = mann_whitney_p(&a, &b);
+        assert!(p > 0.0 && p < 0.05, "{p}");
+    }
+
+    #[test]
     fn normal_approximation_tracks_the_exact_value_for_moderate_n() {
         let a: Vec<f64> = (0..20).map(|i| i as f64 * 2.0).collect();
         let b: Vec<f64> = (0..20).map(|i| i as f64 * 2.0 + 7.5).collect();

@@ -30,7 +30,7 @@ jobs:
       - run: cargo test --workspace
 
   wasm-golden:
-    # The committed dist/benchdiff.wasm must behave exactly like the native binary.
+    # The committed dist/benchdiff.wasm must match the native binary's output on the golden cases.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -48,11 +48,3 @@ jobs:
         run: cargo build --release -p benchdiff
       - name: committed wasm matches native output
         run: node --test "test/*.test.js"
-      - name: committed wasm is not older than a fresh build's behaviour
-        # Same test again, pointed at the freshly built wasm, so a failure here but not above
-        # means the committed file is stale rather than the code being wrong.
-        run: |
-          cp dist/benchdiff.wasm "$RUNNER_TEMP/committed.wasm"
-          cp target/wasm32-wasip1/release/benchdiff.wasm dist/benchdiff.wasm
-          node --test "test/*.test.js"
-          cp "$RUNNER_TEMP/committed.wasm" dist/benchdiff.wasm

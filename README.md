@@ -15,7 +15,8 @@ release asset. One Rust core, compiled to WebAssembly and run by a zero-dependen
 
 Rows with samples (Go `-count=N`, Criterion, JMH raw data, Hyperfine runs) are judged with
 the same Mann-Whitney U test as `benchstat`; point estimates fall back to a percentage/absolute
-threshold. The report says which method judged how many rows. Background and sources:
+threshold. The report says which method judged how many rows. Precedence: samples (at least 4 per
+side, Mann-Whitney) -> non-overlapping intervals -> threshold. Background and sources:
 [docs/research.md](docs/research.md).
 
 ## Use it
@@ -36,6 +37,7 @@ read-only: the action logs a warning and the report still lands in the job summa
 | `head` | required | result file(s) for this commit |
 | `base` | | result file(s) to compare against |
 | `format` | `auto` | see above; `auto` sniffs the content |
+| `base-format` | same as `format` | format of the base files, e.g. `benchdiff` for a previous release's canonical JSON |
 | `threshold` | `5` | percent; smaller changes are noise |
 | `min-abs` | `0` | absolute noise floor in the metric's own unit |
 | `only-changed` | `false` | hide unchanged rows |
@@ -44,6 +46,11 @@ read-only: the action logs a warning and the report still lands in the job summa
 | `title` / `tag` | `Benchmark comparison` / `default` | heading; the sticky comment is keyed by `<!-- benchdiff:TAG -->` |
 | `fail-on-regression` | `false` | `true` = any regression, a number = at least that many percent |
 | `comment` | `true` | post/update the PR comment |
+
+Several files passed to `head` or `base` are merged; a benchmark present in two files is an error
+(repeated Go lines inside one file are samples of the same benchmark). `fail-on-regression` and the
+numeric inputs must be finite and non-negative, and `tag` must not contain `-->` or control characters.
+The sticky comment is matched only if it was posted by a bot and starts with the marker.
 
 Outputs: `regressed`, `improved`, `unchanged`, `new`, `removed`, `failed`, `report-path`,
 `json-path`, `head-json-path` (the head results as canonical JSON, the file to upload as the release asset).
@@ -120,7 +127,7 @@ Check the glob against your module's actual report directory.
  "metrics": [{"group": "api", "name": "create", "measure": "p50", "unit": "ms",
               "better": "lower", "value": 0.44, "samples": [0.44, 0.45, 0.43, 0.44]}]}
 ```
-A metric is identified by `(group, name, measure)`.
+A metric is identified by `(group, name, measure)`. Readers accept `schema` 1; a newer schema is rejected.
 
 ## Release benchmarks
 
@@ -138,7 +145,12 @@ jobs:
       bench-command: go test -bench . -benchmem -count=10 ./... | tee bench.txt
       results: bench.txt
       format: go
+      benchdiff-ref: <same commit SHA>   # required; pin it
 ```
+
+The previous release's asset is canonical benchdiff JSON, so the workflow diffs it with
+`base-format: benchdiff` whatever `format` you use for the new results. `setup` and `bench-command`
+run verbatim: never build them from `github.event.*` data.
 
 ## CLI
 
@@ -146,6 +158,7 @@ jobs:
 cargo run -p benchdiff -- --base base.txt --head head.txt --format go
 cargo run -p benchdiff -- --head new.json --head-json canonical.json   # convert to canonical JSON
 ```
+The CLI rejects non-finite or negative numbers and flags that would swallow the next flag.
 Exit codes: `0` ok, `1` the `--fail-on-regression` limit was exceeded, `2` bad input or usage.
 
 ## Development
@@ -153,10 +166,11 @@ Exit codes: `0` ok, `1` the `--fail-on-regression` limit was exceeded, `2` bad i
 ```sh
 make test      # cargo test --workspace
 make golden    # rebuild dist/benchdiff.wasm and check it against the native binary via the JS shim
+node --test "test/*.test.js"   # same checks against the committed wasm; set BENCHDIFF_NATIVE to use a native binary other than target/release/benchdiff
 make ready     # fmt, clippy -D warnings, tests, golden
 ```
 
 * `crates/benchdiff-core`: model, importers, comparison, Markdown/JSON rendering. No I/O.
 * `crates/benchdiff`: the CLI (hand-rolled flags, `std::fs` only so it also runs under WASI).
-* `index.js`, `action.yml`: the Action. `dist/benchdiff.wasm` is committed; rebuild with `make wasm` after any Rust change (CI's golden test fails on a stale one).
+* `index.js`, `action.yml`: the Action. `dist/benchdiff.wasm` is committed; rebuild with `make wasm` after any Rust change. The golden test compares the committed wasm with the native build on a fixed set of cases, so behavior drift on those cases is caught; a byte-identical rebuild is not enforced because toolchain output is not reproducible across hosts.
 * `testdata/`: real tool output where I could produce it; see [testdata/README.md](testdata/README.md) for which files are hand-written.

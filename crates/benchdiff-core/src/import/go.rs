@@ -22,7 +22,8 @@ fn parse_result_line(line: &str) -> Option<(&str, Vec<(f64, &str)>)> {
     fields[1].parse::<u64>().ok()?;
     let mut pairs = Vec::new();
     for pair in fields[2..].chunks(2) {
-        pairs.push((pair[0].parse::<f64>().ok()?, pair[1]));
+        let value = pair[0].parse::<f64>().ok().filter(|v| v.is_finite())?;
+        pairs.push((value, pair[1]));
     }
     Some((fields[0], pairs))
 }
@@ -147,6 +148,8 @@ pub(super) fn parse(text: &str) -> Result<MetricSet, String> {
 mod tests {
     use super::*;
 
+    const FIXTURE_NAMES: [&str; 5] = ["Join", "Sort", "Sub/n=x0", "Sub/n=x1", "Throughput"];
+
     fn fixture() -> MetricSet {
         parse(include_str!("../../../../testdata/go/bench.txt")).unwrap()
     }
@@ -194,7 +197,31 @@ mod tests {
     fn parse_should_strip_the_procs_suffix_and_keep_subbenchmark_names() {
         let set = fixture();
         assert!(set.metrics.iter().any(|m| m.name == "Sub/n=x1"));
-        assert!(set.metrics.iter().all(|m| !m.name.ends_with("-24")));
+        let mut names: Vec<_> = set.metrics.iter().map(|m| m.name.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names, FIXTURE_NAMES);
+    }
+
+    #[test]
+    fn parse_result_line_table() {
+        let cases: [(&str, Option<(&str, usize)>); 8] = [
+            ("BenchmarkFoo-8 100 5 ns/op", Some(("BenchmarkFoo-8", 1))),
+            (
+                "BenchmarkFoo-8 100 5 ns/op 3 B/op",
+                Some(("BenchmarkFoo-8", 2)),
+            ),
+            ("BenchmarkFoo-8 100 5 ns/op 3", None),
+            ("BenchmarkFoo-8 many 5 ns/op", None),
+            ("Benchmarkfoo-8 100 5 ns/op", None),
+            ("BenchmarkFoo-8 --- FAIL", None),
+            ("BenchmarkFoo-8 100 NaN ns/op", None),
+            ("BenchmarkFoo-8 100", None),
+        ];
+        for (line, want) in cases {
+            let got = parse_result_line(line).map(|(n, pairs)| (n, pairs.len()));
+            assert_eq!(got, want, "{line}");
+        }
     }
 
     #[test]

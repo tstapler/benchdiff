@@ -320,17 +320,21 @@ fn sort_rows(rows: &mut [Row], sort: Sort) {
         Sort::Input => {}
         Sort::Name => rows
             .sort_by(|a, b| (&a.group, &a.name, &a.measure).cmp(&(&b.group, &b.name, &b.measure))),
-        Sort::Delta => rows.sort_by(|a, b| severity(b).total_cmp(&severity(a))),
+        Sort::Delta => rows.sort_by(|a, b| {
+            let ((ca, ma), (cb, mb)) = (delta_key(a), delta_key(b));
+            ca.cmp(&cb).then(mb.total_cmp(&ma))
+        }),
     }
 }
 
-/// Positive for regressions (bigger is worse), negative for improvements.
-fn severity(r: &Row) -> f64 {
-    let magnitude = r.delta_pct.map_or(f64::MAX, f64::abs);
+/// (class, magnitude): regressions, then improvements, then the rest; larger magnitude first.
+/// A row with no percentage (zero base) counts as infinitely large.
+fn delta_key(r: &Row) -> (u8, f64) {
+    let magnitude = r.delta_pct.map_or(f64::INFINITY, f64::abs);
     match r.verdict {
-        Verdict::Regressed => magnitude,
-        Verdict::Improved => -magnitude,
-        _ => f64::MIN,
+        Verdict::Regressed => (0, magnitude),
+        Verdict::Improved => (1, magnitude),
+        _ => (2, 0.0),
     }
 }
 
@@ -479,6 +483,79 @@ mod tests {
         let r = compare(Some(&base), &head, &Options::default());
         let order: Vec<_> = r.rows.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(order, ["big-reg", "small-reg", "big-imp", "flat"]);
+    }
+
+    #[test]
+    fn delta_sort_orders_improvements_largest_first_and_keeps_the_rest_in_input_order() {
+        let l = Better::Lower;
+        let base = set(&[
+            ("flat-a", 100.0, l),
+            ("small-imp", 100.0, l),
+            ("flat-b", 100.0, l),
+            ("big-imp", 100.0, l),
+        ]);
+        let head = set(&[
+            ("flat-a", 100.0, l),
+            ("small-imp", 90.0, l),
+            ("flat-b", 100.0, l),
+            ("big-imp", 50.0, l),
+        ]);
+        let r = compare(Some(&base), &head, &Options::default());
+        let order: Vec<_> = r.rows.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(order, ["big-imp", "small-imp", "flat-a", "flat-b"]);
+    }
+
+    #[test]
+    fn failure_threshold_edge_cases() {
+        let l = Better::Lower;
+        let trips = |base: f64, head: f64, limit: Option<f64>| {
+            compare(
+                Some(&set(&[("m", base, l)])),
+                &set(&[("m", head, l)]),
+                &Options {
+                    fail_on_regression_pct: limit,
+                    ..Options::default()
+                },
+            )
+            .exceeds_failure_threshold()
+        };
+        assert!(trips(0.0, 1.0, Some(1000.0)), "zero-base regression trips");
+        assert!(!trips(100.0, 50.0, Some(0.0)), "improvement never trips");
+        assert!(
+            trips(100.0, 110.0, Some(0.0)),
+            "bare 0 trips on any regression"
+        );
+
+        let mut b = metric("m", 1.0, l);
+        b.unit = "B".into();
+        let mk = |m| MetricSet {
+            env: Default::default(),
+            metrics: vec![m],
+        };
+        let r = compare(
+            Some(&mk(b)),
+            &mk(metric("m", 2.0, l)),
+            &Options {
+                fail_on_regression_pct: Some(0.0),
+                ..Options::default()
+            },
+        );
+        assert_eq!(r.rows[0].verdict, Verdict::Incomparable);
+        assert!(!r.exceeds_failure_threshold());
+    }
+
+    #[test]
+    fn sampled_base_in_us_vs_head_in_ms_scales_before_the_rank_test() {
+        // Base 10-14 us = 0.010-0.014 ms; head 0.02-0.024 ms: a regression once scaled.
+        // Unscaled, base (10..14) > head (0.02..) would read as a large improvement.
+        let mut base = sampled(&[10.0, 11.0, 12.0, 13.0, 14.0], Better::Lower);
+        base.metrics[0].unit = "us".into();
+        let head = sampled(&[0.020, 0.021, 0.022, 0.023, 0.024], Better::Lower);
+        let r = compare(Some(&base), &head, &Options::default());
+        assert_eq!(r.rows[0].method, Some(Method::MannWhitney));
+        assert_eq!(r.rows[0].verdict, Verdict::Regressed);
+        assert!(r.rows[0].p_value.unwrap() < 0.05);
+        assert!((r.rows[0].base.unwrap() - 0.012).abs() < 1e-12);
     }
 
     #[test]
