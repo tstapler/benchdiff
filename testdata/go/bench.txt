@@ -1,0 +1,21 @@
+goos: linux
+goarch: amd64
+pkg: gob
+cpu: AMD Ryzen 9 7900X 12-Core Processor            
+BenchmarkSort-24          	    6433	      9642 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort-24          	    6801	      9040 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort-24          	    7048	      8933 ns/op	       0 B/op	       0 allocs/op
+BenchmarkJoin-24          	 2209713	        26.05 ns/op	       8 B/op	       1 allocs/op
+BenchmarkJoin-24          	 2024983	        25.41 ns/op	       8 B/op	       1 allocs/op
+BenchmarkJoin-24          	 2031902	        27.91 ns/op	       8 B/op	       1 allocs/op
+BenchmarkThroughput-24    	  265897	       218.5 ns/op	4686.33 MB/s	       0 B/op	       0 allocs/op
+BenchmarkThroughput-24    	  228933	       221.9 ns/op	4615.70 MB/s	       0 B/op	       0 allocs/op
+BenchmarkThroughput-24    	  272850	       211.4 ns/op	4843.62 MB/s	       0 B/op	       0 allocs/op
+BenchmarkSub/n=x0-24      	270568968	         0.2164 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSub/n=x0-24      	302128114	         0.2310 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSub/n=x0-24      	275698030	         0.2213 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSub/n=x1-24      	 1801106	        32.71 ns/op	     112 B/op	       1 allocs/op
+BenchmarkSub/n=x1-24      	 1867720	        28.57 ns/op	     112 B/op	       1 allocs/op
+BenchmarkSub/n=x1-24      	 2029172	        33.53 ns/op	     112 B/op	       1 allocs/op
+PASS
+ok  	gob	1.209s

@@ -1,0 +1,46 @@
+goos: linux
+goarch: amd64
+pkg: gob
+cpu: AMD Ryzen 9 7900X 12-Core Processor            
+BenchmarkSort-24	6933	11267	ns/op	0	B/op	0	allocs/op
+BenchmarkSort-24	6754	12403	ns/op	0	B/op	0	allocs/op
+BenchmarkSort-24	5457	12427	ns/op	0	B/op	0	allocs/op
+BenchmarkSort-24	6151	11775	ns/op	0	B/op	0	allocs/op
+BenchmarkSort-24	6546	13250	ns/op	0	B/op	0	allocs/op
+BenchmarkSort-24	6669	12385	ns/op	0	B/op	0	allocs/op
+BenchmarkSort-24	6976	12587	ns/op	0	B/op	0	allocs/op
+BenchmarkSort-24	6798	11125	ns/op	0	B/op	0	allocs/op
+BenchmarkJoin-24	2234738	20.78	ns/op	8	B/op	1	allocs/op
+BenchmarkJoin-24	2236335	20.14	ns/op	8	B/op	1	allocs/op
+BenchmarkJoin-24	2179888	21.77	ns/op	8	B/op	1	allocs/op
+BenchmarkJoin-24	2084248	22.21	ns/op	8	B/op	1	allocs/op
+BenchmarkJoin-24	2237635	21.15	ns/op	8	B/op	1	allocs/op
+BenchmarkJoin-24	2484373	21.87	ns/op	8	B/op	1	allocs/op
+BenchmarkJoin-24	2306564	21.74	ns/op	8	B/op	1	allocs/op
+BenchmarkJoin-24	2170016	21.27	ns/op	8	B/op	1	allocs/op
+BenchmarkThroughput-24    	  254349	       213.8 ns/op	4789.26 MB/s	       0 B/op	       0 allocs/op
+BenchmarkThroughput-24    	  274564	       235.6 ns/op	4346.19 MB/s	       0 B/op	       0 allocs/op
+BenchmarkThroughput-24    	  295759	       238.5 ns/op	4293.02 MB/s	       0 B/op	       0 allocs/op
+BenchmarkThroughput-24    	  283478	       230.0 ns/op	4451.73 MB/s	       0 B/op	       0 allocs/op
+BenchmarkThroughput-24    	  294471	       227.4 ns/op	4502.62 MB/s	       0 B/op	       0 allocs/op
+BenchmarkThroughput-24    	  292682	       211.5 ns/op	4841.15 MB/s	       0 B/op	       0 allocs/op
+BenchmarkThroughput-24    	  279164	       221.6 ns/op	4620.54 MB/s	       0 B/op	       0 allocs/op
+BenchmarkThroughput-24    	  299563	       214.5 ns/op	4774.89 MB/s	       0 B/op	       0 allocs/op
+BenchmarkSub/n=x0-24      	263132665	         0.2128 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSub/n=x0-24      	281461640	         0.2041 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSub/n=x0-24      	301951815	         0.2045 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSub/n=x0-24      	290259280	         0.2106 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSub/n=x0-24      	282222056	         0.2019 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSub/n=x0-24      	236852028	         0.2158 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSub/n=x0-24      	263664859	         0.2084 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSub/n=x0-24      	244740456	         0.2213 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSub/n=x1-24      	 2345338	        27.24 ns/op	     112 B/op	       1 allocs/op
+BenchmarkSub/n=x1-24      	 2358146	        33.11 ns/op	     112 B/op	       1 allocs/op
+BenchmarkSub/n=x1-24      	 1757586	        35.07 ns/op	     112 B/op	       1 allocs/op
+BenchmarkSub/n=x1-24      	 2110948	        30.96 ns/op	     112 B/op	       1 allocs/op
+BenchmarkSub/n=x1-24      	 2216751	        26.95 ns/op	     112 B/op	       1 allocs/op
+BenchmarkSub/n=x1-24      	 1922763	        32.37 ns/op	     112 B/op	       1 allocs/op
+BenchmarkSub/n=x1-24      	 2163025	        34.70 ns/op	     112 B/op	       1 allocs/op
+BenchmarkSub/n=x1-24      	 2166684	        25.67 ns/op	     112 B/op	       1 allocs/op
+PASS
+ok  	gob	3.384s

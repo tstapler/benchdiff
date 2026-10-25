@@ -1,0 +1,7 @@
+{"schema": 1,
+ "env": {"sha": "abc123", "runner": "ubuntu-24.04"},
+ "metrics": [
+  {"group": "api", "name": "create", "measure": "p50", "unit": "ms", "better": "lower", "value": 0.44},
+  {"group": "api", "name": "create", "measure": "p95", "unit": "ms", "better": "lower", "value": 0.66, "lower": 0.6, "upper": 0.7},
+  {"group": "api", "name": "echo", "unit": "ops/s", "better": "higher", "value": 9100, "samples": [9000, 9100, 9200, 9150, 9050]}
+ ]}

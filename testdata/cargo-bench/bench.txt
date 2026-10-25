@@ -1,0 +1,2 @@
+test join      ... bench:           5.58 ns/iter (+/- 0.10)
+test sort_ints ... bench:       5,275.51 ns/iter (+/- 187.95)

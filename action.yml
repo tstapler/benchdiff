@@ -1,0 +1,74 @@
+name: benchdiff
+description: Compare benchmark results (Go, Criterion, cargo bench, JMH/kotlinx-benchmark, Hyperfine, ...) and post a sticky Markdown report.
+author: tstapler
+branding:
+  icon: bar-chart-2
+  color: blue
+
+inputs:
+  head:
+    description: Benchmark result file(s) for this commit; newline- or comma-separated paths or globs.
+    required: true
+  base:
+    description: Benchmark result file(s) to compare against. Omit for a head-only report.
+    required: false
+  format:
+    description: "Input format: auto, benchdiff, go, criterion, cargo-bench, jmh, hyperfine, googlebench, gab-smaller, gab-bigger, bmf."
+    default: auto
+  base-format:
+    description: "Input format of the base files (same values as format). Defaults to the value of format; set `benchdiff` when the base is a previous release's canonical JSON."
+    required: false
+  threshold:
+    description: Changes smaller than this many percent are treated as noise.
+    default: '5'
+  min-abs:
+    description: Changes smaller than this many units (in the metric's own unit) are treated as noise.
+    default: '0'
+  only-changed:
+    description: Hide unchanged rows.
+    default: 'false'
+  sort:
+    description: "Row order: delta (worst regression first), name, or input."
+    default: delta
+  max-rows:
+    description: Show at most this many changed rows (the JSON report keeps all).
+    required: false
+  title:
+    description: Report heading.
+    default: Benchmark comparison
+  tag:
+    description: Key of the sticky comment; use distinct tags for several reports on one PR.
+    default: default
+  fail-on-regression:
+    description: "'true' fails on any regression, a number fails on a regression of at least that many percent, 'false' never fails."
+    default: 'false'
+  comment:
+    description: Post or update the sticky PR comment.
+    default: 'true'
+  github-token:
+    description: Token used for the PR comment.
+    default: ${{ github.token }}
+
+outputs:
+  regressed:
+    description: Number of regressed benchmarks.
+  improved:
+    description: Number of improved benchmarks.
+  unchanged:
+    description: Number of unchanged benchmarks.
+  new:
+    description: Number of benchmarks only in head.
+  removed:
+    description: Number of benchmarks only in base.
+  failed:
+    description: "'true' when fail-on-regression tripped."
+  report-path:
+    description: Markdown report file.
+  json-path:
+    description: Machine-readable report file.
+  head-json-path:
+    description: Head results converted to canonical benchdiff JSON (upload this as the release asset).
+
+runs:
+  using: node24
+  main: index.js

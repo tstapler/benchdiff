@@ -1,0 +1,10 @@
+[package]
+name = "benchdiff-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Benchmark importers, comparison and Markdown rendering; pure, builds natively and to wasm32-wasip1"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

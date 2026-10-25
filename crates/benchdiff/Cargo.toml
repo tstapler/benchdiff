@@ -1,0 +1,10 @@
+[package]
+name = "benchdiff"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CLI: compare two benchmark runs and render a Markdown report"
+
+[dependencies]
+benchdiff-core = { path = "../benchdiff-core" }
+serde_json = { workspace = true }
