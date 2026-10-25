@@ -6,7 +6,7 @@ name: Release benchmarks
 #   jobs:
 #     bench:
 #       permissions: { contents: write }
-#       uses: tstapler/benchdiff/.github/workflows/release-benchmarks.yml@main
+#       uses: tstapler/benchdiff/.github/workflows/release-benchmarks.yml@v0
 #       with:
 #         bench-command: go test -bench . -benchmem -count=10 ./... | tee bench.txt
 #         results: bench.txt

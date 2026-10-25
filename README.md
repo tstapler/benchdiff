@@ -22,12 +22,16 @@ side, Mann-Whitney) -> non-overlapping intervals -> threshold. Background and so
 ## Use it
 
 ```yaml
-- uses: tstapler/benchdiff@<commit-sha>   # not published yet; pin a SHA once it is
+- uses: tstapler/benchdiff@v0
   with:
     head: bench-head.txt          # files or globs, newline/comma separated
     base: bench-base.txt          # optional; omit for a head-only report
     format: auto                  # or go | criterion | cargo-bench | jmh | hyperfine | googlebench | gab-smaller | gab-bigger | bmf | benchdiff
 ```
+
+`@v0` follows the latest `0.x` release. For a supply-chain-safe pin, use the full commit SHA of a
+release instead (`tstapler/benchdiff@<40-hex-sha> # v0.1.0`). The Action is a committed WebAssembly
+build plus a dependency-free `index.js`: nothing is downloaded or compiled at run time.
 
 Needs `permissions: pull-requests: write` for the sticky comment. The comment is found by its marker on a Bot-authored comment, so a personal access token as `github-token` creates a new comment each run; use the default `GITHUB_TOKEN` or an App token. On fork PRs the token is
 read-only: the action logs a warning and the report still lands in the job summary.
@@ -66,7 +70,7 @@ Keep the base from the default branch in the Actions cache (the pattern stapler-
 - uses: actions/cache/restore@<sha>
   with: { path: base/, key: bench-main-${{ github.sha }}, restore-keys: bench-main- }
 # ... run benchmarks into head/ ...
-- uses: tstapler/benchdiff@<commit-sha>
+- uses: tstapler/benchdiff@v0
   with: { head: head/*, base: base/* }
 # on pushes to main only: cp head/* base/ and actions/cache/save
 ```
@@ -78,7 +82,7 @@ Each shows the benchmark command, then the `with:` inputs. Add the PR workflow a
 **Go** (`go test`, same input as `benchstat`; use `-count=10` or more so the significance test can run)
 ```yaml
 - run: go test -bench . -benchmem -count=10 ./... | tee head.txt
-- uses: tstapler/benchdiff@<sha>
+- uses: tstapler/benchdiff@v0
   with: { head: head.txt, base: base.txt, format: go }
 ```
 One row per benchmark and unit (`ns/op`, `B/op`, `allocs/op`, `MB/s`); `MB/s` is higher-is-better, `Unit x better=higher` lines are honoured.
@@ -86,7 +90,7 @@ One row per benchmark and unit (`ns/op`, `B/op`, `allocs/op`, `MB/s`); `MB/s` is
 **Rust, `cargo bench` (libtest)** (nightly harness, or `RUSTC_BOOTSTRAP=1` on stable)
 ```yaml
 - run: cargo bench 2>&1 | tee head.txt
-- uses: tstapler/benchdiff@<sha>
+- uses: tstapler/benchdiff@v0
   with: { head: head.txt, base: base.txt, format: cargo-bench }
 ```
 Single estimate per benchmark, so threshold-only (the `+/-` is max-min, not an interval, and is ignored).
@@ -94,14 +98,14 @@ Single estimate per benchmark, so threshold-only (the `+/-` is max-min, not an i
 **Rust, Criterion** (via [cargo-criterion](https://github.com/bheisler/cargo-criterion); gives per-sample data, so the Mann-Whitney test runs)
 ```yaml
 - run: cargo install cargo-criterion --locked && cargo criterion --message-format=json > head.jsonl
-- uses: tstapler/benchdiff@<sha>
+- uses: tstapler/benchdiff@v0
   with: { head: head.jsonl, base: base.jsonl, format: criterion }
 ```
 
 **Kotlin / JVM (kotlinx-benchmark, JMH)**
 ```yaml
 - run: ./gradlew jvmBenchmark          # JSON lands under <module>/build/reports/benchmarks/ by default
-- uses: tstapler/benchdiff@<sha>
+- uses: tstapler/benchdiff@v0
   with: { head: 'kmp/build/reports/benchmarks/**/*.json', base: base.json, format: jmh }
 ```
 `thrpt` is higher-is-better, other JMH modes lower. Parameterised benchmarks appear as `name[size=1000]`. Plain JMH works the same with `-rf json -rff head.json`.
@@ -110,14 +114,14 @@ Check the glob against your module's actual report directory.
 **Hyperfine** (v1 and v2 JSON schemas)
 ```yaml
 - run: hyperfine --warmup 3 --runs 20 --export-json head.json './mytool build'
-- uses: tstapler/benchdiff@<sha>
+- uses: tstapler/benchdiff@v0
   with: { head: head.json, base: base.json, format: hyperfine }
 ```
 
 **Google Benchmark (C++)**
 ```yaml
 - run: ./bench --benchmark_repetitions=10 --benchmark_format=json > head.json
-- uses: tstapler/benchdiff@<sha>
+- uses: tstapler/benchdiff@v0
   with: { head: head.json, base: base.json, format: googlebench }
 ```
 
@@ -140,7 +144,7 @@ on: { release: { types: [published] } }
 jobs:
   bench:
     permissions: { contents: write }
-    uses: tstapler/benchdiff/.github/workflows/release-benchmarks.yml@<sha>
+    uses: tstapler/benchdiff/.github/workflows/release-benchmarks.yml@v0
     with:
       bench-command: go test -bench . -benchmem -count=10 ./... | tee bench.txt
       results: bench.txt
@@ -174,3 +178,15 @@ make ready     # fmt, clippy -D warnings, tests, golden
 * `crates/benchdiff`: the CLI (hand-rolled flags, `std::fs` only so it also runs under WASI).
 * `index.js`, `action.yml`: the Action. `dist/benchdiff.wasm` is committed; rebuild with `make wasm` after any Rust change. The golden test compares the committed wasm with the native build on a fixed set of cases, so behavior drift on those cases is caught; a byte-identical rebuild is not enforced because toolchain output is not reproducible across hosts.
 * `testdata/`: real tool output where I could produce it; see [testdata/README.md](testdata/README.md) for which files are hand-written.
+
+## Releasing
+
+1. `make ready` (rebuilds `dist/benchdiff.wasm` with build paths remapped, then runs every check).
+2. Merge to `main`, tag `vX.Y.Z` on the merge commit, and create a GitHub release for it.
+3. Move the floating major tag: `git tag -f v0 vX.Y.Z && git push -f origin v0`.
+4. Optional: publish to the Marketplace from the release page (needs a one-time acceptance of the
+   GitHub Marketplace Developer Agreement in the web UI).
+
+## License
+
+MIT, see [LICENSE](LICENSE).
