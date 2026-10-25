@@ -6,9 +6,12 @@ RUSTUP_BIN := $(HOME)/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin
 test:
 	cargo test --workspace
 
+WASM_RUSTFLAGS := --remap-path-prefix=$(HOME)=/build --remap-path-prefix=$(CURDIR)=/src
+
+# The remap keeps the committed binary free of the builder's home directory (panic messages embed paths).
 wasm:
-	@if [ -x "$(RUSTUP_BIN)/cargo" ]; then PATH="$(RUSTUP_BIN):$$PATH" RUSTC="$(RUSTUP_BIN)/rustc" cargo build --release --target wasm32-wasip1 -p benchdiff; \
-	else cargo build --release --target wasm32-wasip1 -p benchdiff; fi
+	@if [ -x "$(RUSTUP_BIN)/cargo" ]; then RUSTFLAGS="$(WASM_RUSTFLAGS)" PATH="$(RUSTUP_BIN):$$PATH" RUSTC="$(RUSTUP_BIN)/rustc" cargo build --release --target wasm32-wasip1 -p benchdiff; \
+	else RUSTFLAGS="$(WASM_RUSTFLAGS)" cargo build --release --target wasm32-wasip1 -p benchdiff; fi
 	cp target/wasm32-wasip1/release/benchdiff.wasm dist/benchdiff.wasm
 
 golden: wasm
