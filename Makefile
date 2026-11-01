@@ -2,10 +2,11 @@
 # directly because a Homebrew rustc earlier on PATH has no wasm32-wasip1 standard library.
 RUSTUP_BIN := $(HOME)/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin
 
-.PHONY: test wasm golden ready
+.PHONY: test wasm golden ready wasm-size wasm-fresh
 test:
 	cargo test --workspace
 
+WASM ?= dist/benchdiff.wasm
 WASM_RUSTFLAGS := --remap-path-prefix=$(HOME)=/build --remap-path-prefix=$(CURDIR)=/src
 
 # The remap keeps the committed binary free of the builder's home directory (panic messages embed paths).
@@ -17,6 +18,12 @@ wasm:
 golden: wasm
 	cargo build --release -p benchdiff
 	node --disable-warning=ExperimentalWarning --test "test/*.test.js"
+
+wasm-size:
+	sh scripts/check-wasm-size.sh $(WASM)
+
+wasm-fresh:
+	sh scripts/check-wasm-fresh.sh
 
 ready:
 	cargo fmt --all --check
