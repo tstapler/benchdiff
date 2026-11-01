@@ -1,0 +1,71 @@
+{
+  "counts": {
+    "improved": 0,
+    "incomparable": 0,
+    "invalid": 0,
+    "new": 0,
+    "regressed": 0,
+    "removed": 0,
+    "skipped": 0,
+    "unchanged": 2
+  },
+  "failed": false,
+  "has_base": true,
+  "rows": [
+    {
+      "base": 5925.647327001357,
+      "better": "lower",
+      "delta_pct": 0.0,
+      "group": "sort",
+      "head": 5925.647327001357,
+      "head_range": [
+        5884.376203240117,
+        5972.930378359029
+      ],
+      "measure": "time",
+      "method": "mann-whitney",
+      "n_base": 100,
+      "n_head": 100,
+      "name": "ints",
+      "p_value": 0.9999999699999995,
+      "unit": "ns",
+      "verdict": "unchanged"
+    },
+    {
+      "base": 14.339306920179364,
+      "better": "lower",
+      "delta_pct": 0.0,
+      "group": "",
+      "head": 14.339306920179364,
+      "head_range": [
+        14.19870293148483,
+        14.49707282710783
+      ],
+      "measure": "time",
+      "method": "mann-whitney",
+      "n_base": 100,
+      "n_head": 100,
+      "name": "join",
+      "p_value": 0.9999999699999995,
+      "unit": "ns",
+      "verdict": "unchanged"
+    }
+  ],
+  "summary": {
+    "alpha": 0.05,
+    "base_env": [],
+    "fail_on_regression_pct": null,
+    "head_env": [],
+    "max_rows": null,
+    "min_abs": 0.0,
+    "only_changed": false,
+    "skipped_base": [],
+    "skipped_base_total": 0,
+    "skipped_head": [],
+    "skipped_head_total": 0,
+    "tag": "default",
+    "threshold_pct": 5.0,
+    "title": "Benchmark comparison",
+    "use_stats": true
+  }
+}

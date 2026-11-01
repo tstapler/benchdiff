@@ -1,0 +1,65 @@
+{
+  "counts": {
+    "improved": 0,
+    "incomparable": 0,
+    "invalid": 0,
+    "new": 0,
+    "regressed": 0,
+    "removed": 0,
+    "skipped": 0,
+    "unchanged": 2
+  },
+  "failed": false,
+  "has_base": true,
+  "rows": [
+    {
+      "base": 5.58,
+      "better": "lower",
+      "delta_pct": 0.0,
+      "group": "",
+      "head": 5.58,
+      "head_range": null,
+      "measure": "time",
+      "method": "threshold",
+      "n_base": 0,
+      "n_head": 0,
+      "name": "join",
+      "p_value": null,
+      "unit": "ns/iter",
+      "verdict": "unchanged"
+    },
+    {
+      "base": 5275.51,
+      "better": "lower",
+      "delta_pct": 0.0,
+      "group": "",
+      "head": 5275.51,
+      "head_range": null,
+      "measure": "time",
+      "method": "threshold",
+      "n_base": 0,
+      "n_head": 0,
+      "name": "sort_ints",
+      "p_value": null,
+      "unit": "ns/iter",
+      "verdict": "unchanged"
+    }
+  ],
+  "summary": {
+    "alpha": 0.05,
+    "base_env": [],
+    "fail_on_regression_pct": null,
+    "head_env": [],
+    "max_rows": null,
+    "min_abs": 0.0,
+    "only_changed": false,
+    "skipped_base": [],
+    "skipped_base_total": 0,
+    "skipped_head": [],
+    "skipped_head_total": 0,
+    "tag": "default",
+    "threshold_pct": 5.0,
+    "title": "Benchmark comparison",
+    "use_stats": true
+  }
+}

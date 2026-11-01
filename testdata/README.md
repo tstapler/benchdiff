@@ -15,3 +15,13 @@
 | `golden/head.go.txt` | `go/bench-count8.txt` with `Sort` `ns/op` multiplied by 1.3 and `Join` `ns/op` by 0.8, to get a known regression and improvement |
 
 Replace the hand-written files with real captures when a repo that produces them is wired in.
+
+## Golden expected outputs
+
+`golden/expected/<case>.{md,json}` freeze the output of the CLI (`--markdown` and `--json`) for 15 cases, run from the repo root with `cargo build --release -p benchdiff`:
+
+- Option cases on `golden/head.go.txt` vs `golden/base.go.txt`: `default`, `json` (adds `--format go`), `only-changed` (`--only-changed`), `max-rows-2` (`--max-rows 2`), `sort-name` (`--sort name`), `threshold-1-min-abs-5` (`--threshold 1 --min-abs 5`).
+- `native-base`: `benchdiff/native.json` as both head and base with `--format benchdiff`.
+- `importer-<format>` for `bmf`, `cargo-bench`, `criterion`, `gab-smaller`, `gab-bigger`, `googlebench`, `hyperfine`, `jmh`: the fixture under `testdata/` as both base and head with `--format <format>`.
+
+Regenerate with `UPDATE_GOLDEN=1` once the asserting tests (`test/golden.test.js`, `crates/benchdiff/tests/golden_expected.rs`) land; a diff in `golden/expected/` must be reviewed as an intentional behaviour change.

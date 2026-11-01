@@ -1,0 +1,105 @@
+{
+  "counts": {
+    "improved": 0,
+    "incomparable": 0,
+    "invalid": 0,
+    "new": 0,
+    "regressed": 0,
+    "removed": 0,
+    "skipped": 0,
+    "unchanged": 3
+  },
+  "failed": false,
+  "has_base": true,
+  "rows": [
+    {
+      "base": 1520.5,
+      "better": "higher",
+      "delta_pct": 0.0,
+      "group": "dev.stapler.stelekit.benchmarks.SearchBenchmark",
+      "head": 1520.5,
+      "head_range": [
+        1490.3,
+        1550.7
+      ],
+      "measure": "thrpt",
+      "method": "mann-whitney",
+      "n_base": 6,
+      "n_head": 6,
+      "name": "search[size=1000]",
+      "p_value": 0.9999999699999995,
+      "unit": "ops/s",
+      "verdict": "unchanged"
+    },
+    {
+      "base": 650.1,
+      "better": "lower",
+      "delta_pct": 0.0,
+      "group": "dev.stapler.stelekit.benchmarks.SearchBenchmark",
+      "head": 650.1,
+      "head_range": [
+        638.1,
+        662.1
+      ],
+      "measure": "avgt",
+      "method": "mann-whitney",
+      "n_base": 4,
+      "n_head": 4,
+      "name": "search[size=10]",
+      "p_value": 0.9999999699999995,
+      "unit": "ns/op",
+      "verdict": "unchanged"
+    },
+    {
+      "base": 128.0,
+      "better": "lower",
+      "delta_pct": 0.0,
+      "group": "dev.stapler.stelekit.benchmarks.SearchBenchmark",
+      "head": 128.0,
+      "head_range": null,
+      "measure": "gc.alloc.rate.norm",
+      "method": "threshold",
+      "n_base": 2,
+      "n_head": 2,
+      "name": "search[size=10]",
+      "p_value": null,
+      "unit": "B/op",
+      "verdict": "unchanged"
+    }
+  ],
+  "summary": {
+    "alpha": 0.05,
+    "base_env": [
+      [
+        "jvm",
+        "21.0.4"
+      ],
+      [
+        "vm",
+        "OpenJDK 64-Bit Server VM"
+      ]
+    ],
+    "fail_on_regression_pct": null,
+    "head_env": [
+      [
+        "jvm",
+        "21.0.4"
+      ],
+      [
+        "vm",
+        "OpenJDK 64-Bit Server VM"
+      ]
+    ],
+    "max_rows": null,
+    "min_abs": 0.0,
+    "only_changed": false,
+    "skipped_base": [],
+    "skipped_base_total": 0,
+    "skipped_head": [],
+    "skipped_head_total": 0,
+    "tag": "default",
+    "threshold_pct": 5.0,
+    "title": "Benchmark comparison",
+    "use_stats": true
+  }
+}
