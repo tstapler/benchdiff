@@ -109,3 +109,62 @@ test('parseFailOnRegression rejects hex and other non-decimal numbers', () => {
   for (const bad of ['0x10', '1e3', '-1', 'abc']) assert.throws(() => parseFailOnRegression(bad), /fail-on-regression/);
   assert.equal(parseFailOnRegression('12.5'), '12.5');
 });
+
+const TAIL = ['--markdown', '/work/report.md', '--json', '/work/report.json', '--head-json', '/work/head.json'];
+
+test('buildArgs snapshot: documented defaults produce the exact current argv', () => {
+  const args = buildArgs({ head: ['h.txt'], base: ['b.txt'], format: 'auto', threshold: '5', minAbs: '0', sort: 'delta', title: 'Benchmark comparison', tag: 'default', failOnRegression: 'false' });
+  assert.deepEqual(args, [
+    '--head', 'h.txt', '--base', 'b.txt',
+    '--format', 'auto', '--threshold', '5', '--min-abs', '0', '--sort', 'delta',
+    '--title=Benchmark comparison', '--tag=default',
+    ...TAIL,
+  ]);
+});
+
+test('buildArgs snapshot: every input set yields the exact current argv', () => {
+  const args = buildArgs({
+    head: ['h1', 'h2'], base: ['b1'], format: 'go', baseFormat: 'benchdiff', threshold: '7.5', minAbs: '2',
+    onlyChanged: true, sort: 'name', maxRows: '9', title: 'My title', tag: 'perf', failOnRegression: '10',
+  });
+  assert.deepEqual(args, [
+    '--head', 'h1', '--head', 'h2', '--base', 'b1',
+    '--format', 'go', '--threshold', '7.5', '--min-abs', '2', '--sort', 'name',
+    '--title=My title', '--tag=perf',
+    '--base-format', 'benchdiff', '--only-changed', '--max-rows', '9', '--fail-on-regression=10',
+    ...TAIL,
+  ]);
+});
+
+test('buildArgs snapshot: onlyChanged and failOnRegression forms', () => {
+  const tail = (o) => buildArgs({ ...base, ...o }).slice(-TAIL.length - 1, -TAIL.length);
+  assert.deepEqual(buildArgs({ ...base, onlyChanged: true }).filter((a) => a === '--only-changed'), ['--only-changed']);
+  assert.deepEqual(buildArgs({ ...base, onlyChanged: false }).filter((a) => a === '--only-changed'), []);
+  assert.deepEqual(tail({ failOnRegression: 'true' }), ['--fail-on-regression']);
+  assert.deepEqual(tail({ failOnRegression: '0' }), ['--fail-on-regression=0']);
+  assert.deepEqual(tail({ failOnRegression: '12.5' }), ['--fail-on-regression=12.5']);
+});
+
+test('package_json_should_be_absent_or_have_no_dependencies_and_index_and_lib_should_require_only_node_builtins', () => {
+  const firstDependency = (file) => {
+    if (!fs.existsSync(file)) return null;
+    const deps = JSON.parse(fs.readFileSync(file, 'utf8')).dependencies;
+    return deps && Object.keys(deps).length > 0 ? Object.keys(deps)[0] : null;
+  };
+  assert.equal(firstDependency(path.join(root, 'package.json')), null);
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-pkg-'));
+  fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ dependencies: { left_pad: '1.0.0', other: '2.0.0' } }));
+  assert.equal(firstDependency(path.join(tmp, 'package.json')), 'left_pad');
+
+  const libDir = path.join(root, 'lib');
+  const libFiles = fs.existsSync(libDir) ? fs.readdirSync(libDir).filter((f) => f.endsWith('.js')).map((f) => path.join(libDir, f)) : [];
+  for (const file of [path.join(root, 'index.js'), ...libFiles]) {
+    if (!fs.existsSync(file)) continue;
+    const src = fs.readFileSync(file, 'utf8');
+    const specs = [...src.matchAll(/\brequire\(\s*['"]([^'"]+)['"]\s*\)/g), ...src.matchAll(/^\s*import\s[^'"\n]*['"]([^'"]+)['"]/gm)].map((m) => m[1]);
+    for (const spec of specs) {
+      assert.ok(spec.startsWith('node:') || spec.startsWith('./') || spec.startsWith('../'), `${path.basename(file)} requires non-builtin "${spec}"`);
+    }
+  }
+});
