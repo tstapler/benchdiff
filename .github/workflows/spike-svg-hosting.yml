@@ -1,0 +1,133 @@
+# THROWAWAY spike for ADR-003 / plan task 0.2.1. Deleted by task 0.2.1b.
+# Publishes fixtures/spike/*.svg to the orphan branch benchdiff-assets via the Git Data API,
+# then posts a PR comment and a step summary with seven embed variants.
+name: spike-svg-hosting
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  spike:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+      IS_PRIVATE: ${{ github.event.repository.private }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      RUN_ID: ${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # Variant 4: single-file artifact, archive:false. Anonymous download needs login (expected to fail in Camo).
+      - name: Upload card.svg without archiving
+        id: artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: fixtures/spike/card.svg
+          archive: false
+
+      - name: Publish to orphan branch, post comment and summary
+        env:
+          ARTIFACT_URL: ${{ steps.artifact.outputs.artifact-url }}
+        run: |
+          set -euo pipefail
+          BRANCH=benchdiff-assets
+          API="repos/$REPO"
+          FILES="card.svg card-opaque.svg"
+
+          # --- 1. Commit the SVGs to the orphan branch (prototype of task 4.1.2's calls) ---
+          tree_entries='[]'
+          for f in $FILES; do
+            blob=$(jq -n --rawfile c "fixtures/spike/$f" '{content:$c,encoding:"utf-8"}' \
+              | gh api "$API/git/blobs" --input - --jq .sha)
+            tree_entries=$(jq -c --arg p "spike/$f" --arg s "$blob" \
+              '. + [{path:$p,mode:"100644",type:"blob",sha:$s}]' <<<"$tree_entries")
+          done
+          tree=$(jq -n --argjson t "$tree_entries" '{tree:$t}' | gh api "$API/git/trees" --input - --jq .sha)
+
+          parent=$(gh api "$API/git/ref/heads/$BRANCH" --jq .object.sha 2>/dev/null || true)
+          if [ -n "$parent" ]; then
+            commit=$(jq -n --arg t "$tree" --arg p "$parent" --arg m "spike: svg fixtures run $RUN_ID" \
+              '{message:$m,tree:$t,parents:[$p]}' | gh api "$API/git/commits" --input - --jq .sha)
+            jq -n --arg s "$commit" '{sha:$s,force:false}' \
+              | gh api -X PATCH "$API/git/refs/heads/$BRANCH" --input - --jq .object.sha
+          else
+            commit=$(jq -n --arg t "$tree" --arg m "spike: svg fixtures run $RUN_ID" \
+              '{message:$m,tree:$t,parents:[]}' | gh api "$API/git/commits" --input - --jq .sha)
+            jq -n --arg r "refs/heads/$BRANCH" --arg s "$commit" '{ref:$r,sha:$s}' \
+              | gh api "$API/git/refs" --input - --jq .object.sha
+          fi
+          echo "orphan branch commit: $commit"
+
+          # --- 2. Build the seven embed variants ---
+          RAW="https://raw.githubusercontent.com/$REPO/$commit/spike"
+          HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          DATA_URI="data:image/svg+xml;base64,$(base64 -w0 fixtures/spike/card.svg)"
+          {
+            echo "## SVG hosting spike (run $RUN_ID)"
+            echo "repo private=${IS_PRIVATE:-unknown} fork-PR=${IS_FORK:-n/a} orphan commit=\`$commit\`"
+            echo
+            echo "### V1 plain raw URL"
+            echo "![v1 card]($RAW/card.svg) ![v1 opaque]($RAW/card-opaque.svg)"
+            echo
+            echo "### V2 picture element"
+            echo "<picture><source media=\"(prefers-color-scheme: dark)\" srcset=\"$RAW/card.svg\"><img alt=\"v2 picture\" src=\"$RAW/card-opaque.svg\"></picture>"
+            echo
+            echo "### V3 gh-light-mode-only / gh-dark-mode-only fragments"
+            echo "![v3 light]($RAW/card-opaque.svg#gh-light-mode-only) ![v3 dark]($RAW/card.svg#gh-dark-mode-only)"
+            echo
+            echo "### V4 artifact archive:false link (login required, expected not to render as image)"
+            echo "![v4 artifact](${ARTIFACT_URL:-missing}) [link](${ARTIFACT_URL:-missing})"
+            echo
+            echo "### V5 github.com raw link"
+            echo "![v5 github raw](https://github.com/$REPO/raw/$commit/spike/card.svg)"
+            echo
+            echo "### V6 base64 data URI (comment sanitizer expected to strip)"
+            echo "![v6 data uri]($DATA_URI)"
+            echo
+            echo "### V7 repo-tracked path (fixtures/spike/card.svg; the default-branch URL 404s until merged)"
+            echo "![v7 raw at head sha](https://raw.githubusercontent.com/$REPO/$HEAD_SHA/fixtures/spike/card.svg)"
+            echo "![v7 raw at default branch](https://raw.githubusercontent.com/$REPO/$DEFAULT_BRANCH/fixtures/spike/card.svg)"
+            echo "![v7 relative path](fixtures/spike/card.svg)"
+          } > body.md
+
+          cat body.md >> "$GITHUB_STEP_SUMMARY"
+
+          # --- 3. PR comment (fails on fork PRs: read-only token; record and continue) ---
+          if [ -n "${PR_NUMBER:-}" ]; then
+            cid=$(jq -n --rawfile b body.md '{body:$b}' \
+              | gh api "$API/issues/$PR_NUMBER/comments" --input - --jq .id) || cid=""
+            if [ -z "$cid" ]; then
+              echo "::warning::comment post failed (expected for fork PRs)"
+              echo "comment: FAILED" >> "$GITHUB_STEP_SUMMARY"
+            else
+              # --- 4. Camo Content-Type / nosniff check on the rendered comment HTML ---
+              html=$(gh api -H 'Accept: application/vnd.github.html+json' "$API/issues/comments/$cid" --jq .body_html)
+              echo "$html" | grep -oE '<img[^>]*>' > img-tags.txt || true
+              echo "img tags in rendered comment: $(wc -l < img-tags.txt)"
+              {
+                echo
+                echo "### Camo header check (rendered comment $cid)"
+                echo '```'
+                grep -oE 'src="[^"]+"' img-tags.txt | sed -E 's/^src="//; s/"$//' | sed 's/&amp;/\&/g' \
+                  | while read -r u; do
+                      case "$u" in
+                        http*) echo "$u" | cut -c1-120
+                               curl -sIL --max-time 20 "$u" | grep -iE '^(HTTP/|content-type|x-content-type-options)' | sed 's/^/    /' ;;
+                        *) echo "$u (non-http src: not fetched)" | cut -c1-120 ;;
+                      esac
+                    done
+                echo '```'
+              } | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo "No PR number (workflow_dispatch): summary only."
+          fi
