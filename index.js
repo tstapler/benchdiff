@@ -78,8 +78,12 @@ function stage(files, dir, prefix) {
 /**
  * Builds the CLI argv. Config-governed settings are emitted only when the raw input is
  * non-empty, so a `--config` file (or the binary's own default) applies when the user set nothing.
+ * The one exception is `svgEmbed`: the Action passes `auto` when it is '' (unset), so `charts` alone
+ * embeds even when it comes from the config file. `undefined` means the caller is not wired for
+ * charts yet (main() until task 4.2.1b), and nothing is emitted.
+ * `dimensions` is newline-delimited and becomes one `--dimensions` flag per non-blank line.
  */
-function buildArgs({ head, base, config, format, baseFormat, threshold, minAbs, onlyChanged, sort, maxRows, title, tag, failOnRegression }) {
+function buildArgs({ head, base, config, format, baseFormat, threshold, minAbs, onlyChanged, sort, maxRows, title, tag, failOnRegression, compareBy, groupBy, dimensions, dimensionsStrict, reference, correction, cellFormat, charts, chartRows, chartWidth, chartTheme, svgDir, svgEmbed, publishImages }) {
   const args = [];
   head.forEach((f) => args.push('--head', f));
   base.forEach((f) => args.push('--base', f));
@@ -97,6 +101,20 @@ function buildArgs({ head, base, config, format, baseFormat, threshold, minAbs, 
   if (failOnRegression === 'true') args.push('--fail-on-regression');
   else if (failOnRegression === 'false') args.push('--no-fail-on-regression');
   else if (failOnRegression) args.push(`--fail-on-regression=${failOnRegression}`);
+  if (compareBy) args.push('--compare-by', compareBy);
+  if (groupBy) args.push('--group-by', groupBy);
+  String(dimensions ?? '').split('\n').map((l) => l.trim()).filter(Boolean).forEach((rule) => args.push('--dimensions', rule));
+  if (dimensionsStrict === 'true') args.push('--dimensions-strict');
+  if (reference) args.push('--reference', reference);
+  if (correction) args.push('--correction', correction);
+  if (cellFormat) args.push('--cell-format', cellFormat);
+  if (charts) args.push('--charts', charts);
+  if (chartRows) args.push('--chart-rows', chartRows);
+  if (chartWidth) args.push('--chart-width', chartWidth);
+  if (chartTheme) args.push('--chart-theme', chartTheme);
+  if (svgDir) args.push('--svg-dir', svgDir);
+  if (svgEmbed !== undefined) args.push(`--svg-embed=${svgEmbed || 'auto'}`);
+  if (publishImages) args.push(`--publish-images=${publishImages}`);
   args.push('--markdown', '/work/report.md', '--json', '/work/report.json', '--head-json', '/work/head.json');
   return args;
 }

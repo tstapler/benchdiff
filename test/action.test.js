@@ -266,3 +266,48 @@ test('clip_should_move_cut_before_image_or_picture_markup_when_cut_inside', () =
   assert.equal((out.match(/<details>/g) || []).length, (out.match(/<\/details>/g) || []).length);
   assert.ok(!out.includes('<picture>'));
 });
+
+test('buildArgs: new inputs emit their flag only when non-empty', () => {
+  const none = buildArgs(base);
+  for (const f of ['--compare-by', '--group-by', '--dimensions', '--dimensions-strict', '--reference', '--correction', '--cell-format',
+    '--charts', '--chart-rows', '--chart-width', '--chart-theme', '--svg-dir', '--publish-images']) assert.ok(!none.includes(f), f);
+  assert.ok(!none.some((a) => a.startsWith('--svg-embed')));
+  const args = buildArgs({
+    ...base, compareBy: 'impl', groupBy: 'size', reference: 'quick', correction: 'none', cellFormat: 'ratio',
+    charts: 'delta,ranking', chartRows: '10', chartWidth: '800', chartTheme: 'both', svgDir: '/work/svg', publishImages: 'false',
+  });
+  assert.equal(flagValue(args, '--compare-by'), 'impl');
+  assert.equal(flagValue(args, '--group-by'), 'size');
+  assert.equal(flagValue(args, '--reference'), 'quick');
+  assert.equal(flagValue(args, '--correction'), 'none');
+  assert.equal(flagValue(args, '--cell-format'), 'ratio');
+  assert.equal(flagValue(args, '--charts'), 'delta,ranking');
+  assert.equal(flagValue(args, '--chart-rows'), '10');
+  assert.equal(flagValue(args, '--chart-width'), '800');
+  assert.equal(flagValue(args, '--chart-theme'), 'both');
+  assert.equal(flagValue(args, '--svg-dir'), '/work/svg');
+  assert.ok(args.includes('--publish-images=false'));
+});
+
+test('buildArgs: svg-embed is auto when unset and the user value when set', () => {
+  assert.ok(buildArgs({ ...base, svgEmbed: '' }).includes('--svg-embed=auto'));
+  assert.ok(buildArgs({ ...base, svgEmbed: 'false' }).includes('--svg-embed=false'));
+  assert.ok(buildArgs({ ...base, svgEmbed: 'true' }).includes('--svg-embed=true'));
+});
+
+test('buildArgs: dimensions repeats the flag once per non-blank line, in order', () => {
+  const args = buildArgs({ ...base, dimensions: 'impl=/impl=(?P<impl>\\w+)\n\n  size=/size=(?P<size>\\d+)  \n' });
+  const rules = args.flatMap((a, i) => (a === '--dimensions' ? [args[i + 1]] : []));
+  assert.deepEqual(rules, ['impl=/impl=(?P<impl>\\w+)', 'size=/size=(?P<size>\\d+)']);
+  assert.ok(!buildArgs({ ...base, dimensions: ' \n ' }).includes('--dimensions'));
+});
+
+test('buildArgs: dimensions-strict is a bare flag only when true (there is no negative flag)', () => {
+  assert.ok(buildArgs({ ...base, dimensionsStrict: 'true' }).includes('--dimensions-strict'));
+  assert.ok(!buildArgs({ ...base, dimensionsStrict: 'false' }).includes('--dimensions-strict'));
+  assert.ok(!buildArgs({ ...base, dimensionsStrict: '' }).includes('--dimensions-strict'));
+});
+
+test('buildArgs: sort accepts rank and passes it through', () => {
+  assert.equal(flagValue(buildArgs({ ...base, sort: 'rank' }), '--sort'), 'rank');
+});
