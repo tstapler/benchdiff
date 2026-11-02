@@ -54,7 +54,7 @@ jobs:
           tree=$(jq -n --argjson t "$tree_entries" '{tree:$t}' | gh api "$API/git/trees" --input - --jq .sha)
 
           parent=$(gh api "$API/git/ref/heads/$BRANCH" --jq .object.sha 2>/dev/null || true)
-          if [ -n "$parent" ]; then
+          if [[ "$parent" =~ ^[0-9a-f]{40}$ ]]; then
             commit=$(jq -n --arg t "$tree" --arg p "$parent" --arg m "spike: svg fixtures run $RUN_ID" \
               '{message:$m,tree:$t,parents:[$p]}' | gh api "$API/git/commits" --input - --jq .sha)
             jq -n --arg s "$commit" '{sha:$s,force:false}' \
