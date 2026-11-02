@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="120" viewBox="0 0 360 120" role="img" aria-labelledby="t d">
+  <title id="t">benchdiff spike: opaque light card</title>
+  <desc id="d">Fixed light colours, no media query; readable on any page theme.</desc>
+  <rect x="0.5" y="0.5" width="359" height="119" rx="8" fill="#ffffff" stroke="#d0d7de"/>
+  <text x="16" y="30" fill="#1f2328" font-family="sans-serif" font-size="14">spike: opaque light card</text>
+  <text x="16" y="62" fill="#1f2328" font-family="sans-serif" font-size="14">BenchmarkSort</text>
+  <rect x="130" y="50" width="180" height="16" fill="#1a7f37"/>
+  <text x="16" y="98" fill="#57606a" font-family="sans-serif" font-size="12">always light, any theme</text>
+</svg>
