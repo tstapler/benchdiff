@@ -6,7 +6,7 @@
 
 use crate::compare::{Method, Options, Verdict};
 use crate::markdown::{
-    chart_notices, code, flatten, fmt_num, marker, render_chart_blocks, RenderExtras,
+    chart_notices, code, esc, flatten, fmt_num, marker, render_chart_blocks, RenderExtras,
 };
 use crate::matrix::{matrix_failures, FailedCell, FailureKind};
 use crate::matrix::{
@@ -847,24 +847,6 @@ fn esc_notice(text: &str) -> String {
             '>' => out.push_str("&gt;"),
             '&' => out.push_str("&amp;"),
             '\\' | '`' | '*' | '_' | '[' | ']' | '|' | '@' => {
-                out.push('\\');
-                out.push(ch);
-            }
-            _ => out.push(ch),
-        }
-    }
-    out
-}
-
-/// Untrusted text as plain Markdown: one line, markup characters backslash-escaped.
-fn esc(text: &str) -> String {
-    let mut out = String::new();
-    for ch in flatten(text).chars() {
-        match ch {
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '&' => out.push_str("&amp;"),
-            '\\' | '`' | '*' | '_' | '[' | ']' | '(' | ')' | '#' | '|' | '!' | '@' | '~' => {
                 out.push('\\');
                 out.push(ch);
             }

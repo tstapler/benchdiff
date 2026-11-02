@@ -50,6 +50,24 @@ pub(crate) fn code(text: &str) -> String {
     format!("`{}`", flat.replace('`', "'").replace('|', "\\|"))
 }
 
+/// Untrusted text as plain Markdown: one line, markup characters backslash-escaped.
+pub(crate) fn esc(text: &str) -> String {
+    let mut out = String::new();
+    for ch in flatten(text).chars() {
+        match ch {
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '&' => out.push_str("&amp;"),
+            '\\' | '`' | '*' | '_' | '[' | ']' | '(' | ')' | '#' | '|' | '!' | '@' | '~' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 fn plural(n: usize, noun: &str) -> String {
     format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
 }
@@ -118,7 +136,9 @@ fn skip_text(s: &SkippedChart) -> String {
             }
             ChartKind::Distribution => format!("chart skipped: {} is not applicable", k.name()),
         },
-        SkipReason::NoSamples => format!("chart skipped: {kind}: no samples (run with samples)"),
+        SkipReason::NoSamples => {
+            format!("{kind} chart skipped: no samples in the input (use -count=10 or Criterion)")
+        }
         SkipReason::Empty => format!("chart skipped: {kind}: no rows to chart"),
         SkipReason::CapExceeded { shown, total } => {
             format!("chart skipped: {kind}: {total} series exceed the cap of {shown}")
@@ -561,7 +581,7 @@ fn method_facts(s: &Summary) -> String {
         let items: Vec<String> = s
             .threshold_overrides
             .iter()
-            .map(|(k, v)| format!("{k} {}%", fmt_num(*v)))
+            .map(|(k, v)| format!("{} {}%", esc(k), fmt_num(*v)))
             .collect();
         let _ = write!(out, " Per-metric thresholds: {}.", items.join(", "));
     }
@@ -569,7 +589,7 @@ fn method_facts(s: &Summary) -> String {
         let items: Vec<String> = s
             .config_sources
             .iter()
-            .map(|c| format!("{}={} ({})", c.key, c.value, c.source))
+            .map(|c| format!("{}={} ({})", esc(&c.key), esc(&c.value), esc(&c.source)))
             .collect();
         let _ = write!(
             out,
@@ -961,6 +981,32 @@ mod tests {
         assert!(json.contains("\"config_sources\""), "{json}");
     }
 
+    #[test]
+    fn render_method_should_escape_hostile_threshold_keys_and_config_sources() {
+        let base = set(&[("net", "Parse", 100.0)]);
+        let head = set(&[("net", "Parse", 150.0)]);
+        let mut report = compare(Some(&base), &head, &Options::default());
+        for k in ["<!-- benchdiff:x -->", "</sub><img src=x>", "@user"] {
+            report.summary.threshold_overrides.insert(k.into(), 5.0);
+        }
+        report.summary.config_sources = vec![crate::compare::ConfigSource {
+            key: "</sub><img src=x>".into(),
+            value: "@user".into(),
+            source: "<!-- benchdiff:x -->".into(),
+        }];
+        let md = render_markdown(&report);
+        assert!(!md.contains("<img"), "{md}");
+        assert!(!md.contains("</sub><"), "{md}");
+        assert!(!md.replace("\\@user", "").contains("@user"), "{md}");
+        // Only the report's own sticky marker (first line) may appear.
+        assert_eq!(md.matches("<!-- benchdiff:").count(), 1, "{md}");
+        assert_eq!(
+            md.matches("</sub>").count(),
+            md.matches("<sub>").count(),
+            "{md}"
+        );
+    }
+
     fn chart(text: Option<&str>) -> ChartEmbed {
         ChartEmbed {
             kind: ChartKind::Delta,
@@ -1120,6 +1166,22 @@ mod tests {
             "{md}"
         );
         assert!(!md.contains(PLACEHOLDER_SCHEME));
+    }
+
+    #[test]
+    fn render_markdown_with_should_render_no_samples_skip_as_specified_in_ux() {
+        let extras = RenderExtras {
+            skipped: vec![SkippedChart {
+                kind: ChartKind::Distribution,
+                reason: SkipReason::NoSamples,
+            }],
+            ..RenderExtras::default()
+        };
+        let md = render_markdown_with(&two_way(), &extras);
+        assert!(
+            md.contains("⚠️ distribution chart skipped: no samples in the input (use -count=10 or Criterion)\n"),
+            "{md}"
+        );
     }
 
     #[test]

@@ -370,7 +370,9 @@ fn parse_json(text: &str, file: &str) -> Result<Config, String> {
             .chart_rows
             .as_ref()
             .map(|v| {
-                ChartRows::new(whole_number(file, "chart-rows", v)? as usize)
+                let n = whole_number(file, "chart-rows", v)?;
+                // Saturate (a bare `as usize` wraps on wasm32) so an oversized value reports as out of range.
+                ChartRows::new(usize::try_from(n).unwrap_or(usize::MAX))
                     .map_err(|e| format!("{file}: chart-rows: {e}"))
             })
             .transpose()?,
@@ -775,6 +777,14 @@ mod tests {
             let e = parse(&format!(r#"{{"version":1,"{key}":"out"}}"#)).unwrap_err();
             assert!(e.contains(&format!("unknown key '{key}'")), "{e}");
         }
+    }
+
+    #[test]
+    fn parse_config_should_reject_chart_rows_beyond_usize_when_value_wraps_to_valid() {
+        // 4294967306 = 2^32 + 10: a wrapping cast to a 32-bit usize would yield 10 and pass 1..=200.
+        let e = parse(r#"{"version":1,"chart-rows":4294967306}"#).unwrap_err();
+        assert!(e.contains("chart-rows"), "{e}");
+        assert!(parse(r#"{"version":1,"chart-rows":10}"#).is_ok());
     }
 
     #[test]
