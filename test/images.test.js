@@ -128,3 +128,145 @@ test('placeholder_scheme_should_equal_rust_constant_when_it_exists', (t) => {
   if (found.length === 0) return t.skip('Rust PLACEHOLDER_SCHEME not yet defined (arrives in 3.3.1c); cross-check pending');
   assert.deepEqual(found, [PLACEHOLDER_SCHEME]);
 });
+
+// ---- 4.1.2a: Git Data API client (mocked fetch only) ----
+const crypto = require('node:crypto');
+const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
+const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>');
+const FILES = [{ name: 'delta.svg', bytes: SVG }];
+const TIP = 'a'.repeat(40);
+const TIP_TREE = 'b'.repeat(40);
+
+// Minimal fake of the Git Data endpoints. `refReplies` scripts successive ref writes (PATCH/POST).
+function fakeGitHub({ tip = TIP, refReplies = [] } = {}) {
+  const calls = [];
+  let n = 0;
+  const json = (status, body) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) });
+  const fetch = async (url, init = {}) => {
+    const method = init.method || 'GET';
+    const body = init.body ? JSON.parse(init.body) : undefined;
+    calls.push({ url, method, body, headers: init.headers });
+    const u = new URL(url);
+    if (method === 'GET' && u.pathname.endsWith('/git/ref/heads/benchdiff-assets')) {
+      return tip ? json(200, { object: { sha: tip } }) : json(404, { message: 'Not Found' });
+    }
+    if (method === 'GET' && u.pathname.includes('/git/commits/')) return json(200, { tree: { sha: TIP_TREE } });
+    if (method === 'POST' && u.pathname.endsWith('/git/blobs')) return json(201, { sha: `blob${++n}`.padEnd(40, '0') });
+    if (method === 'POST' && u.pathname.endsWith('/git/trees')) return json(201, { sha: 'c'.repeat(40) });
+    if (method === 'POST' && u.pathname.endsWith('/git/commits')) return json(201, { sha: `d${calls.length}`.padEnd(40, '0') });
+    if (u.pathname.includes('/git/refs')) {
+      const r = refReplies.shift() || [200, {}];
+      return json(r[0], r[1]);
+    }
+    return json(500, { message: 'unexpected' });
+  };
+  return { fetch, calls };
+}
+const mkCtx = (extra = {}) => ({
+  token: 'ghs_SECRET_TOKEN',
+  repository: 'o/r',
+  tag: 'default',
+  apiUrl: 'https://api.github.com',
+  rawBase: 'https://raw.githubusercontent.com',
+  sleep: async () => {},
+  random: () => 0,
+  ...extra,
+});
+const refWrites = (calls) => calls.filter((c) => c.method !== 'GET' && new URL(c.url).pathname.includes('/git/refs'));
+
+test('publishImages_should_commit_on_existing_tip_and_return_sha_pinned_raw_url_when_branch_exists', async () => {
+  const gh = fakeGitHub();
+  const r = await publishImages(FILES, mkCtx({ fetch: gh.fetch }));
+  const commitCall = gh.calls.find((c) => c.method === 'POST' && c.url.endsWith('/git/commits'));
+  assert.deepEqual(commitCall.body.parents, [TIP], 'parented on the existing tip');
+  const treeCall = gh.calls.find((c) => c.url.endsWith('/git/trees'));
+  assert.equal(treeCall.body.base_tree, TIP_TREE, 'previous entries preserved via base_tree');
+  const [write] = refWrites(gh.calls);
+  assert.equal(write.method, 'PATCH');
+  assert.equal(write.body.force, false, 'never force-push');
+  const hash = sha(SVG).slice(0, 8);
+  const p = `t-${sha('default').slice(0, 12)}/${hash}/delta.svg`;
+  assert.equal(treeCall.body.tree[0].path, p);
+  assert.deepEqual(r, { urls: { 'delta.svg': `https://raw.githubusercontent.com/o/r/${write.body.sha}/${p}` } });
+});
+
+test('publishImages_should_send_base64_blob_with_bearer_token_to_api_host_only_and_never_leak_token_when_publishing', async () => {
+  const gh = fakeGitHub();
+  const r = await publishImages(FILES, mkCtx({ fetch: gh.fetch }));
+  const blob = gh.calls.find((c) => c.url.endsWith('/git/blobs'));
+  assert.deepEqual(blob.body, { content: SVG.toString('base64'), encoding: 'base64' });
+  for (const c of gh.calls) {
+    assert.equal(new URL(c.url).host, 'api.github.com');
+    assert.equal(c.headers.Authorization, 'Bearer ghs_SECRET_TOKEN');
+  }
+  assert.ok(!JSON.stringify(r).includes('SECRET'));
+});
+
+test('publishImages_should_create_orphan_root_commit_and_post_ref_when_branch_missing', async () => {
+  const gh = fakeGitHub({ tip: null, refReplies: [[201, {}]] });
+  const r = await publishImages(FILES, mkCtx({ fetch: gh.fetch }));
+  const commitCall = gh.calls.find((c) => c.url.endsWith('/git/commits'));
+  assert.deepEqual(commitCall.body.parents, []);
+  assert.equal(gh.calls.find((c) => c.url.endsWith('/git/trees')).body.base_tree, undefined);
+  const [write] = refWrites(gh.calls);
+  assert.equal(write.method, 'POST');
+  assert.equal(write.body.ref, 'refs/heads/benchdiff-assets');
+  assert.ok(r.urls['delta.svg'].includes(`/o/r/${write.body.sha}/`));
+});
+
+test('publishImages_should_reread_tip_and_reparent_and_succeed_when_ref_update_422_twice', async () => {
+  const gh = fakeGitHub({ refReplies: [[422, { message: 'Update is not a fast forward' }], [422, {}], [200, {}]] });
+  const sleeps = [];
+  const r = await publishImages(FILES, mkCtx({ fetch: gh.fetch, sleep: async (ms) => sleeps.push(ms) }));
+  assert.ok(r.urls, JSON.stringify(r));
+  assert.equal(refWrites(gh.calls).length, 3);
+  assert.equal(gh.calls.filter((c) => c.method === 'GET' && c.url.endsWith('/git/ref/heads/benchdiff-assets')).length, 3, 're-read each attempt');
+  assert.equal(sleeps.length, 2);
+  assert.equal(gh.calls.filter((c) => c.url.endsWith('/git/blobs')).length, 1, 'blobs created once');
+});
+
+test('publishImages_should_switch_to_update_path_when_create_ref_422_already_exists', async () => {
+  let reads = 0;
+  const gh = fakeGitHub({ refReplies: [[422, { message: 'Reference already exists' }], [200, {}]] });
+  const inner = gh.fetch;
+  const fetch = async (url, init) => {
+    if ((init?.method || 'GET') === 'GET' && url.endsWith('/git/ref/heads/benchdiff-assets') && ++reads === 1) {
+      return { ok: false, status: 404, json: async () => ({}), text: async () => '' };
+    }
+    return inner(url, init);
+  };
+  const r = await publishImages(FILES, mkCtx({ fetch }));
+  assert.ok(r.urls, JSON.stringify(r));
+  assert.deepEqual(refWrites(gh.calls).map((c) => c.method), ['POST', 'PATCH']);
+});
+
+test('publishImages_should_return_push_failed_without_throwing_after_five_consecutive_422s', async () => {
+  const gh = fakeGitHub({ refReplies: Array.from({ length: 9 }, () => [422, {}]) });
+  const r = await publishImages(FILES, mkCtx({ fetch: gh.fetch }));
+  assert.deepEqual(r, { error: ERRORS['push-failed'], reason: 'push-failed' });
+  assert.equal(refWrites(gh.calls).length, 5);
+});
+
+test('publishImages_should_return_push_failed_when_fetch_throws_or_api_errors', async () => {
+  const boom = await publishImages(FILES, mkCtx({ fetch: async () => { throw new Error('net down ghs_SECRET_TOKEN'); } }));
+  assert.equal(boom.reason, 'push-failed');
+  assert.ok(!JSON.stringify(boom).includes('SECRET'));
+  const gh = fakeGitHub();
+  const bad = await publishImages(FILES, mkCtx({ fetch: async (u, i) => (u.endsWith('/git/blobs') ? { ok: false, status: 500, json: async () => ({}), text: async () => '' } : gh.fetch(u, i)) }));
+  assert.equal(bad.reason, 'push-failed');
+});
+
+test('publishImages_should_use_hashed_tag_path_and_honour_api_url_and_raw_base_when_configured', async () => {
+  const gh = fakeGitHub();
+  const r = await publishImages(FILES, mkCtx({ fetch: gh.fetch, tag: 'a/../b', apiUrl: 'https://ghe.example/api/v3', rawBase: 'https://raw.example' }));
+  const p = r.urls['delta.svg'];
+  assert.ok(p.startsWith('https://raw.example/o/r/'));
+  assert.ok(!p.slice('https://raw.example/'.length).includes('..'));
+  assert.ok(p.includes(`/t-${sha('a/../b').slice(0, 12)}/`));
+  assert.ok(gh.calls.every((c) => c.url.startsWith('https://ghe.example/api/v3/repos/o/r/')));
+});
+
+test('publishImages_should_stay_disabled_without_token_or_repository', async () => {
+  const r = await publishImages(FILES, { fetch: async () => { throw new Error('no network'); } });
+  assert.equal(r.reason, 'disabled');
+});
