@@ -50,6 +50,8 @@ pub struct Options {
     pub fail_on_regression_pct: Option<f64>,
     /// Per-metric noise thresholds (`group/name` or `group` -> percent); see `threshold_for`.
     pub threshold_overrides: BTreeMap<String, f64>,
+    /// Keep per-row samples for charts (`Row::samples`); internal, set by chart requests only.
+    pub keep_samples: bool,
 }
 
 impl Options {
@@ -87,6 +89,7 @@ impl Default for Options {
             tag: "default".into(),
             fail_on_regression_pct: None,
             threshold_overrides: BTreeMap::new(),
+            keep_samples: false,
         }
     }
 }
@@ -118,6 +121,14 @@ pub enum Method {
     Threshold,
 }
 
+/// Raw samples of a compared pair, for charts. Never serialized.
+#[derive(Debug, Clone, Default)]
+pub struct Samples {
+    /// Already multiplied by the unit scale, i.e. in the head's unit.
+    pub base: Vec<f64>,
+    pub head: Vec<f64>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Row {
     pub group: String,
@@ -137,6 +148,8 @@ pub struct Row {
     pub n_head: usize,
     /// Head interval, shown in head-only reports.
     pub head_range: Option<(f64, f64)>,
+    #[serde(skip)]
+    pub samples: Samples,
 }
 
 impl Row {
@@ -293,6 +306,7 @@ fn one_sided_row(m: &Metric, verdict: Verdict) -> Row {
         n_base: if is_new { 0 } else { m.samples.len() },
         n_head: if is_new { m.samples.len() } else { 0 },
         head_range: m.lower.zip(m.upper).filter(|_| is_new),
+        samples: Samples::default(),
     }
 }
 
@@ -350,6 +364,7 @@ fn changed_row(base: &Metric, head: &Metric, opts: &Options) -> Row {
         n_base: base.samples.len(),
         n_head: head.samples.len(),
         head_range: head.lower.zip(head.upper),
+        samples: Samples::default(),
     };
     // Express the base in the head's unit so the delta and the test are on one scale.
     let Some(scale) = units::factor(&base.unit, &head.unit) else {
@@ -363,6 +378,12 @@ fn changed_row(base: &Metric, head: &Metric, opts: &Options) -> Row {
     let ev = evidence(base, head, scale, opts);
     row.method = Some(ev.method);
     row.p_value = ev.p_value;
+    if opts.keep_samples {
+        row.samples = Samples {
+            base: base.samples.iter().map(|v| v * scale).collect(),
+            head: head.samples.clone(),
+        };
+    }
 
     let passes_floor = diff != 0.0
         && diff.abs() >= opts.min_abs
@@ -862,5 +883,62 @@ mod tests {
         assert_eq!(v("Dial2"), Verdict::Regressed);
         assert_eq!(v("Query"), Verdict::Regressed);
         assert_eq!(r.summary.threshold_overrides, o.threshold_overrides);
+    }
+
+    fn sampled_unit(unit: &str, values: &[f64]) -> MetricSet {
+        let mut m = Metric::new(
+            "g",
+            "m",
+            "",
+            unit,
+            crate::stats::median(values),
+            Better::Lower,
+        );
+        m.samples = values.to_vec();
+        MetricSet {
+            env: Default::default(),
+            skipped: Default::default(),
+            metrics: vec![m],
+        }
+    }
+
+    #[test]
+    fn compare_should_leave_samples_empty_by_default() {
+        let r = compare(
+            Some(&sampled(&[1.0, 2.0, 3.0], Better::Lower)),
+            &sampled(&[4.0, 5.0, 6.0], Better::Lower),
+            &Options::default(),
+        );
+        assert!(r.rows[0].samples.base.is_empty() && r.rows[0].samples.head.is_empty());
+    }
+
+    #[test]
+    fn compare_should_scale_base_samples_to_head_unit_when_keep_samples_and_us_vs_ns() {
+        let o = Options {
+            keep_samples: true,
+            ..Options::default()
+        };
+        let r = compare(
+            Some(&sampled_unit("us", &[1.0, 2.0, 3.0])),
+            &sampled_unit("ns", &[1500.0, 2500.0, 3500.0]),
+            &o,
+        );
+        assert_eq!(r.rows[0].samples.base, vec![1000.0, 2000.0, 3000.0]);
+        assert_eq!(r.rows[0].samples.head, vec![1500.0, 2500.0, 3500.0]);
+    }
+
+    #[test]
+    fn compare_should_leave_samples_empty_for_one_sided_rows_when_keep_samples() {
+        let o = Options {
+            keep_samples: true,
+            ..Options::default()
+        };
+        let only = sampled(&[1.0, 2.0, 3.0], Better::Lower);
+        let new = compare(Some(&set(&[])), &only, &o);
+        let removed = compare(Some(&only), &set(&[]), &o);
+        for r in new.rows.iter().chain(removed.rows.iter()) {
+            assert!(r.samples.base.is_empty() && r.samples.head.is_empty());
+        }
+        assert_eq!(new.rows.len() + removed.rows.len(), 2);
     }
 }
