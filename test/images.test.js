@@ -418,3 +418,20 @@ test('publishImages_should_keep_hostile_tags_out_of_paths_and_use_github_raw_hos
     assert.equal(rel, `t-${sha(tag).slice(0, 12)}/${sha(SVG).slice(0, 8)}/delta.svg`);
   }
 });
+
+test('rewritePlaceholders_should_warn_once_and_strip_picture_and_image_when_publish_fails', () => {
+  const pic = '<picture><source media="(prefers-color-scheme: dark)" srcset="benchdiff-svg:a-dark.svg"><img alt="x" src="benchdiff-svg:a-light.svg"></picture>';
+  const md = `${MARKER}\n\n${pic}\n\n![b](benchdiff-svg:b.svg)\n\n${DETAILS}\n`;
+  const r = rewritePlaceholders(md, { error: ERRORS.fork, reason: 'fork' });
+  assert.ok(!r.markdown.includes(PLACEHOLDER_SCHEME));
+  assert.ok(!/<picture|<source|<img|!\[b\]/.test(r.markdown));
+  assert.equal(r.markdown.split('charts could not be hosted').length - 1, 1);
+  assert.ok(!/\n{3,}/.test(r.markdown));
+});
+
+test('rewritePlaceholders_should_strip_whole_picture_when_only_one_of_its_urls_is_hosted', () => {
+  const pic = '<picture><source srcset="benchdiff-svg:a-dark.svg"><img alt="x" src="benchdiff-svg:a-light.svg"></picture>';
+  const r = rewritePlaceholders(`${MARKER}\n\n${pic}\n`, { urls: { 'a-light.svg': 'https://h/l.svg' } });
+  assert.ok(!/<picture|<source|<img|https:\/\/h\/l/.test(r.markdown));
+  assert.ok(r.warning);
+});

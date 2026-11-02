@@ -67,6 +67,8 @@ pub struct ChartEmbed {
     pub alt: String,
     /// `svg::render_text_table` output; `None` emits the image without a text block.
     pub text: Option<String>,
+    /// Dark twin of `file` (`chart-theme: both`); `Some` emits a `<picture>` block instead of `![]()`.
+    pub dark_file: Option<String>,
 }
 
 /// A chart that produced no file, with the reason shown in the report.
@@ -137,6 +139,21 @@ pub(crate) fn chart_notices(extras: &RenderExtras) -> Vec<Notice> {
         .collect()
 }
 
+/// Escapes text for a double-quoted HTML attribute (the `<picture>` form is raw HTML, not Markdown).
+fn attr_escape(text: &str) -> String {
+    let mut out = String::new();
+    for ch in flatten(text).chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 fn alt_escape(alt: &str) -> String {
     let mut out = String::new();
     for ch in flatten(alt).chars() {
@@ -171,12 +188,24 @@ pub(crate) fn render_chart_blocks(extras: &RenderExtras) -> String {
     let several = extras.charts.len() > 1;
     for c in &extras.charts {
         if extras.publish_images {
-            let _ = writeln!(
-                out,
-                "![{}]({PLACEHOLDER_SCHEME}{})\n",
-                alt_escape(&c.alt),
-                c.file
-            );
+            match &c.dark_file {
+                Some(dark) => {
+                    let _ = writeln!(
+                        out,
+                        "<picture><source media=\"(prefers-color-scheme: dark)\" srcset=\"{PLACEHOLDER_SCHEME}{dark}\"><img alt=\"{}\" src=\"{PLACEHOLDER_SCHEME}{}\"></picture>\n",
+                        attr_escape(&c.alt),
+                        c.file
+                    );
+                }
+                None => {
+                    let _ = writeln!(
+                        out,
+                        "![{}]({PLACEHOLDER_SCHEME}{})\n",
+                        alt_escape(&c.alt),
+                        c.file
+                    );
+                }
+            }
         }
         if let Some(text) = &c.text {
             let open = if extras.publish_images { "" } else { " open" };
@@ -938,7 +967,46 @@ mod tests {
             file: "delta.svg".into(),
             alt: "Benchmark [change] <b>".into(),
             text: text.map(String::from),
+            dark_file: None,
         }
+    }
+
+    fn themed(light: &str, dark: &str) -> ChartEmbed {
+        ChartEmbed {
+            file: light.into(),
+            dark_file: Some(dark.into()),
+            ..chart(None)
+        }
+    }
+
+    #[test]
+    fn render_markdown_with_should_emit_picture_block_when_chart_has_light_and_dark_files() {
+        let mut c = themed("delta-light.svg", "delta-dark.svg");
+        c.alt = "A & \"B\" <b> [x]".into();
+        let md = render_markdown_with(&two_way(), &embedded(vec![c]));
+        assert!(
+            md.contains("<picture><source media=\"(prefers-color-scheme: dark)\" srcset=\"benchdiff-svg:delta-dark.svg\"><img alt=\"A &amp; &quot;B&quot; &lt;b&gt; [x]\" src=\"benchdiff-svg:delta-light.svg\"></picture>\n\n"),
+            "{md}"
+        );
+        assert!(!md.contains("!["), "{md}");
+    }
+
+    #[test]
+    fn render_markdown_with_should_emit_plain_image_when_chart_has_one_file() {
+        let md = render_markdown_with(&two_way(), &embedded(vec![chart(None)]));
+        assert!(md.contains("](benchdiff-svg:delta.svg)"), "{md}");
+        assert!(!md.contains("<picture>"), "{md}");
+    }
+
+    #[test]
+    fn render_markdown_with_should_emit_no_picture_when_publish_images_false() {
+        let mut e = embedded(vec![themed("d-light.svg", "d-dark.svg")]);
+        e.publish_images = false;
+        let md = render_markdown_with(&two_way(), &e);
+        assert!(
+            !md.contains("<picture>") && !md.contains("benchdiff-svg:"),
+            "{md}"
+        );
     }
 
     fn two_way() -> Report {

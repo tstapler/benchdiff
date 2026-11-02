@@ -1546,6 +1546,7 @@ mod tests {
                 file: "ranking.svg".into(),
                 alt: "Ratio vs quick".into(),
                 text: Some("| # |\n|---|".into()),
+                dark_file: None,
             }],
             embed: true,
             notices: vec![Notice {
@@ -1564,5 +1565,29 @@ mod tests {
             .unwrap();
         let table = md.find("| Benchmark").unwrap();
         assert!(note < img && img < det && det < table, "{md}");
+    }
+
+    #[test]
+    fn render_matrix_markdown_with_should_emit_picture_block_when_chart_has_light_and_dark_files() {
+        use crate::markdown::ChartEmbed;
+        use crate::svg::ChartKind;
+        let v = fifteen(2);
+        let report = compare_matrix(&v, &Options::default(), &mopts());
+        let extras = RenderExtras {
+            charts: vec![ChartEmbed {
+                kind: ChartKind::Ranking,
+                file: "ranking-light.svg".into(),
+                alt: "Ratio vs quick".into(),
+                text: None,
+                dark_file: Some("ranking-dark.svg".into()),
+            }],
+            embed: true,
+            ..RenderExtras::default()
+        };
+        let md = render_matrix_markdown_with(&report, &extras);
+        assert!(
+            md.contains("<picture><source media=\"(prefers-color-scheme: dark)\" srcset=\"benchdiff-svg:ranking-dark.svg\"><img alt=\"Ratio vs quick\" src=\"benchdiff-svg:ranking-light.svg\"></picture>"),
+            "{md}"
+        );
     }
 }
