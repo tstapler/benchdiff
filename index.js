@@ -512,7 +512,7 @@ async function main({ runWasm: run = runWasm, fetchImpl = fetch } = {}) {
     // Nothing to compare: post the notice-only report and skip the gate (the regression counts are all zero).
     const title = input('title', 'Benchmark comparison');
     fs.writeFileSync(path.join(workDir, 'report.md'), renderNoticeReport({ title, tag: tag || 'default', notices: degraded.notices }));
-    const zero = { regressed: 0, improved: 0, unchanged: 0, new: 0, removed: 0 };
+    const zero = { regressed: 0, improved: 0, unchanged: 0, new: 0, removed: 0, incomparable: 0, invalid: 0 };
     fs.writeFileSync(path.join(workDir, 'report.json'), JSON.stringify({ counts: zero, failed: false }));
   }
   const { code, stderr } = degraded ? { code: 0, stderr: '' } : await run(args, workDir);
@@ -564,6 +564,8 @@ async function main({ runWasm: run = runWasm, fetchImpl = fetch } = {}) {
     unchanged: report.counts.unchanged,
     new: report.counts.new,
     removed: report.counts.removed,
+    incomparable: report.counts.incomparable ?? 0,
+    invalid: report.counts.invalid ?? 0,
     failed: report.failed,
     'report-path': path.join(workDir, 'report.md'),
     'json-path': path.join(workDir, 'report.json'),

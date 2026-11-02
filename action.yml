@@ -112,6 +112,10 @@ outputs:
     description: "Number of benchmarks only in head. N-way runs: cells vs the reference."
   removed:
     description: "Number of benchmarks only in base. N-way runs: cells vs the reference."
+  incomparable:
+    description: "Number of benchmarks that cannot be compared (as in the report's counts). N-way runs: cells vs the reference, after Holm."
+  invalid:
+    description: "Number of benchmarks with invalid data (as in the report's counts). N-way runs: cells vs the reference, and a variant series that was skipped or unusable."
   failed:
     description: "'true' when fail-on-regression tripped (the regression gate result; N-way runs: cells vs the reference). False when fail-on-regression is unset."
   report-path:

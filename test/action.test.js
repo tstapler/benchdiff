@@ -709,7 +709,7 @@ test('main: a missing reference file posts the notice-only report without runnin
   assert.equal(commentBody(gh), golden);
   assert.equal(fs.readFileSync(s.summary, 'utf8'), `${golden}\n`);
   assert.equal(fs.readFileSync(outputOf(s, 'report-path'), 'utf8'), golden);
-  for (const k of ['regressed', 'improved', 'unchanged', 'new', 'removed']) assert.equal(outputOf(s, k), '0', k);
+  for (const k of ['regressed', 'improved', 'unchanged', 'new', 'removed', 'incomparable', 'invalid']) assert.equal(outputOf(s, k), '0', k);
   assert.equal(outputOf(s, 'failed'), 'false');
 });
 
@@ -772,7 +772,7 @@ test('main: matrix JSON counts and failed reach the outputs unchanged and the ga
   await withEnv(s.env, async () => {
     await assert.rejects(main({ runWasm: run }), /2 benchmark regression/);
   });
-  const want = { regressed: '2', improved: '3', unchanged: '4', new: '1', removed: '5', failed: 'true' };
+  const want = { regressed: '2', improved: '3', unchanged: '4', new: '1', removed: '5', incomparable: '6', invalid: '7', failed: 'true' };
   for (const [k, v] of Object.entries(want)) assert.equal(outputOf(s, k), v, k);
   assert.equal(outputOf(s, 'head-json-path'), '');
 });
@@ -819,7 +819,7 @@ test('action_variants_should_post_matrix_comment_equal_to_expected_when_three_la
   assert.equal(body.split('\n', 1)[0], '<!-- benchdiff:default -->');
   assert.equal(body, MATRIX_MD);
   assert.equal(fs.readFileSync(r.s.summary, 'utf8'), `${MATRIX_MD}\n`);
-  for (const k of ['regressed', 'improved', 'unchanged', 'new', 'removed']) assert.equal(outputOf(r.s, k), String(MATRIX_JSON.counts[k]), k);
+  for (const k of ['regressed', 'improved', 'unchanged', 'new', 'removed', 'incomparable', 'invalid']) assert.equal(outputOf(r.s, k), String(MATRIX_JSON.counts[k]), k);
   assert.equal(outputOf(r.s, 'failed'), 'false');
   assert.equal(outputOf(r.s, 'head-json-path'), '');
   assert.deepEqual(JSON.parse(fs.readFileSync(outputOf(r.s, 'json-path'), 'utf8')).counts, MATRIX_JSON.counts);

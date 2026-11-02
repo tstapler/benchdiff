@@ -9,6 +9,8 @@
     "unchanged": "14",
     "new": "0",
     "removed": "0",
+    "incomparable": "0",
+    "invalid": "0",
     "failed": "false",
     "report-path": "report.md",
     "json-path": "report.json",

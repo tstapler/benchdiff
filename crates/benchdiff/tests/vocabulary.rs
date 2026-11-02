@@ -207,7 +207,7 @@ fn action_yml_should_describe_hosting_side_effects() {
 #[test]
 fn action_yml_should_declare_the_svg_outputs() {
     let outputs: BTreeSet<String> = section("outputs").into_iter().map(|(k, _)| k).collect();
-    for o in ["svg-dir", "svg-paths"] {
+    for o in ["svg-dir", "svg-paths", "incomparable", "invalid"] {
         assert!(outputs.contains(o), "output `{o}` missing");
     }
 }

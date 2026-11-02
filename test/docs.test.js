@@ -195,3 +195,13 @@ test('readme_should_note_regex_backslashes_are_doubled_in_json_examples', () => 
   const example = fs.readFileSync(path.join(root, 'examples/benchdiff.config.json'), 'utf8');
   assert.ok(example.includes('\\\\d'), 'the example config really doubles the backslash');
 });
+
+test('readme_should_document_notice_only_inputs_and_malformed_variant_notice', () => {
+  const text = squash(readme);
+  for (const needle of [
+    'notice-only report built by the Action without running the binary uses the `title` and `tag` Action inputs',
+    'set the inputs to match',
+    "adds the parse error to the notice (`variant 'x' produced no data (path): <err>`)",
+    'a missing or empty file produces the shorter text',
+  ]) assert.ok(text.includes(needle), `README lacks "${needle}"`);
+});

@@ -56,7 +56,7 @@ Several files passed to `head` or `base` are merged; a benchmark present in two 
 numeric inputs must be finite and non-negative, and `tag` must not contain `-->` or control characters.
 The sticky comment is matched only if it was posted by a bot and starts with the marker.
 
-Outputs: `regressed`, `improved`, `unchanged`, `new`, `removed`, `failed`, `report-path`,
+Outputs: `regressed`, `improved`, `unchanged`, `new`, `removed`, `incomparable`, `invalid`, `failed`, `report-path`,
 `json-path`, `head-json-path` (the head results as canonical JSON, the file to upload as the release asset).
 
 Unchanged rows are collapsed in `<details>`; the environment of both runs (CPU, Go version,
@@ -85,7 +85,7 @@ Every input below has a CLI flag and a config key of the same kebab-case name, e
 | `publish-images` | `true` | host embedded charts as images; see [Hosting images](#hosting-images) |
 | `config` | | path to a settings file; see [Config file](#config-file) |
 
-Outputs added: `svg-dir`, `svg-paths` (newline-separated). In an N-way run, `regressed`, `improved`, `unchanged`, `new`, `removed` and `failed` count cells against the reference, and `head-json-path` is empty.
+Outputs added: `svg-dir`, `svg-paths` (newline-separated). In an N-way run, `regressed`, `improved`, `unchanged`, `new`, `removed`, `incomparable`, `invalid` and `failed` count cells against the reference (`incomparable` and `invalid` as in the report, after Holm; `invalid` also counts a variant series that was skipped or unusable), and `head-json-path` is empty.
 
 **Naming.** A *variant* is one labelled input to an N-way comparison: `--variant` is the repeatable CLI flag, `variants` the multi-line Action input.
 
@@ -119,6 +119,8 @@ benchdiff --head all.txt --compare-by impl      # pivot a dimension of one resul
 * **Gate.** A cell is `Regressed` only against the reference. `fail-on-regression` in an N-way run requires an explicit `reference` (exit 2 otherwise), fails on any regressed cell over the limit (after Holm) or any invalid cell, and without it `failed` is `false`.
 * `sort: rank` orders rows by variant ranking and needs an N-way run.
 * A variant with unreadable or malformed data is skipped with a notice (warn by default); `dimensions-strict` turns data-dependent dimension problems into exit 2.
+* The notice-only report built by the Action without running the binary uses the `title` and `tag` Action inputs (it is built when the reference or all but one variant has no data); values that exist only in a `--config` file are not known to that path, so set the inputs to match.
+* For a malformed (unparseable) variant file the binary adds the parse error to the notice (`variant 'x' produced no data (path): <err>`); a missing or empty file produces the shorter text.
 
 ## Dimensions
 
