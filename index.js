@@ -3,6 +3,7 @@
 // `benchdiff` CLI under node:wasi against a preopened temp dir, then publishes the result
 // (outputs, job summary, sticky PR comment).
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -22,15 +23,19 @@ function input(name, fallback = '') {
   return v === undefined || v.trim() === '' ? fallback : v.trim();
 }
 
+const isFile = (p) => {
+  try {
+    return fs.statSync(p).isFile();
+  } catch {
+    return false; // missing, dangling symlink, unreadable
+  }
+};
+
 /** Newline/comma separated paths and globs -> existing files, in order, de-duplicated. */
 function expand(patterns, cwd = process.cwd()) {
   const files = [];
   for (const pattern of patterns.split(/[\n,]/).map((p) => p.trim()).filter(Boolean)) {
-    const direct = path.resolve(cwd, pattern);
-    const matches = fs.existsSync(direct) && fs.statSync(direct).isFile()
-      ? [direct]
-      : fs.globSync(pattern, { cwd }).map((m) => path.resolve(cwd, m)).filter((m) => fs.statSync(m).isFile()).sort();
-    for (const m of matches) if (!files.includes(m)) files.push(m);
+    for (const m of resolveOne(pattern, cwd)) if (!files.includes(m)) files.push(m);
   }
   return files;
 }
@@ -38,8 +43,35 @@ function expand(patterns, cwd = process.cwd()) {
 /** One pattern (no `,`/newline splitting) -> existing files, sorted by path. */
 function resolveOne(pattern, cwd = process.cwd()) {
   const direct = path.resolve(cwd, pattern);
-  if (fs.existsSync(direct) && fs.statSync(direct).isFile()) return [direct];
-  return fs.globSync(pattern, { cwd }).map((m) => path.resolve(cwd, m)).filter((m) => fs.statSync(m).isFile()).sort();
+  if (isFile(direct)) return [direct];
+  return fs.globSync(pattern, { cwd }).map((m) => path.resolve(cwd, m)).filter(isFile).sort();
+}
+
+const workspaceRoot = () => fs.realpathSync(process.env.GITHUB_WORKSPACE || process.cwd());
+const isInside = (root, target) => {
+  const rel = path.relative(root, target);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+};
+
+/** Throws `<input> '<path>' resolves outside the workspace` unless every file's real path is in the workspace. */
+function requireInWorkspace(inputName, files, given = files) {
+  const root = workspaceRoot();
+  const list = Array.isArray(files) ? files : [files];
+  for (const f of list) {
+    if (!isInside(root, fs.realpathSync(f))) throw new Error(`${inputName} '${Array.isArray(given) ? f : given}' resolves outside the workspace`);
+  }
+  return files;
+}
+
+/** Like requireInWorkspace for a directory that may not exist yet: checks its deepest existing ancestor's real path. */
+function requireDirInWorkspace(inputName, given) {
+  const root = workspaceRoot();
+  const target = path.resolve(root, given);
+  let existing = target;
+  while (!fs.existsSync(existing)) existing = path.dirname(existing);
+  const real = path.join(fs.realpathSync(existing), path.relative(existing, target));
+  if (!isInside(root, real)) throw new Error(`${inputName} '${given}' resolves outside the workspace`);
+  return target;
 }
 
 const VARIANT_LABEL = /^[A-Za-z0-9._-]{1,40}$/;
@@ -216,7 +248,8 @@ function variantsDegradation(variants, reference, strict) {
 /** Copies the explicit config file to `<dir>/config/<its own base name>` so errors name the file the user wrote. */
 function stageConfig(file, dir, cwd = process.cwd()) {
   const source = path.resolve(cwd, file);
-  if (!fs.existsSync(source) || !fs.statSync(source).isFile()) throw new Error(`config file not found: ${file}`);
+  if (!isFile(source)) throw new Error(`config file not found: ${file}`);
+  requireInWorkspace('config', source, file);
   const name = path.basename(source).replace(/[^A-Za-z0-9._-]/g, '_');
   fs.mkdirSync(path.join(dir, 'config'), { recursive: true });
   fs.copyFileSync(source, path.join(dir, 'config', name));
@@ -253,8 +286,9 @@ function setOutputs(values) {
   if (!file) return;
   const line = ([k, v]) => {
     const text = String(v);
-    if (!text.includes('\n')) return `${k}=${text}\n`;
-    const delim = `benchdiff_${require('node:crypto').randomBytes(8).toString('hex')}`;
+    if (!/[\r\n]/.test(text)) return `${k}=${text}\n`;
+    let delim;
+    do delim = `benchdiff_${crypto.randomBytes(8).toString('hex')}`; while (text.includes(delim));
     return `${k}<<${delim}\n${text}\n${delim}\n`;
   };
   fs.appendFileSync(file, Object.entries(values).map(line).join(''));
@@ -284,7 +318,7 @@ function clip(body, marker) {
   const cut = body.lastIndexOf('\n', COMMENT_LIMIT);
   const kept = body.slice(0, beforeImageMarkup(body, cut > 0 ? cut : COMMENT_LIMIT));
   // A cut inside <details> would swallow the footer and marker into the collapsed block.
-  const open = Math.max(0, (kept.match(/<details>/g) || []).length - (kept.match(/<\/details>/g) || []).length);
+  const open = Math.max(0, (kept.match(/<details[\s>]/g) || []).length - (kept.match(/<\/details>/g) || []).length);
   const closers = '\n</details>'.repeat(open);
   return `${kept}${closers}\n\n_Report truncated to fit GitHub's comment limit; the job summary has the full text._\n${marker}\n`;
 }
@@ -348,7 +382,8 @@ const MESSAGES = Object.freeze({
 const HOST_LABELS = { fork: 'fork PR', private: 'private repository', permission: 'token lacks contents: write', disabled: 'publish-images is false' };
 
 const isPlaceholderRun = (markdown) => markdown.includes(PLACEHOLDER_SCHEME);
-const logLine = (msg) => process.stdout.write(`${msg}\n`);
+// Chart skip reasons derive from benchmark names; strip anything that could forge a log line or workflow command.
+const logLine = (msg) => process.stdout.write(`${String(msg).replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, '')}\n`);
 const tagOfMarker = (marker) => (/^<!-- benchdiff:(.*) -->$/.exec(marker) || [])[1] || '';
 
 /** Parses the binary's stderr: its own produced/skipped line and the "chart skipped" notices. */
@@ -359,10 +394,16 @@ function chartSummary(stderr, fileCount) {
 }
 
 /** Copies the produced SVGs where upload-artifact can reach them; returns {dir, paths}. */
+const SVG_WARN_BYTES = 102400;
+
 function exposeSvgs(workSvg, names, wanted) {
   if (!names.length) return { dir: '', paths: [] };
+  for (const n of names) {
+    const size = fs.statSync(path.join(workSvg, n)).size;
+    if (size > SVG_WARN_BYTES) warning(`${n} is ${Math.round(size / 1024)} KB (over the 100 KB guideline)`);
+  }
   if (wanted) {
-    const dest = path.resolve(process.env.GITHUB_WORKSPACE || process.cwd(), wanted);
+    const dest = requireDirInWorkspace('svg-dir', wanted);
     try {
       fs.mkdirSync(dest, { recursive: true });
       for (const n of names) fs.copyFileSync(path.join(workSvg, n), path.join(dest, n));
@@ -415,12 +456,15 @@ async function main({ runWasm: run = runWasm, fetchImpl = fetch } = {}) {
   const variantsInput = input('variants');
   if (variantsInput && (input('head') || input('base'))) throw new Error('variants cannot be combined with head/base');
   if (variantsInput && input('base-format')) throw new Error('base-format cannot be combined with variants');
+  const svgDirInput = input('svg-dir');
+  if (svgDirInput) requireDirInWorkspace('svg-dir', svgDirInput);
   const variants = variantsInput ? resolveVariants(parseVariants(variantsInput)) : [];
+  for (const v of variants) if (v.file) requireInWorkspace('variants', v.file, v.path);
   const degraded = variantsInput ? variantsDegradation(variants, input('reference'), parseBoolInput('dimensions-strict', input('dimensions-strict')) === 'true') : undefined;
-  const head = variantsInput ? [] : expand(input('head'));
+  const head = variantsInput ? [] : requireInWorkspace('head', expand(input('head')));
   if (!variantsInput && !head.length) throw new Error(`no head files match ${JSON.stringify(input('head'))}`);
   const basePattern = input('base');
-  const base = basePattern ? expand(basePattern) : [];
+  const base = basePattern ? requireInWorkspace('base', expand(basePattern)) : [];
   if (basePattern && !base.length) warning(`no base files match ${JSON.stringify(basePattern)}; reporting head only`);
 
   const tagInput = input('tag');
@@ -530,7 +574,7 @@ async function main({ runWasm: run = runWasm, fetchImpl = fetch } = {}) {
   if (report.failed) throw new Error(`${report.counts.regressed} benchmark regression(s) exceed the fail-on-regression limit`);
 }
 
-module.exports = { MESSAGES, PERMISSIONS_SNIPPET, publishImages, rewritePlaceholders, expand, resolveOne, parseVariants, resolveVariants, stageVariants, renderNoticeReport, variantsDegradation, runWasm, stage, buildArgs, stageConfig, parseFailOnRegression, validateTag, upsertComment, clip, main };
+module.exports = { MESSAGES, PERMISSIONS_SNIPPET, publishImages, rewritePlaceholders, expand, resolveOne, parseVariants, resolveVariants, stageVariants, renderNoticeReport, variantsDegradation, runWasm, stage, buildArgs, stageConfig, parseFailOnRegression, validateTag, upsertComment, clip, setOutputs, main };
 
 if (require.main === module) {
   main().catch((e) => {
