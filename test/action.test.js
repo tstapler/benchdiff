@@ -1127,3 +1127,40 @@ test('ci_workflow_should_run_wasm_fresh_on_tags_and_pass_event_data_through_env'
   const run = wf.slice(wf.indexOf('touched dist/'));
   assert.ok(!/\$\{\{ github\.(base_ref|event_name) \}\}"/.test(run.split('env:')[1].split('run:')[1]), 'no expressions inside the script');
 });
+
+// ---- compare-by: run through the Action ----
+
+test('buildArgs: any non-empty compare-by omits --head-json (the run is N-way)', () => {
+  for (const compareBy of ['run', 'impl', 'group']) assert.ok(!buildArgs({ ...base, compareBy }).includes('--head-json'), compareBy);
+  assert.ok(buildArgs({ ...base, compareBy: '' }).includes('--head-json'));
+});
+
+test('main_should_not_pass_head_json_and_leave_head_json_path_empty_when_compare_by_is_run', async () => {
+  const s = setup('');
+  s.env['INPUT_COMPARE-BY'] = 'run';
+  const fake = fakeWasm({ svgs: [] });
+  await withEnv(s.env, () => main({ runWasm: fake.run }));
+  assert.ok(!fake.calls[0].args.includes('--head-json'));
+  assert.equal(flagValue(fake.calls[0].args, '--compare-by'), 'run');
+  assert.equal(outputOf(s, 'head-json-path'), '');
+});
+
+test('main_should_fail_the_step_with_the_cli_text_when_compare_by_run_gets_several_files', async () => {
+  const s = setup('');
+  const dir = s.env.GITHUB_WORKSPACE;
+  fs.copyFileSync(path.join(root, 'testdata/golden/head.go.txt'), path.join(dir, 'head2.go.txt'));
+  s.env['INPUT_COMPARE-BY'] = 'run';
+  s.env.INPUT_HEAD = path.join(dir, 'head*.go.txt');
+  await assert.rejects(withEnv(s.env, () => main()), /compare-by 'run' takes one --base and one --head file/);
+});
+
+test('main_should_render_a_base_vs_head_matrix_through_the_real_wasm_when_compare_by_is_run', async () => {
+  const s = setup('');
+  s.env['INPUT_COMPARE-BY'] = 'run';
+  await withEnv(s.env, () => main());
+  const md = fs.readFileSync(path.join(s.env.RUNNER_TEMP, fs.readdirSync(s.env.RUNNER_TEMP).find((n) => n.startsWith('benchdiff-') ) || '', 'report.md'), 'utf8');
+  assert.match(md, /\|[^\n]*\bbase\b[^\n]*\bhead\b[^\n]*\|/);
+  assert.equal(outputOf(s, 'failed'), 'false');
+  assert.equal(outputOf(s, 'head-json-path'), '');
+  for (const k of ['regressed', 'improved', 'unchanged', 'new', 'removed', 'incomparable', 'invalid']) assert.match(outputOf(s, k), /^\d+$/, k);
+});

@@ -69,7 +69,7 @@ Every input below has a CLI flag and a config key of the same kebab-case name, e
 | Input | Default | |
 |---|---|---|
 | `variants` | | N-way input, one `label=path-or-glob` per line; see [N-way comparison](#n-way-comparison) |
-| `compare-by` | | N-way: the dimension to pivot into columns (a dimension name, `group`, or `run`) |
+| `compare-by` | | N-way: the dimension to pivot into columns (a dimension name, `group`, or `run`); `run` columns the `base` and `head` files, and the `head-json-path` output is empty for any N-way run |
 | `group-by` | all but the axis | N-way: comma-separated dimensions that identify a row |
 | `dimensions` | | extra `dim=regex` rules, one per line; see [Dimensions](#dimensions) |
 | `dimensions-strict` | `false` | `true` turns data-dependent dimension notices into exit 2 |

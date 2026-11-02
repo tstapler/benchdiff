@@ -206,8 +206,8 @@ function buildArgs({ head, base, config, format, baseFormat, threshold, minAbs, 
   if (svgEmbed !== undefined) args.push(`--svg-embed=${svgEmbed || 'auto'}`);
   if (publishImages) args.push(`--publish-images=${publishImages}`);
   args.push('--markdown', '/work/report.md', '--json', '/work/report.json');
-  // The binary rejects --head-json with --variant: a matrix has no single head set to cache.
-  if (!variants.length) args.push('--head-json', '/work/head.json');
+  // The binary rejects --head-json for any N-way run (--variant or non-empty --compare-by): a matrix has no single head set to cache.
+  if (!variants.length && !compareBy) args.push('--head-json', '/work/head.json');
   return args;
 }
 
@@ -569,7 +569,7 @@ async function main({ runWasm: run = runWasm, fetchImpl = fetch } = {}) {
     failed: report.failed,
     'report-path': path.join(workDir, 'report.md'),
     'json-path': path.join(workDir, 'report.json'),
-    'head-json-path': variantsInput ? '' : path.join(workDir, 'head.json'),
+    'head-json-path': variantsInput || input('compare-by') ? '' : path.join(workDir, 'head.json'),
     ...chartOutputs,
   });
 
