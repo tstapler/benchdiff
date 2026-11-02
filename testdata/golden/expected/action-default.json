@@ -1,0 +1,341 @@
+{
+  "comment_requests": [
+    "GET /repos/o/r/issues/7/comments",
+    "POST /repos/o/r/issues/7/comments"
+  ],
+  "outputs": {
+    "regressed": "1",
+    "improved": "1",
+    "unchanged": "14",
+    "new": "0",
+    "removed": "0",
+    "failed": "false",
+    "report-path": "report.md",
+    "json-path": "report.json",
+    "head-json-path": "head.json"
+  },
+  "report_path_contents": "<!-- benchdiff:default -->\n### Benchmark comparison\n\n**1 regressed · 1 improved · 14 unchanged · 0 new · 0 removed**\n\n#### `gob`\n\n| Benchmark | Base | Head | Change | Evidence |\n|---|--:|--:|--:|---|\n| `Sort [ns/op]` | 9534 `ns/op` | 12394 `ns/op` | 🔴 +30.0% ▰▰▰▱▱ | p<0.001 (n=8/8) |\n| `Join [ns/op]` | 26.88 `ns/op` | 21.5 `ns/op` | 🟢 -20.0% ▰▰▰▱▱ | p<0.001 (n=8/8) |\n\n<details>\n<summary>14 unchanged</summary>\n\n**`gob`**\n\n| Benchmark | Base | Head | Change | Evidence |\n|---|--:|--:|--:|---|\n| `Sort [B/op]` | 0 `B/op` | 0 `B/op` | ⚪ n/a (base is 0) | p=1.000 (n=8/8) |\n| `Sort [allocs/op]` | 0 `allocs/op` | 0 `allocs/op` | ⚪ n/a (base is 0) | p=1.000 (n=8/8) |\n| `Join [B/op]` | 8 `B/op` | 8 `B/op` | ⚪ 0.0% ▱▱▱▱▱ | p=1.000 (n=8/8) |\n| `Join [allocs/op]` | 1 `allocs/op` | 1 `allocs/op` | ⚪ 0.0% ▱▱▱▱▱ | p=1.000 (n=8/8) |\n| `Throughput [ns/op]` | 224.5 `ns/op` | 224.5 `ns/op` | ⚪ 0.0% ▱▱▱▱▱ | p=1.000 (n=8/8) |\n| `Throughput [MB/s]` | 4562 `MB/s` | 4562 `MB/s` | ⚪ 0.0% ▱▱▱▱▱ | p=1.000 (n=8/8) |\n| `Throughput [B/op]` | 0 `B/op` | 0 `B/op` | ⚪ n/a (base is 0) | p=1.000 (n=8/8) |\n| `Throughput [allocs/op]` | 0 `allocs/op` | 0 `allocs/op` | ⚪ n/a (base is 0) | p=1.000 (n=8/8) |\n| `Sub/n=x0 [ns/op]` | 0.2095 `ns/op` | 0.2095 `ns/op` | ⚪ 0.0% ▱▱▱▱▱ | p=1.000 (n=8/8) |\n| `Sub/n=x0 [B/op]` | 0 `B/op` | 0 `B/op` | ⚪ n/a (base is 0) | p=1.000 (n=8/8) |\n| `Sub/n=x0 [allocs/op]` | 0 `allocs/op` | 0 `allocs/op` | ⚪ n/a (base is 0) | p=1.000 (n=8/8) |\n| `Sub/n=x1 [ns/op]` | 31.66 `ns/op` | 31.66 `ns/op` | ⚪ 0.0% ▱▱▱▱▱ | p=1.000 (n=8/8) |\n| `Sub/n=x1 [B/op]` | 112 `B/op` | 112 `B/op` | ⚪ 0.0% ▱▱▱▱▱ | p=1.000 (n=8/8) |\n| `Sub/n=x1 [allocs/op]` | 1 `allocs/op` | 1 `allocs/op` | ⚪ 0.0% ▱▱▱▱▱ | p=1.000 (n=8/8) |\n\n</details>\n\n<details>\n<summary>Environment</summary>\n\n| | Base | Head |\n|---|---|---|\n| `cpu` | `AMD Ryzen 9 7900X 12-Core Processor` | `AMD Ryzen 9 7900X 12-Core Processor` |\n| `goarch` | `amd64` | `amd64` |\n| `goos` | `linux` | `linux` |\n| `pkg` | `gob` | `gob` |\n\n</details>\n\n<sub>A change counts when it is ≥ 5% and, where the data allows, statistically significant. Judged: 16 by Mann-Whitney U test (α=0.05, ≥4 samples per side).</sub>\n",
+  "json_path_contents": {
+    "counts": {
+      "improved": 1,
+      "incomparable": 0,
+      "invalid": 0,
+      "new": 0,
+      "regressed": 1,
+      "removed": 0,
+      "skipped": 0,
+      "unchanged": 14
+    },
+    "failed": false,
+    "has_base": true,
+    "rows": [
+      {
+        "base": 9534,
+        "better": "lower",
+        "delta_pct": 29.99790224459828,
+        "group": "gob",
+        "head": 12394,
+        "head_range": null,
+        "measure": "ns/op",
+        "method": "mann-whitney",
+        "n_base": 8,
+        "n_head": 8,
+        "name": "Sort",
+        "p_value": 0.0001554001554001554,
+        "unit": "ns/op",
+        "verdict": "regressed"
+      },
+      {
+        "base": 26.884999999999998,
+        "better": "lower",
+        "delta_pct": -20.01115863864608,
+        "group": "gob",
+        "head": 21.505,
+        "head_range": null,
+        "measure": "ns/op",
+        "method": "mann-whitney",
+        "n_base": 8,
+        "n_head": 8,
+        "name": "Join",
+        "p_value": 0.0001554001554001554,
+        "unit": "ns/op",
+        "verdict": "improved"
+      },
+      {
+        "base": 0,
+        "better": "lower",
+        "delta_pct": null,
+        "group": "gob",
+        "head": 0,
+        "head_range": null,
+        "measure": "B/op",
+        "method": "mann-whitney",
+        "n_base": 8,
+        "n_head": 8,
+        "name": "Sort",
+        "p_value": 1,
+        "unit": "B/op",
+        "verdict": "unchanged"
+      },
+      {
+        "base": 0,
+        "better": "lower",
+        "delta_pct": null,
+        "group": "gob",
+        "head": 0,
+        "head_range": null,
+        "measure": "allocs/op",
+        "method": "mann-whitney",
+        "n_base": 8,
+        "n_head": 8,
+        "name": "Sort",
+        "p_value": 1,
+        "unit": "allocs/op",
+        "verdict": "unchanged"
+      },
+      {
+        "base": 8,
+        "better": "lower",
+        "delta_pct": 0,
+        "group": "gob",
+        "head": 8,
+        "head_range": null,
+        "measure": "B/op",
+        "method": "mann-whitney",
+        "n_base": 8,
+        "n_head": 8,
+        "name": "Join",
+        "p_value": 1,
+        "unit": "B/op",
+        "verdict": "unchanged"
+      },
+      {
+        "base": 1,
+        "better": "lower",
+        "delta_pct": 0,
+        "group": "gob",
+        "head": 1,
+        "head_range": null,
+        "measure": "allocs/op",
+        "method": "mann-whitney",
+        "n_base": 8,
+        "n_head": 8,
+        "name": "Join",
+        "p_value": 1,
+        "unit": "allocs/op",
+        "verdict": "unchanged"
+      },
+      {
+        "base": 224.5,
+        "better": "lower",
+        "delta_pct": 0,
+        "group": "gob",
+        "head": 224.5,
+        "head_range": null,
+        "measure": "ns/op",
+        "method": "mann-whitney",
+        "n_base": 8,
+        "n_head": 8,
+        "name": "Throughput",
+        "p_value": 0.9999999699999995,
+        "unit": "ns/op",
+        "verdict": "unchanged"
+      },
+      {
+        "base": 4561.58,
+        "better": "higher",
+        "delta_pct": 0,
+        "group": "gob",
+        "head": 4561.58,
+        "head_range": null,
+        "measure": "MB/s",
+        "method": "mann-whitney",
+        "n_base": 8,
+        "n_head": 8,
+        "name": "Throughput",
+        "p_value": 0.9999999699999995,
+        "unit": "MB/s",
+        "verdict": "unchanged"
+      },
+      {
+        "base": 0,
+        "better": "lower",
+        "delta_pct": null,
+        "group": "gob",
+        "head": 0,
+        "head_range": null,
+        "measure": "B/op",
+        "method": "mann-whitney",
+        "n_base": 8,
+        "n_head": 8,
+        "name": "Throughput",
+        "p_value": 1,
+        "unit": "B/op",
+        "verdict": "unchanged"
+      },
+      {
+        "base": 0,
+        "better": "lower",
+        "delta_pct": null,
+        "group": "gob",
+        "head": 0,
+        "head_range": null,
+        "measure": "allocs/op",
+        "method": "mann-whitney",
+        "n_base": 8,
+        "n_head": 8,
+        "name": "Throughput",
+        "p_value": 1,
+        "unit": "allocs/op",
+        "verdict": "unchanged"
+      },
+      {
+        "base": 0.20950000000000002,
+        "better": "lower",
+        "delta_pct": 0,
+        "group": "gob",
+        "head": 0.20950000000000002,
+        "head_range": null,
+        "measure": "ns/op",
+        "method": "mann-whitney",
+        "n_base": 8,
+        "n_head": 8,
+        "name": "Sub/n=x0",
+        "p_value": 0.9999999699999995,
+        "unit": "ns/op",
+        "verdict": "unchanged"
+      },
+      {
+        "base": 0,
+        "better": "lower",
+        "delta_pct": null,
+        "group": "gob",
+        "head": 0,
+        "head_range": null,
+        "measure": "B/op",
+        "method": "mann-whitney",
+        "n_base": 8,
+        "n_head": 8,
+        "name": "Sub/n=x0",
+        "p_value": 1,
+        "unit": "B/op",
+        "verdict": "unchanged"
+      },
+      {
+        "base": 0,
+        "better": "lower",
+        "delta_pct": null,
+        "group": "gob",
+        "head": 0,
+        "head_range": null,
+        "measure": "allocs/op",
+        "method": "mann-whitney",
+        "n_base": 8,
+        "n_head": 8,
+        "name": "Sub/n=x0",
+        "p_value": 1,
+        "unit": "allocs/op",
+        "verdict": "unchanged"
+      },
+      {
+        "base": 31.665,
+        "better": "lower",
+        "delta_pct": 0,
+        "group": "gob",
+        "head": 31.665,
+        "head_range": null,
+        "measure": "ns/op",
+        "method": "mann-whitney",
+        "n_base": 8,
+        "n_head": 8,
+        "name": "Sub/n=x1",
+        "p_value": 0.9999999699999995,
+        "unit": "ns/op",
+        "verdict": "unchanged"
+      },
+      {
+        "base": 112,
+        "better": "lower",
+        "delta_pct": 0,
+        "group": "gob",
+        "head": 112,
+        "head_range": null,
+        "measure": "B/op",
+        "method": "mann-whitney",
+        "n_base": 8,
+        "n_head": 8,
+        "name": "Sub/n=x1",
+        "p_value": 1,
+        "unit": "B/op",
+        "verdict": "unchanged"
+      },
+      {
+        "base": 1,
+        "better": "lower",
+        "delta_pct": 0,
+        "group": "gob",
+        "head": 1,
+        "head_range": null,
+        "measure": "allocs/op",
+        "method": "mann-whitney",
+        "n_base": 8,
+        "n_head": 8,
+        "name": "Sub/n=x1",
+        "p_value": 1,
+        "unit": "allocs/op",
+        "verdict": "unchanged"
+      }
+    ],
+    "summary": {
+      "alpha": 0.05,
+      "base_env": [
+        [
+          "cpu",
+          "AMD Ryzen 9 7900X 12-Core Processor"
+        ],
+        [
+          "goarch",
+          "amd64"
+        ],
+        [
+          "goos",
+          "linux"
+        ],
+        [
+          "pkg",
+          "gob"
+        ]
+      ],
+      "fail_on_regression_pct": null,
+      "head_env": [
+        [
+          "cpu",
+          "AMD Ryzen 9 7900X 12-Core Processor"
+        ],
+        [
+          "goarch",
+          "amd64"
+        ],
+        [
+          "goos",
+          "linux"
+        ],
+        [
+          "pkg",
+          "gob"
+        ]
+      ],
+      "max_rows": null,
+      "min_abs": 0,
+      "only_changed": false,
+      "skipped_base": [],
+      "skipped_base_total": 0,
+      "skipped_head": [],
+      "skipped_head_total": 0,
+      "tag": "default",
+      "threshold_pct": 5,
+      "title": "Benchmark comparison",
+      "use_stats": true
+    }
+  }
+}

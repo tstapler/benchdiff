@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { runWasm, stage, expand, upsertComment, clip } = require('../index.js');
+const { runWasm, stage, expand, upsertComment, clip, main } = require('../index.js');
 
 const root = path.resolve(__dirname, '..');
 const native = process.env.BENCHDIFF_NATIVE || path.join(root, 'target', 'release', 'benchdiff');
@@ -94,6 +94,102 @@ for (const [name, c] of Object.entries(cases)) {
     if (c.check) c.check(JSON.parse(fs.readFileSync(path.join(wasmDir, 'report.json'), 'utf8')));
   });
 }
+
+// Frozen outputs in testdata/golden/expected (UPDATE_GOLDEN=1 rewrites them; review the diff as a
+// behaviour change). Same 15 CLI cases as crates/benchdiff/tests/golden_expected.rs.
+const expectedDir = td('golden', 'expected');
+const update = !!process.env.UPDATE_GOLDEN;
+const GH = td('golden/head.go.txt');
+const GB = td('golden/base.go.txt');
+const optionCase = (extra) => ({ head: GH, base: GB, extra });
+const sameFile = (file, format) => ({ head: td(file), base: td(file), extra: ['--format', format] });
+const expectedCases = {
+  default: optionCase([]),
+  json: optionCase(['--format', 'go']),
+  'only-changed': optionCase(['--only-changed']),
+  'max-rows-2': optionCase(['--max-rows', '2']),
+  'sort-name': optionCase(['--sort', 'name']),
+  'threshold-1-min-abs-5': optionCase(['--threshold', '1', '--min-abs', '5']),
+  'native-base': sameFile('benchdiff/native.json', 'benchdiff'),
+  'importer-bmf': sameFile('bmf/bmf.json', 'bmf'),
+  'importer-cargo-bench': sameFile('cargo-bench/bench.txt', 'cargo-bench'),
+  'importer-criterion': sameFile('criterion/criterion.jsonl', 'criterion'),
+  'importer-gab-smaller': sameFile('gab/custom.json', 'gab-smaller'),
+  'importer-gab-bigger': sameFile('gab/custom.json', 'gab-bigger'),
+  'importer-googlebench': sameFile('googlebench/googlebench.json', 'googlebench'),
+  'importer-hyperfine': sameFile('hyperfine/hyperfine.json', 'hyperfine'),
+  'importer-jmh': sameFile('jmh/jmh.json', 'jmh'),
+};
+
+function assertGolden(name, ext, actual) {
+  const file = path.join(expectedDir, `${name}.${ext}`);
+  if (update) fs.writeFileSync(file, actual);
+  else assert.equal(actual, fs.readFileSync(file, 'utf8'), `case \`${name}\`: ${name}.${ext} differs from testdata/golden/expected (UPDATE_GOLDEN=1 to refresh)`);
+}
+
+for (const [name, c] of Object.entries(expectedCases)) {
+  const outputs = (dir, prefix) => ['--markdown', `${prefix}report.md`, '--json', `${prefix}report.json`];
+  test(`wasm matches expected files: ${name}`, async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-exp-wasm-'));
+    const [head] = stage([c.head], dir, 'head');
+    const [base] = stage([c.base], dir, 'base');
+    const r = await runWasm(['--head', head, '--base', base, ...c.extra, ...outputs(dir, '/work/')], dir);
+    assert.equal(r.code, 0, r.stderr);
+    assertGolden(name, 'md', fs.readFileSync(path.join(dir, 'report.md'), 'utf8'));
+    assertGolden(name, 'json', fs.readFileSync(path.join(dir, 'report.json'), 'utf8'));
+  });
+  test(`native matches expected files: ${name}`, () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-exp-native-'));
+    const code = runNative(['--head', c.head, '--base', c.base, ...c.extra, ...outputs(dir, `${dir}/`)], root);
+    assert.equal(code, 0);
+    assertGolden(name, 'md', fs.readFileSync(path.join(dir, 'report.md'), 'utf8'));
+    assertGolden(name, 'json', fs.readFileSync(path.join(dir, 'report.json'), 'utf8'));
+  });
+}
+
+// Action level: main() through the real wasm with default inputs and a mocked GitHub API.
+// action-default.md is the sticky-comment body; action-default.json holds everything else observable.
+test('action-default: main() comment body, report files and outputs match expected files', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-action-'));
+  const eventPath = path.join(dir, 'event.json');
+  fs.writeFileSync(eventPath, JSON.stringify({ pull_request: { number: 7 } }));
+  const outputFile = path.join(dir, 'output');
+  const vars = {
+    INPUT_HEAD: GH, INPUT_BASE: GB, 'INPUT_GITHUB-TOKEN': 't',
+    GITHUB_OUTPUT: outputFile, RUNNER_TEMP: dir, GITHUB_EVENT_PATH: eventPath,
+    GITHUB_REPOSITORY: 'o/r', GITHUB_API_URL: 'https://api.test',
+  };
+  const saved = { env: { ...process.env }, fetch: globalThis.fetch };
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    const key = `${init.method || 'GET'} ${new URL(url).pathname}`;
+    calls.push({ key, body: init.body });
+    const json = key.startsWith('GET') ? [] : { id: 1 };
+    return { ok: true, status: key.startsWith('GET') ? 200 : 201, json: async () => json };
+  };
+  Object.assign(process.env, vars);
+  try {
+    await main();
+  } finally {
+    globalThis.fetch = saved.fetch;
+    for (const k of Object.keys(process.env)) if (!(k in saved.env)) delete process.env[k];
+    Object.assign(process.env, saved.env);
+  }
+  const outputs = Object.fromEntries(fs.readFileSync(outputFile, 'utf8').split('\n').filter(Boolean).map((l) => l.split('=')));
+  const reportPath = outputs['report-path'];
+  const jsonPath = outputs['json-path'];
+  const post = calls.find((c) => c.key.startsWith('POST'));
+  assert.ok(post, 'main() did not post a comment');
+  const commentBody = JSON.parse(post.body).body;
+  const observed = {
+    comment_requests: calls.map((c) => c.key),
+    outputs: Object.fromEntries(Object.entries(outputs).map(([k, v]) => [k, k.endsWith('-path') ? path.basename(v) : v])),
+    report_path_contents: fs.readFileSync(reportPath, 'utf8'),
+    json_path_contents: JSON.parse(fs.readFileSync(jsonPath, 'utf8')),
+  };
+  assertGolden('action-default', 'md', commentBody);
+  assertGolden('action-default', 'json', `${JSON.stringify(observed, null, 2)}\n`);
+});
 
 test('wasm reports a usage error with exit code 2 and a message', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-wasm-'));
