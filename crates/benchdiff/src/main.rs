@@ -102,6 +102,9 @@ struct Effective {
     format: Format,
     base_format: Option<Format>,
     sources: Vec<(String, String, &'static str)>,
+    /// Chart-setting layers for `--print-config` only; kept out of `sources` so reports'
+    /// "config sources" lists stay unchanged.
+    svg_sources: Vec<(&'static str, &'static str)>,
     file_overrides_set: bool,
     svg: SvgOptions,
     svg_dir: Option<String>,
@@ -145,6 +148,14 @@ impl Args {
         let mut matrix = MatrixOptions::default();
         matrix_overlay.apply(&mut matrix);
         self.check_run_shape(&options, &matrix)?;
+        let mut svg_sources = vec![];
+        for key in SVG_KEYS {
+            if svg_key_set(&self.svg_flags, key) {
+                svg_sources.push((key, "flag"));
+            } else if svg_key_set(&svg_overlay, key) {
+                svg_sources.push((key, "config"));
+            }
+        }
         let svg_overlay = svg_overlay.merge(self.svg_flags.clone());
         let mut svg = SvgOptions::default();
         svg_overlay.apply(&mut svg);
@@ -175,6 +186,7 @@ impl Args {
             format: self.format.or(format).unwrap_or(Format::Auto),
             base_format: self.base_format.or(base_format),
             sources,
+            svg_sources,
             file_overrides_set,
             svg,
             svg_dir: svg_overlay.svg_dir,
@@ -228,6 +240,29 @@ const SETTING_KEYS: [&str; 17] = [
     "correction",
     "cell-format",
 ];
+
+const SVG_KEYS: [&str; 7] = [
+    "charts",
+    "chart-rows",
+    "chart-width",
+    "chart-theme",
+    "svg-embed",
+    "publish-images",
+    "svg-dir",
+];
+
+fn svg_key_set(o: &SvgOptionsOverlay, key: &str) -> bool {
+    match key {
+        "charts" => o.kinds.is_some(),
+        "chart-rows" => o.rows.is_some(),
+        "chart-width" => o.width.is_some(),
+        "chart-theme" => o.theme.is_some(),
+        "svg-embed" => o.embed.is_some(),
+        "publish-images" => o.publish_images.is_some(),
+        "svg-dir" => o.svg_dir.is_some(),
+        _ => false,
+    }
+}
 
 /// The config-governed settings a layer sets, as display text.
 fn layer_values(
@@ -328,6 +363,10 @@ fn print_config(args: &Args, eff: &Effective) -> String {
     if eff.file_overrides_set {
         sources.insert("thresholds".into(), "config".into());
     }
+    for (key, layer) in &eff.svg_sources {
+        sources.insert((*key).into(), (*layer).into());
+    }
+    let svg = &eff.svg;
     let config = json!({
         "threshold": o.threshold_pct,
         "thresholds": o.threshold_overrides,
@@ -350,6 +389,17 @@ fn print_config(args: &Args, eff: &Effective) -> String {
         },
         "correction": eff.matrix.correction,
         "cell-format": eff.matrix.cell_format,
+        "charts": if svg.kinds.is_empty() {
+            "none".to_string()
+        } else {
+            svg.kinds.iter().map(|k| k.name()).collect::<Vec<_>>().join(",")
+        },
+        "chart-rows": svg.rows.get(),
+        "chart-width": svg.width.get(),
+        "chart-theme": format!("{:?}", svg.theme).to_lowercase(),
+        "svg-embed": svg.embed == benchdiff_core::svg::EmbedMode::On,
+        "publish-images": svg.publish_images,
+        "svg-dir": eff.svg_dir,
     });
     let out = json!({"config-file": args.config, "config": config, "sources": sources});
     format!("{out:#}\n")

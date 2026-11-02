@@ -75,6 +75,26 @@ fn print_config_should_list_defaults_without_sources_when_no_config() {
 }
 
 #[test]
+fn print_config_should_show_chart_keys_with_config_and_flag_sources() {
+    let c = config_file(
+        "charts",
+        "c.json",
+        r#"{"version":1,"charts":"delta,ranking","chart-rows":12,"svg-embed":"true"}"#,
+    );
+    let v = print_config(&["--config", &c, "--chart-rows", "7", "--svg-dir", "out"]);
+    assert_eq!(v["config"]["charts"], "delta,ranking");
+    assert_eq!(v["config"]["chart-rows"], 7);
+    assert_eq!(v["config"]["chart-width"], 760);
+    assert_eq!(v["config"]["chart-theme"], "light");
+    assert_eq!(v["config"]["svg-embed"], true);
+    assert_eq!(v["config"]["svg-dir"], "out");
+    assert_eq!(
+        v["sources"],
+        serde_json::json!({"charts": "config", "chart-rows": "flag", "svg-embed": "config", "svg-dir": "flag"})
+    );
+}
+
+#[test]
 fn print_config_should_not_render_a_report_or_need_head() {
     let out = run(&["--print-config", "--head", HEAD, "--base", BASE]);
     assert!(out.status.success());

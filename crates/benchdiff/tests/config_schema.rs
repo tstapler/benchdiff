@@ -425,7 +425,6 @@ fn starter_example_should_render_matrix_on_nway_impl() {
 /// `charts`, `chart-rows`, `chart-width`, `chart-theme` and `svg-embed` from both `config` and
 /// `sources`, although the file sets them and the run honours them.
 #[test]
-#[ignore = "print-config omits the chart/svg-embed keys (crates/benchdiff/src/main.rs print_config)"]
 fn starter_example_print_config_should_source_chart_keys_from_config() {
     let out = run_example(&["--print-config"]);
     let v: Value = serde_json::from_slice(&out.stdout).unwrap();
