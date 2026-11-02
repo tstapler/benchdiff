@@ -21,6 +21,10 @@ mod units;
 pub use compare::{compare, Method, Options, Report, Row, Sort, Summary, Verdict};
 pub use import::{detect, parse, Format};
 pub use markdown::{marker, render_markdown};
+pub use matrix::{
+    compare_matrix, matrix_failed, matrix_failures, Cell, Comparison, FailedCell, FailureKind,
+    MatrixOptions, MatrixReport, MatrixRow, MatrixSummary, Variant, VariantLabel,
+};
 pub use model::{Better, Metric, MetricSet};
 
 /// The machine-readable report: every row, the settings, and the verdict counts.
@@ -43,6 +47,110 @@ pub fn render_json(report: &Report) -> String {
         "rows": report.rows,
     });
     serde_json::to_string_pretty(&value).expect("report serializes")
+}
+
+/// Verdict-count keys of the companion `counts`, matching [`render_json`].
+#[derive(Default)]
+struct CellCounts {
+    regressed: usize,
+    improved: usize,
+    unchanged: usize,
+    new: usize,
+    removed: usize,
+    incomparable: usize,
+    invalid: usize,
+}
+
+impl CellCounts {
+    fn add(&mut self, cell: &Cell, reference_present: bool) {
+        match cell {
+            Cell::Missing if reference_present => self.removed += 1,
+            Cell::Missing => {}
+            Cell::Present(p) => match &p.vs_reference {
+                Comparison::Compared { verdict, .. } => match verdict {
+                    Verdict::Regressed => self.regressed += 1,
+                    Verdict::Improved => self.improved += 1,
+                    _ => self.unchanged += 1,
+                },
+                Comparison::Incomparable(_) | Comparison::DirectionMismatch => {
+                    self.incomparable += 1
+                }
+                Comparison::Invalid(_) => self.invalid += 1,
+                Comparison::NoReference => self.new += 1,
+                Comparison::Reference => {}
+            },
+        }
+    }
+
+    fn to_json(&self, skipped: usize) -> serde_json::Value {
+        serde_json::json!({
+            "regressed": self.regressed,
+            "improved": self.improved,
+            "unchanged": self.unchanged,
+            "new": self.new,
+            "removed": self.removed,
+            "incomparable": self.incomparable,
+            "invalid": self.invalid,
+            "skipped": skipped,
+        })
+    }
+}
+
+/// The two-way JSON shape for an N-way run, plus an additive `matrix` key (schema stays 1).
+///
+/// Top-level `counts` are cells versus the reference after the Holm pass; `failed` is
+/// [`matrix_failed`] for `gate` (`fail-on-regression`); `rows` is empty. A Missing cell in a
+/// row the reference lacks has no verdict and is left out of the companion counts.
+pub fn render_json_with_matrix(report: &MatrixReport, gate: Option<f64>) -> String {
+    let ref_col = report
+        .summary
+        .reference
+        .as_ref()
+        .and_then(|r| report.columns.iter().position(|c| c.as_str() == r.label))
+        .unwrap_or(0);
+    let mut total = CellCounts::default();
+    let mut per_variant: Vec<CellCounts> = report
+        .columns
+        .iter()
+        .map(|_| CellCounts::default())
+        .collect();
+    for row in &report.rows {
+        let reference_present = matches!(row.cells.get(ref_col), Some(Cell::Present(_)));
+        for (col, cell) in row.cells.iter().enumerate().filter(|(c, _)| *c != ref_col) {
+            total.add(cell, reference_present);
+            per_variant[col].add(cell, reference_present);
+        }
+    }
+    let skipped: usize = report.summary.skipped.iter().map(|s| s.total).sum();
+    let breakdown: Vec<serde_json::Value> = report
+        .columns
+        .iter()
+        .enumerate()
+        .filter(|(c, _)| *c != ref_col)
+        .map(|(c, label)| {
+            let mut v = per_variant[c].to_json(0);
+            v["label"] = label.as_str().into();
+            v.as_object_mut().expect("object").remove("skipped");
+            v
+        })
+        .collect();
+    let value = serde_json::json!({
+        "schema": 1,
+        "counts": total.to_json(skipped),
+        "failed": matrix_failed(report, gate),
+        "has_base": true,
+        "rows": [],
+        "matrix": {
+            "summary": report.summary,
+            "reference": report.summary.reference,
+            "columns": report.columns,
+            "rows": report.rows,
+            "reference_absent": report.reference_absent,
+            "geomean": report.geomean,
+            "counts": breakdown,
+        },
+    });
+    serde_json::to_string_pretty(&value).expect("matrix report serializes")
 }
 
 #[cfg(test)]

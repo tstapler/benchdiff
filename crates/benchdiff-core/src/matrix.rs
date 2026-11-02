@@ -750,22 +750,59 @@ fn comparison_verdict(c: &Comparison) -> Option<Verdict> {
     }
 }
 
-/// The regression gate: `gate` is `fail-on-regression`. Without it nothing fails; with it, a
-/// `Regressed` cell of at least that many percent or any `Invalid` cell does. Requiring an
-/// explicit reference is the option validator's job (2.2.2a), not this function's.
-pub fn matrix_failed(report: &MatrixReport, gate: Option<f64>) -> bool {
+/// Why a cell trips the regression gate.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FailureKind {
+    /// Significantly slower than the reference by `pct` percent (`None`: reference value zero).
+    Regressed {
+        pct: Option<f64>,
+    },
+    Invalid,
+}
+
+/// One cell that trips the gate.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FailedCell {
+    pub variant: String,
+    pub row: String,
+    pub kind: FailureKind,
+}
+
+/// Cells that trip the regression gate, in table order. `gate` is `fail-on-regression`: without
+/// it nothing fails; with it, a `Regressed` cell of at least that many percent or any `Invalid`
+/// cell does. Requiring an explicit reference is the option validator's job (2.2.2a).
+pub fn matrix_failures(report: &MatrixReport, gate: Option<f64>) -> Vec<FailedCell> {
     let Some(limit) = gate else {
-        return false;
+        return Vec::new();
     };
-    report.comparisons().any(|(_, c)| match c {
-        Comparison::Invalid(_) => true,
-        Comparison::Compared {
-            verdict: Verdict::Regressed,
-            delta,
-            ..
-        } => delta.is_none_or(|d| d.abs() >= limit),
-        _ => false,
-    })
+    let mut out = Vec::new();
+    for row in &report.rows {
+        for (col, cell) in row.cells.iter().enumerate() {
+            let Cell::Present(p) = cell else { continue };
+            let kind = match &p.vs_reference {
+                Comparison::Invalid(_) => FailureKind::Invalid,
+                Comparison::Compared {
+                    verdict: Verdict::Regressed,
+                    delta,
+                    ..
+                } if delta.is_none_or(|d| d.abs() >= limit) => {
+                    FailureKind::Regressed { pct: *delta }
+                }
+                _ => continue,
+            };
+            out.push(FailedCell {
+                variant: report.columns[col].to_string(),
+                row: row.label(),
+                kind,
+            });
+        }
+    }
+    out
+}
+
+/// The regression gate verdict: `!matrix_failures(..).is_empty()`.
+pub fn matrix_failed(report: &MatrixReport, gate: Option<f64>) -> bool {
+    !matrix_failures(report, gate).is_empty()
 }
 
 fn labels_text(variants: &[Variant]) -> String {
