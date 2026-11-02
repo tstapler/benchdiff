@@ -10,6 +10,7 @@ use crate::dimensioned::Dimensioned;
 use crate::dimensions::{axis_value, row_dims, GROUP_AXIS, MEASURE_AXIS};
 use crate::model::{Better, Dims, Metric, MetricSet, SkippedKey};
 use crate::notice::{Notice, NoticeClass};
+use crate::stats;
 use crate::units;
 
 /// Most benchmark names listed in a "no such dimension" notice.
@@ -282,7 +283,7 @@ pub enum CellFormat {
     Ratio,
 }
 
-/// Multiple-comparison correction across one row's cells (ADR-002; logic lands in 2.1.4a).
+/// Multiple-comparison correction across one row's cells (ADR-002; applied by `compare_matrix`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Correction {
@@ -370,7 +371,8 @@ pub enum Comparison {
         delta: Option<f64>,
         method: Option<Method>,
         p_value: Option<f64>,
-        /// Filled by the Holm post-pass (2.1.4a); `None` until then.
+        /// Set by the Holm post-pass for cells with a p-value; `None` otherwise or under
+        /// `Correction::None`.
         p_adjusted: Option<PAdjusted>,
     },
     Incomparable(Reason),
@@ -425,6 +427,12 @@ impl MatrixRow {
         }
         let dims: Vec<String> = self.dims.iter().map(|(k, v)| format!("{k}={v}")).collect();
         format!("{} [{}]", self.name, dims.join(", "))
+    }
+
+    /// The Holm family size `m`: cells whose Mann-Whitney test ran (they carry a p-value),
+    /// whether or not the threshold floor then suppressed them. Rendered as `(m=..)`.
+    pub fn holm_m(&self) -> usize {
+        self.cells.iter().filter(|c| tested_p(c).is_some()).count()
     }
 }
 
@@ -506,6 +514,46 @@ impl MatrixReport {
         self.comparisons()
             .filter(|(c, cmp)| *c == col && matches!(cmp, Comparison::Invalid(_)))
             .count()
+    }
+}
+
+fn tested_p(cell: &Cell) -> Option<f64> {
+    match cell {
+        Cell::Present(PresentCell {
+            vs_reference: Comparison::Compared {
+                p_value: Some(p), ..
+            },
+            ..
+        }) => Some(*p),
+        _ => None,
+    }
+}
+
+/// Per-row Holm pass (ADR-002). Downgrade-only: a significant cell whose adjusted p reaches
+/// `alpha` becomes `Unchanged`; the raw p-value stays and `p_adjusted` is filled.
+fn apply_holm(row: &mut MatrixRow, alpha: f64) {
+    let raw: Vec<f64> = row.cells.iter().filter_map(tested_p).collect();
+    let mut adjusted = stats::holm_adjust(&raw).into_iter();
+    for cell in &mut row.cells {
+        if tested_p(cell).is_none() {
+            continue;
+        }
+        let adj = adjusted.next().expect("one adjusted p per tested cell");
+        if let Cell::Present(PresentCell {
+            vs_reference:
+                Comparison::Compared {
+                    verdict,
+                    p_adjusted,
+                    ..
+                },
+            ..
+        }) = cell
+        {
+            *p_adjusted = Some(PAdjusted::new(adj));
+            if matches!(verdict, Verdict::Regressed | Verdict::Improved) && adj >= alpha {
+                *verdict = Verdict::Unchanged;
+            }
+        }
     }
 }
 
@@ -702,6 +750,10 @@ pub fn compare_matrix(variants: &[Variant], opts: &Options, mopts: &MatrixOption
         .filter(|r| matches!(r.cells[ref_col], Cell::Missing))
         .map(MatrixRow::label)
         .collect();
+    if mopts.correction == Correction::Holm {
+        // Before sorting and before any aggregate, so all of them see post-Holm verdicts.
+        rows.iter_mut().for_each(|r| apply_holm(r, opts.alpha));
+    }
     sort_matrix_rows(&mut rows, mopts.sort, ref_col);
     MatrixReport {
         summary,
@@ -1235,7 +1287,7 @@ mod tests {
         {
             assert_eq!(*method, Some(crate::Method::MannWhitney));
             assert!(p_value.is_some());
-            assert!(p_adjusted.is_none());
+            assert!(p_adjusted.unwrap().get() >= p_value.unwrap());
         }
         assert_eq!(row.ranking, [2, 0, 1]);
     }
@@ -1651,5 +1703,180 @@ mod tests {
         assert_eq!(PAdjusted::new(-0.2).get(), 0.0);
         assert_eq!(PAdjusted::new(f64::NAN).get(), 1.0);
         assert_eq!(PAdjusted::new(0.06).get(), 0.06);
+    }
+
+    // ---- Holm post-pass ----
+
+    fn tested(verdict: Verdict, p: f64) -> Cell {
+        present(
+            100.0,
+            Samples::default(),
+            Comparison::Compared {
+                verdict,
+                delta: Some(30.0),
+                method: Some(Method::MannWhitney),
+                p_value: Some(p),
+                p_adjusted: None,
+            },
+        )
+    }
+
+    fn row_of(cells: Vec<Cell>) -> MatrixRow {
+        MatrixRow {
+            group: String::new(),
+            name: "Sort".into(),
+            measure: String::new(),
+            unit: "ns".into(),
+            better: Better::Lower,
+            dims: Dims::default(),
+            cells,
+            ranking: Vec::new(),
+        }
+    }
+
+    fn outcome(cell: &Cell) -> (Verdict, Option<f64>, Option<f64>) {
+        match cell {
+            Cell::Present(PresentCell {
+                vs_reference:
+                    Comparison::Compared {
+                        verdict,
+                        p_value,
+                        p_adjusted,
+                        ..
+                    },
+                ..
+            }) => (*verdict, *p_value, p_adjusted.map(PAdjusted::get)),
+            other => panic!("not compared: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn holm_pass_should_only_downgrade_and_use_m_equal_cells_with_pvalue_when_floor_suppressed_cell(
+    ) {
+        let reference = present(100.0, Samples::default(), Comparison::Reference);
+        let interval = present(
+            100.0,
+            Samples::default(),
+            Comparison::Compared {
+                verdict: Verdict::Regressed,
+                delta: Some(30.0),
+                method: Some(Method::Interval),
+                p_value: None,
+                p_adjusted: None,
+            },
+        );
+        let mut row = row_of(vec![
+            reference,
+            tested(Verdict::Regressed, 0.01),
+            tested(Verdict::Regressed, 0.04),
+            tested(Verdict::Unchanged, 0.03),
+            interval,
+        ]);
+        assert_eq!(row.holm_m(), 3);
+        apply_holm(&mut row, 0.05);
+        assert_eq!(
+            outcome(&row.cells[1]),
+            (Verdict::Regressed, Some(0.01), Some(0.03))
+        );
+        let (v, p, adj) = outcome(&row.cells[2]);
+        assert_eq!((v, p), (Verdict::Unchanged, Some(0.04)));
+        assert!((adj.unwrap() - 0.06).abs() < 1e-12);
+        let (v, _, adj) = outcome(&row.cells[3]);
+        assert_eq!(v, Verdict::Unchanged);
+        assert!((adj.unwrap() - 0.06).abs() < 1e-12);
+        assert_eq!(outcome(&row.cells[4]), (Verdict::Regressed, None, None));
+        assert_eq!(row.holm_m(), 3);
+    }
+
+    #[test]
+    fn holm_pass_should_be_identity_when_single_variant() {
+        let mut row = row_of(vec![
+            present(100.0, Samples::default(), Comparison::Reference),
+            tested(Verdict::Regressed, 0.04),
+        ]);
+        apply_holm(&mut row, 0.05);
+        assert_eq!(
+            outcome(&row.cells[1]),
+            (Verdict::Regressed, Some(0.04), Some(0.04))
+        );
+    }
+
+    /// 4 vs 4 fully separated is the smallest sample that can test: exact p = 2/70 = 0.0286.
+    fn separated(label: &str, base: f64) -> Variant {
+        let mut m = Metric::new("", "Sort", "", "ns", base + 1.5, Better::Lower);
+        m.samples = (0..4).map(|k| base + k as f64).collect();
+        Variant {
+            label: VariantLabel::parse(label).unwrap(),
+            set: MetricSet {
+                metrics: vec![m],
+                ..Default::default()
+            },
+        }
+    }
+
+    fn two_regressions() -> Vec<Variant> {
+        vec![
+            separated("quick", 100.0),
+            separated("heap", 130.0),
+            separated("merge", 140.0),
+        ]
+    }
+
+    #[test]
+    fn counts_geomean_and_matrix_failed_should_use_post_holm_verdicts_when_cell_downgraded() {
+        let opts = Options::default();
+        let holm = compare_matrix(&two_regressions(), &opts, &mopts());
+        for cell in &holm.rows[0].cells[1..] {
+            let (v, p, adj) = outcome(cell);
+            assert_eq!(v, Verdict::Unchanged);
+            assert!((p.unwrap() - 2.0 / 70.0).abs() < 1e-9);
+            assert!((adj.unwrap() - 4.0 / 70.0).abs() < 1e-9);
+        }
+        assert_eq!(holm.rows[0].holm_m(), 2);
+        assert_eq!(holm.count(Verdict::Regressed), 0);
+        assert_eq!(holm.count(Verdict::Unchanged), 2);
+        assert!(!matrix_failed(&holm, Some(10.0)));
+
+        let none = MatrixOptions {
+            correction: Correction::None,
+            ..mopts()
+        };
+        let raw = compare_matrix(&two_regressions(), &opts, &none);
+        assert_eq!(raw.count(Verdict::Regressed), 2);
+        assert!(matrix_failed(&raw, Some(10.0)));
+        assert_eq!(outcome(&raw.rows[0].cells[1]).2, None);
+    }
+
+    #[test]
+    fn matrix_should_not_fail_when_300_identical_distribution_rows() {
+        let mut seed = 42u64;
+        let mut next = move || {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let mut variants: Vec<Variant> = ["a", "b", "c"]
+            .iter()
+            .map(|l| Variant {
+                label: VariantLabel::parse(l).unwrap(),
+                set: MetricSet::default(),
+            })
+            .collect();
+        for row in 0..300 {
+            for v in &mut variants {
+                let mut m = Metric::new("", &format!("B{row}"), "", "ns", 100.0, Better::Lower);
+                // Within +-2% of 100, so no median pair differs by the default 5%.
+                m.samples = (0..10)
+                    .map(|_| 100.0 * (1.0 + 0.04 * (next() - 0.5)))
+                    .collect();
+                m.value = crate::stats::median(&m.samples);
+                v.set.metrics.push(m);
+            }
+        }
+        let r = compare_matrix(&variants, &Options::default(), &mopts());
+        assert_eq!(r.rows.len(), 300);
+        assert_eq!(r.count(Verdict::Regressed), 0);
+        assert!(!matrix_failed(&r, Some(5.0)));
     }
 }
