@@ -2,9 +2,14 @@
 # directly because a Homebrew rustc earlier on PATH has no wasm32-wasip1 standard library.
 RUSTUP_BIN := $(HOME)/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin
 
-.PHONY: test wasm golden ready wasm-size wasm-fresh
+.PHONY: test perf wasm golden ready wasm-size wasm-fresh
 test:
 	cargo test --workspace
+
+# Perf budgets are #[ignore]d in the debug `make test`; they only mean something in release mode.
+perf:
+	cargo test --release -p benchdiff-core --test perf --test nway_scale -- --include-ignored --nocapture
+	node --disable-warning=ExperimentalWarning --test test/perf.test.js
 
 WASM ?= dist/benchdiff.wasm
 WASM_RUSTFLAGS := --remap-path-prefix=$(HOME)=/build --remap-path-prefix=$(CURDIR)=/src
