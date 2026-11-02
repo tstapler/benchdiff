@@ -37,12 +37,37 @@ fn run_case(name: &str, args: &[&str]) {
         if std::env::var_os("UPDATE_GOLDEN").is_some() {
             std::fs::write(&want, &got).unwrap();
         } else {
-            let frozen = std::fs::read_to_string(&want)
-                .unwrap_or_else(|e| panic!("case `{name}`: {}: {e}", want.display()));
-            assert!(frozen == got, "case `{name}`: {name}.{ext} differs from testdata/golden/expected (UPDATE_GOLDEN=1 to refresh)");
+            if let Err(msg) = compare_golden(name, ext, &got, &want) {
+                panic!("{msg}");
+            }
         }
     }
     let _ = std::fs::remove_dir_all(out);
+}
+
+/// Compares `got` with the frozen file `want`; the error names the case.
+fn compare_golden(name: &str, ext: &str, got: &str, want: &Path) -> Result<(), String> {
+    let frozen = std::fs::read_to_string(want)
+        .map_err(|e| format!("case `{name}`: {}: {e}", want.display()))?;
+    if frozen == got {
+        Ok(())
+    } else {
+        Err(format!("case `{name}`: {name}.{ext} differs from testdata/golden/expected (UPDATE_GOLDEN=1 to refresh)"))
+    }
+}
+
+#[test]
+fn golden_should_fail_naming_case_when_markdown_header_mutated() {
+    let want = root().join("testdata/golden/expected/default.md");
+    let frozen = std::fs::read_to_string(&want).unwrap();
+    let dir = std::env::temp_dir().join(format!("bd-golden-mutated-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mutated = dir.join("default.md");
+    std::fs::write(&mutated, frozen.replacen("### ", "## ", 1)).unwrap();
+    let err = compare_golden("default", "md", &frozen, &mutated).unwrap_err();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(err.contains("`default`"), "{err}");
+    assert!(compare_golden("default", "md", &frozen, &want).is_ok());
 }
 
 const HEAD: &str = "testdata/golden/head.go.txt";

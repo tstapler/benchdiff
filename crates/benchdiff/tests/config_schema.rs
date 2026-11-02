@@ -311,6 +311,34 @@ fn example_exercises_the_binary() {
 }
 
 #[test]
+fn starter_example_should_fail_with_line_and_column_when_regex_backslash_not_doubled() {
+    let text = std::fs::read_to_string(root().join("examples/benchdiff.config.json")).unwrap();
+    assert!(
+        text.contains(r"\\d+"),
+        "starter example must double the backslash"
+    );
+    let broken = text.replacen(r"\\d+", r"\d+", 1);
+    let dir = std::env::temp_dir().join(format!("bd-cfg-backslash-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("benchdiff.config.json");
+    std::fs::write(&file, broken).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_benchdiff"))
+        .current_dir(root())
+        .arg("--config")
+        .arg(&file)
+        .arg("--print-config")
+        .output()
+        .unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("line ") && stderr.contains("column "),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn unknown_key_fails_schema_and_parser() {
     let mut ex = example();
     ex["chart-row"] = json!(10);
