@@ -35,6 +35,56 @@ function expand(patterns, cwd = process.cwd()) {
   return files;
 }
 
+/** One pattern (no `,`/newline splitting) -> existing files, sorted by path. */
+function resolveOne(pattern, cwd = process.cwd()) {
+  const direct = path.resolve(cwd, pattern);
+  if (fs.existsSync(direct) && fs.statSync(direct).isFile()) return [direct];
+  return fs.globSync(pattern, { cwd }).map((m) => path.resolve(cwd, m)).filter((m) => fs.statSync(m).isFile()).sort();
+}
+
+const VARIANT_LABEL = /^[A-Za-z0-9._-]{1,40}$/;
+
+/** `label=path-or-glob` lines (newline-separated, split at the FIRST `=`) -> [{label, path}]. Static errors throw. */
+function parseVariants(text) {
+  const variants = [];
+  String(text ?? '').split('\n').forEach((raw, i) => {
+    const line = raw.trim();
+    if (!line) return;
+    const eq = line.indexOf('=');
+    const label = eq < 0 ? '' : line.slice(0, eq).trim();
+    const p = eq < 0 ? '' : line.slice(eq + 1).trim();
+    if (!VARIANT_LABEL.test(label) || !p) {
+      throw new Error(`variants: line ${i + 1} '${line}' has no valid label; expected label=path (label: A-Za-z0-9._-, max 40)`);
+    }
+    if (variants.some((v) => v.label === label)) throw new Error(`variants: label "${label}" given twice`);
+    variants.push({ label, path: p });
+  });
+  return variants;
+}
+
+/** Adds `file` to each parsed variant: its one file, or undefined when nothing matches (a data problem, task 4.2.3b). */
+function resolveVariants(variants, cwd = process.cwd()) {
+  return variants.map((v) => {
+    const matches = resolveOne(v.path, cwd);
+    if (matches.length > 1) {
+      throw new Error(`variants: label '${v.label}' matched ${matches.length} files; a label is one file (${matches.map((m) => path.relative(cwd, m)).join(', ')})`);
+    }
+    return { ...v, file: matches[0] };
+  });
+}
+
+/** Copies each resolved variant file to `variant-<line index>-<safe basename>`; returns `label=/work/...` args (files that are missing are skipped). */
+function stageVariants(variants, dir) {
+  const staged = [];
+  variants.forEach((v, i) => {
+    if (!v.file) return;
+    const name = `variant-${i}-${path.basename(v.file).replace(/[^A-Za-z0-9._-]/g, '_')}`;
+    fs.copyFileSync(v.file, path.join(dir, name));
+    staged.push(`${v.label}=/work/${name}`);
+  });
+  return staged;
+}
+
 /** Runs the wasm CLI with `args` (paths under /work) and returns its exit code and stderr. */
 async function runWasm(args, workDir) {
   const errPath = path.join(workDir, 'stderr.txt');
@@ -85,9 +135,10 @@ function stage(files, dir, prefix) {
  * charts yet (main() until task 4.2.1b), and nothing is emitted.
  * `dimensions` is newline-delimited and becomes one `--dimensions` flag per non-blank line.
  */
-function buildArgs({ head, base, config, format, baseFormat, threshold, minAbs, onlyChanged, sort, maxRows, title, tag, failOnRegression, compareBy, groupBy, dimensions, dimensionsStrict, reference, correction, cellFormat, charts, chartRows, chartWidth, chartTheme, svgDir, svgEmbed, publishImages }) {
+function buildArgs({ head, base, config, format, baseFormat, threshold, minAbs, onlyChanged, sort, maxRows, title, tag, failOnRegression, compareBy, groupBy, dimensions, dimensionsStrict, variants = [], reference, correction, cellFormat, charts, chartRows, chartWidth, chartTheme, svgDir, svgEmbed, publishImages }) {
   const args = [];
   head.forEach((f) => args.push('--head', f));
+  variants.forEach((v) => args.push('--variant', v));
   base.forEach((f) => args.push('--base', f));
   if (config) args.push('--config', config);
   if (format) args.push('--format', format);
@@ -117,7 +168,9 @@ function buildArgs({ head, base, config, format, baseFormat, threshold, minAbs, 
   if (svgDir) args.push('--svg-dir', svgDir);
   if (svgEmbed !== undefined) args.push(`--svg-embed=${svgEmbed || 'auto'}`);
   if (publishImages) args.push(`--publish-images=${publishImages}`);
-  args.push('--markdown', '/work/report.md', '--json', '/work/report.json', '--head-json', '/work/head.json');
+  args.push('--markdown', '/work/report.md', '--json', '/work/report.json');
+  // The binary rejects --head-json with --variant: a matrix has no single head set to cache.
+  if (!variants.length) args.push('--head-json', '/work/head.json');
   return args;
 }
 
@@ -320,8 +373,12 @@ async function embedCharts({ markdown, workSvg, names, svgDir, marker, fetchImpl
 }
 
 async function main({ runWasm: run = runWasm, fetchImpl = fetch } = {}) {
-  const head = expand(input('head'));
-  if (!head.length) throw new Error(`no head files match ${JSON.stringify(input('head'))}`);
+  const variantsInput = input('variants');
+  if (variantsInput && (input('head') || input('base'))) throw new Error('variants cannot be combined with head/base');
+  if (variantsInput && input('base-format')) throw new Error('base-format cannot be combined with variants');
+  const variants = variantsInput ? resolveVariants(parseVariants(variantsInput)) : [];
+  const head = variantsInput ? [] : expand(input('head'));
+  if (!variantsInput && !head.length) throw new Error(`no head files match ${JSON.stringify(input('head'))}`);
   const basePattern = input('base');
   const base = basePattern ? expand(basePattern) : [];
   if (basePattern && !base.length) warning(`no base files match ${JSON.stringify(basePattern)}; reporting head only`);
@@ -354,6 +411,7 @@ async function main({ runWasm: run = runWasm, fetchImpl = fetch } = {}) {
     groupBy: input('group-by'),
     dimensions: input('dimensions'),
     dimensionsStrict: parseBoolInput('dimensions-strict', input('dimensions-strict')),
+    variants: stageVariants(variants, workDir),
     reference: input('reference'),
     correction: input('correction'),
     cellFormat: input('cell-format'),
@@ -418,14 +476,14 @@ async function main({ runWasm: run = runWasm, fetchImpl = fetch } = {}) {
     failed: report.failed,
     'report-path': path.join(workDir, 'report.md'),
     'json-path': path.join(workDir, 'report.json'),
-    'head-json-path': path.join(workDir, 'head.json'),
+    'head-json-path': variantsInput ? '' : path.join(workDir, 'head.json'),
     ...chartOutputs,
   });
 
   if (report.failed) throw new Error(`${report.counts.regressed} benchmark regression(s) exceed the fail-on-regression limit`);
 }
 
-module.exports = { MESSAGES, PERMISSIONS_SNIPPET, publishImages, rewritePlaceholders, expand, runWasm, stage, buildArgs, stageConfig, parseFailOnRegression, validateTag, upsertComment, clip, main };
+module.exports = { MESSAGES, PERMISSIONS_SNIPPET, publishImages, rewritePlaceholders, expand, resolveOne, parseVariants, resolveVariants, stageVariants, runWasm, stage, buildArgs, stageConfig, parseFailOnRegression, validateTag, upsertComment, clip, main };
 
 if (require.main === module) {
   main().catch((e) => {

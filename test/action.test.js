@@ -511,3 +511,156 @@ test('action.yml: count outputs say N-way runs compare cells vs the reference', 
   const outputs = yml.slice(yml.indexOf('\noutputs:'));
   assert.ok((outputs.match(/N-way runs: cells vs the reference/g) || []).length >= 5);
 });
+
+// ---- Task 4.2.3a: `variants` input (parsing, resolution, staging, buildArgs, guard) ----
+
+const { parseVariants, resolveOne, resolveVariants, stageVariants } = require('../index.js');
+
+function variantDir(files) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-variants-'));
+  for (const [name, text] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+    fs.writeFileSync(path.join(dir, name), text);
+  }
+  return dir;
+}
+
+test('parseVariants: splits at the first =, keeps = in paths, skips blank lines, commas are not separators', () => {
+  assert.deepEqual(parseVariants('quick=out/quick.txt\n\nmerge=results/size=100/m.txt\ng={a,b}.txt'), [
+    { label: 'quick', path: 'out/quick.txt' },
+    { label: 'merge', path: 'results/size=100/m.txt' },
+    { label: 'g', path: '{a,b}.txt' },
+  ]);
+});
+
+test('parseVariants: a line without a valid label names its 1-based line, text and the grammar', () => {
+  assert.throws(() => parseVariants('a=x\nb=y\nresults/size=100/m.txt'),
+    { message: "variants: line 3 'results/size=100/m.txt' has no valid label; expected label=path (label: A-Za-z0-9._-, max 40)" });
+  for (const bad of ['nolabel', '=x', 'a b=x', `${'l'.repeat(41)}=x`]) assert.throws(() => parseVariants(bad), /has no valid label/, bad);
+  assert.doesNotThrow(() => parseVariants(`${'l'.repeat(40)}=x`));
+});
+
+test('parseVariants: a line with a label but an empty path is rejected', () => {
+  assert.throws(() => parseVariants('quick='), /has no valid label|no path/);
+});
+
+test('parseVariants: duplicate label is a static error', () => {
+  assert.throws(() => parseVariants('quick=a\nheap=b\nquick=c'), { message: 'variants: label "quick" given twice' });
+});
+
+test('resolveOne: a direct file wins, a glob is sorted, braces are one pattern and commas do not split', () => {
+  const dir = variantDir({ 'out/b.txt': 'b', 'out/a.txt': 'a', 'out/c.json': 'c', 'x,y.txt': 'xy' });
+  assert.deepEqual(resolveOne('out/*.txt', dir), [path.join(dir, 'out/a.txt'), path.join(dir, 'out/b.txt')]);
+  assert.deepEqual(resolveOne('out/{a,b}.txt', dir), [path.join(dir, 'out/a.txt'), path.join(dir, 'out/b.txt')]);
+  assert.deepEqual(resolveOne('out/c.json', dir), [path.join(dir, 'out/c.json')]);
+  assert.deepEqual(resolveOne('x,y.txt', dir), [path.join(dir, 'x,y.txt')]);
+  assert.deepEqual(resolveOne('out/none*.txt', dir), []);
+});
+
+test('resolveVariants: one label is exactly one file; a multi-match names the matches; zero matches passes through', () => {
+  const dir = variantDir({ 'out/quick.txt': 'q', 'out/h1.txt': '1', 'out/h2.txt': '2', 'out/h3.txt': '3' });
+  const ok = resolveVariants([{ label: 'quick', path: 'out/quick.txt' }, { label: 'gone', path: 'out/missing*.txt' }], dir);
+  assert.deepEqual(ok, [{ label: 'quick', path: 'out/quick.txt', file: path.join(dir, 'out/quick.txt') }, { label: 'gone', path: 'out/missing*.txt', file: undefined }]);
+  assert.throws(() => resolveVariants([{ label: 'heap', path: 'out/h*.txt' }], dir),
+    (e) => e.message.startsWith("variants: label 'heap' matched 3 files; a label is one file") && /h1\.txt/.test(e.message) && /h3\.txt/.test(e.message));
+  assert.throws(() => resolveVariants([{ label: 'merge', path: 'out/h{1,2}.txt' }], dir), /label 'merge' matched 2 files/);
+  assert.equal(resolveVariants([{ label: 'merge', path: 'out/h{1,9}.txt' }], dir)[0].file, path.join(dir, 'out/h1.txt'));
+});
+
+test('stageVariants: copies bytes under variant-<index>-<sanitized basename> (no =) and emits label=/work paths in input order', () => {
+  const src = variantDir({ 'a/quick.txt': 'quick-bytes', 'b/we ird=name.txt': 'heap-bytes' });
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-work-'));
+  const out = stageVariants([
+    { label: 'quick', file: path.join(src, 'a/quick.txt') },
+    { label: 'heap', file: path.join(src, 'b/we ird=name.txt') },
+    { label: 'gone', file: undefined },
+  ], work);
+  assert.deepEqual(out, ['quick=/work/variant-0-quick.txt', 'heap=/work/variant-1-we_ird_name.txt']);
+  assert.equal(fs.readFileSync(path.join(work, 'variant-0-quick.txt'), 'utf8'), 'quick-bytes');
+  assert.equal(fs.readFileSync(path.join(work, 'variant-1-we_ird_name.txt'), 'utf8'), 'heap-bytes');
+});
+
+test('buildArgs: variants emit one repeated --variant per line and no --head-json; two-way keeps --head-json', () => {
+  const args = buildArgs({ ...base, head: [], base: [], variants: ['quick=/work/variant-0-q.txt', 'heap=/work/variant-1-h.txt'] });
+  assert.deepEqual(args.filter((a, i) => args[i - 1] === '--variant'), ['quick=/work/variant-0-q.txt', 'heap=/work/variant-1-h.txt']);
+  assert.equal(args.filter((a) => a === '--variant').length, 2);
+  assert.ok(!args.includes('--head-json'));
+  assert.ok(!args.includes('--head') && !args.includes('--base'));
+  assert.ok(buildArgs(base).includes('--head-json'));
+  assert.ok(!buildArgs(base).includes('--variant'));
+});
+
+function variantSetup(variants, extra = {}) {
+  const s = setup('');
+  delete s.env.INPUT_HEAD;
+  delete s.env.INPUT_BASE;
+  s.env.INPUT_VARIANTS = variants;
+  Object.assign(s.env, extra);
+  return s;
+}
+
+test('main: variants together with head or base is a static error and runs nothing', async () => {
+  const src = variantDir({ 'q.txt': 'q' });
+  for (const extra of [{ INPUT_HEAD: 'x.txt' }, { INPUT_BASE: 'y.txt' }]) {
+    const s = variantSetup(`quick=${path.join(src, 'q.txt')}`, extra);
+    const fake = fakeWasm();
+    await withEnv(s.env, async () => {
+      await assert.rejects(main({ runWasm: fake.run }), { message: 'variants cannot be combined with head/base' });
+    });
+    assert.equal(fake.calls.length, 0);
+  }
+});
+
+test('main: base-format together with variants is a static error', async () => {
+  const src = variantDir({ 'q.txt': 'q' });
+  const s = variantSetup(`quick=${path.join(src, 'q.txt')}`, { 'INPUT_BASE-FORMAT': 'go' });
+  const fake = fakeWasm();
+  await withEnv(s.env, async () => {
+    await assert.rejects(main({ runWasm: fake.run }), { message: 'base-format cannot be combined with variants' });
+  });
+  assert.equal(fake.calls.length, 0);
+});
+
+test('main: variants alone skips the head guard, stages files, passes --variant and leaves head-json-path empty', async () => {
+  const src = variantDir({ 'out/quick.txt': 'quick-bytes', 'out/heap-1.txt': 'heap-bytes' });
+  const s = variantSetup(`quick=${path.join(src, 'out/quick.txt')}\nheap=${path.join(src, 'out/*heap*.txt')}`, { INPUT_REFERENCE: 'quick' });
+  const staged = [];
+  const fake = fakeWasm({ markdown: `${MARKER}\n## T\n`, svgs: [], stderr: '' });
+  const run = async (args, workDir) => {
+    for (const a of args) if (a.includes('=/work/variant-')) staged.push(fs.readFileSync(path.join(workDir, a.split('=/work/')[1]), 'utf8'));
+    return fake.run(args, workDir);
+  };
+  await withEnv(s.env, () => main({ runWasm: run }));
+  const args = fake.calls[0].args;
+  assert.deepEqual(args.filter((a, i) => args[i - 1] === '--variant'), ['quick=/work/variant-0-quick.txt', 'heap=/work/variant-1-heap-1.txt']);
+  assert.deepEqual(staged, ['quick-bytes', 'heap-bytes']);
+  assert.ok(!args.includes('--head') && !args.includes('--base') && !args.includes('--head-json'));
+  assert.equal(flagValue(args, '--reference'), 'quick');
+  assert.equal(outputOf(s, 'head-json-path'), '');
+  assert.match(outputOf(s, 'json-path'), /report\.json$/);
+});
+
+test('main: a multi-file glob for one label fails the step before any run', async () => {
+  const src = variantDir({ 'h1.txt': '1', 'h2.txt': '2' });
+  const s = variantSetup(`heap=${path.join(src, 'h*.txt')}`);
+  const fake = fakeWasm();
+  await withEnv(s.env, async () => {
+    await assert.rejects(main({ runWasm: fake.run }), /label 'heap' matched 2 files; a label is one file/);
+  });
+  assert.equal(fake.calls.length, 0);
+});
+
+test('main: head empty and variants empty keeps the existing no-head error', async () => {
+  const s = variantSetup('');
+  await withEnv(s.env, async () => {
+    await assert.rejects(main({ runWasm: fakeWasm().run }), /no head files match/);
+  });
+});
+
+test('action.yml: declares an optional variants input and head is no longer required', () => {
+  const yml = fs.readFileSync(path.join(root, 'action.yml'), 'utf8');
+  const block = (name) => new RegExp(`^  ${name}:\\n((?:    .*\\n)+)`, 'm').exec(yml)?.[1] ?? '';
+  assert.match(block('variants'), /required: false/);
+  assert.match(block('variants'), /label=path/);
+  assert.match(block('head'), /required: false/);
+});

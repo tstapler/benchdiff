@@ -7,10 +7,13 @@ branding:
 
 inputs:
   head:
-    description: Benchmark result file(s) for this commit; newline- or comma-separated paths or globs.
-    required: true
+    description: Benchmark result file(s) for this commit; newline- or comma-separated paths or globs. Required unless `variants` is set; cannot be combined with `variants`.
+    required: false
   base:
     description: Benchmark result file(s) to compare against. Omit for a head-only report.
+    required: false
+  variants:
+    description: "N-way from labelled files: one `label=path-or-glob` per line (newline-separated, commas are not separators; the first `=` splits; label: A-Za-z0-9._- , max 40). One label is exactly one file, so a glob matching several files is an error. Cannot be combined with head, base or base-format. The first line is the default reference. Runs with variants leave head-json-path empty."
     required: false
   format:
     description: "Input format: auto, benchdiff, go, criterion, cargo-bench, jmh, hyperfine, googlebench, gab-smaller, gab-bigger, bmf. Default auto."
