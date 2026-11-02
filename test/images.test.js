@@ -340,3 +340,81 @@ test('publishImages_should_return_permission_when_write_responds_403', async () 
     assert.deepEqual(r, { error: ERRORS.permission, reason: 'permission' });
   }
 });
+
+// ---- 4.1.2c: robustness and retention ----
+const resp = (status, body = {}, headers = {}) => ({
+  ok: status < 400,
+  status,
+  headers: { get: (k) => headers[k.toLowerCase()] ?? null },
+  json: async () => body,
+  text: async () => JSON.stringify(body),
+});
+// Fails the first `times` calls matching `match` with `make()`, then delegates to the fake.
+function flaky(gh, match, times, make) {
+  let left = times;
+  return async (u, i) => (match(u, i) && left-- > 0 ? make() : gh.fetch(u, i));
+}
+
+test('publishImages_should_retry_with_backoff_when_server_errors_then_succeed', async () => {
+  const gh = fakeGitHub();
+  const sleeps = [];
+  const fetch = flaky(gh, (u) => u.endsWith('/git/blobs'), 2, () => resp(502));
+  const r = await publishImages(FILES, mkCtx({ fetch, sleep: async (ms) => sleeps.push(ms) }));
+  assert.ok(r.urls, JSON.stringify(r));
+  assert.deepEqual(sleeps, [250, 500], 'exponential, jitter 0');
+});
+
+test('publishImages_should_add_jitter_and_stop_after_five_attempts_when_5xx_persists', async () => {
+  const sleeps = [];
+  let calls = 0;
+  const r = await publishImages(FILES, mkCtx({ fetch: async () => { calls += 1; return resp(503); }, random: () => 1, sleep: async (ms) => sleeps.push(ms) }));
+  assert.equal(r.reason, 'push-failed');
+  assert.equal(calls, 5);
+  assert.deepEqual(sleeps, [500, 1000, 2000, 4000]);
+});
+
+test('publishImages_should_retry_secondary_rate_limit_403_honouring_retry_after_instead_of_permission', async () => {
+  const gh = fakeGitHub();
+  const sleeps = [];
+  const fetch = flaky(gh, (u) => u.endsWith('/git/blobs'), 1, () => resp(403, { message: 'x' }, { 'retry-after': '7' }));
+  assert.ok((await publishImages(FILES, mkCtx({ fetch, sleep: async (ms) => sleeps.push(ms) }))).urls);
+  assert.deepEqual(sleeps, [7000]);
+  const byBody = flaky(fakeGitHub(), (u) => u.endsWith('/git/blobs'), 1, () => resp(403, { message: 'You have exceeded a secondary rate limit.' }));
+  assert.ok((await publishImages(FILES, mkCtx({ fetch: byBody }))).urls);
+  const byRemaining = flaky(fakeGitHub(), (u) => u.endsWith('/git/blobs'), 1, () => resp(403, {}, { 'x-ratelimit-remaining': '0' }));
+  assert.ok((await publishImages(FILES, mkCtx({ fetch: byRemaining }))).urls);
+});
+
+test('publishImages_should_return_push_failed_not_permission_when_rate_limit_403_persists', async () => {
+  const r = await publishImages(FILES, mkCtx({ fetch: async () => resp(403, {}, { 'retry-after': '1' }) }));
+  assert.equal(r.reason, 'push-failed');
+});
+
+test('publishImages_should_not_commit_and_reuse_tip_urls_when_tree_unchanged', async () => {
+  const gh = fakeGitHub();
+  const fetch = async (u, i) => (i?.method === 'POST' && u.endsWith('/git/trees') ? (gh.fetch(u, i), resp(201, { sha: TIP_TREE })) : gh.fetch(u, i));
+  const r = await publishImages(FILES, mkCtx({ fetch }));
+  const p = `t-${sha('default').slice(0, 12)}/${sha(SVG).slice(0, 8)}/delta.svg`;
+  assert.deepEqual(r, { urls: { 'delta.svg': `https://raw.githubusercontent.com/o/r/${TIP}/${p}` } });
+  assert.equal(gh.calls.filter((c) => c.url.endsWith('/git/commits') && c.method === 'POST').length, 0);
+  assert.equal(refWrites(gh.calls).length, 0);
+});
+
+test('publishImages_should_never_delete_or_force_and_keep_previous_tip_as_parent_when_publishing', async () => {
+  const gh = fakeGitHub({ refReplies: [[422, {}], [200, {}]] });
+  await publishImages(FILES, mkCtx({ fetch: gh.fetch }));
+  assert.ok(gh.calls.every((c) => c.method !== 'DELETE'));
+  for (const w of refWrites(gh.calls)) assert.equal(w.body.force ?? false, false);
+  for (const c of gh.calls.filter((x) => x.method === 'POST' && x.url.endsWith('/git/commits'))) assert.deepEqual(c.body.parents, [TIP]);
+  for (const c of gh.calls.filter((x) => x.url.endsWith('/git/trees'))) assert.equal(c.body.base_tree, TIP_TREE);
+});
+
+test('publishImages_should_keep_hostile_tags_out_of_paths_and_use_github_raw_host_for_github_com', async () => {
+  for (const tag of ['..', 'a/../b', '/abs', 'x:y']) {
+    const gh = fakeGitHub();
+    const { rawBase, ...rest } = mkCtx({ fetch: gh.fetch, tag, serverUrl: 'https://github.com' });
+    const r = await publishImages(FILES, rest);
+    const rel = r.urls['delta.svg'].slice('https://raw.githubusercontent.com/o/r/'.length).split('/').slice(1).join('/');
+    assert.equal(rel, `t-${sha(tag).slice(0, 12)}/${sha(SVG).slice(0, 8)}/delta.svg`);
+  }
+});
