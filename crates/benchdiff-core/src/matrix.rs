@@ -1,18 +1,23 @@
 //! N-way projection: split a [`Dimensioned`] set into [`Variant`]s along an axis.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
+use serde::Serialize;
+
+use crate::compare::{compare_pair, ConfigSource, Method, Options, Row, Samples, Verdict};
 use crate::dimensioned::Dimensioned;
 use crate::dimensions::{axis_value, row_dims, GROUP_AXIS, MEASURE_AXIS};
-use crate::model::{Dims, Metric, MetricSet, SkippedKey};
+use crate::model::{Better, Dims, Metric, MetricSet, SkippedKey};
 use crate::notice::{Notice, NoticeClass};
+use crate::units;
 
 /// Most benchmark names listed in a "no such dimension" notice.
 const MAX_LISTED: usize = 10;
 
 /// Validated variant label: `^[A-Za-z0-9._-]{1,40}$`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(transparent)]
 pub struct VariantLabel(String);
 
 impl VariantLabel {
@@ -252,6 +257,624 @@ fn collision(first: &str, first_dims: &Dims, second: &str, second_dims: &Dims) -
         "rows collide after dropping{which}; add it to group-by \
          (benchmarks '{first}' and '{second}')"
     ))
+}
+
+// ---- N-way comparison ----
+
+/// Which variant every other column is compared against (ADR-005).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Reference {
+    /// The first variant in input order; defaulted, so it cannot back the regression gate.
+    #[default]
+    First,
+    /// A declared baseline.
+    Label(VariantLabel),
+}
+
+/// Table cell shape (`cell-format`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CellFormat {
+    /// `1210 ns (0.74x) 🟢`
+    #[default]
+    Full,
+    /// `0.74x 🟢`
+    Ratio,
+}
+
+/// Multiple-comparison correction across one row's cells (ADR-002; logic lands in 2.1.4a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Correction {
+    #[default]
+    Holm,
+    None,
+}
+
+/// Row order of the matrix table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MatrixSort {
+    Input,
+    Name,
+    /// Worst against the reference first.
+    #[default]
+    Delta,
+    /// Rows where the reference ranks worst first.
+    Rank,
+}
+
+/// Matrix-specific settings; the shared ones stay in [`Options`].
+#[derive(Debug, Clone)]
+pub struct MatrixOptions {
+    pub compare_by: String,
+    pub group_by: Option<Vec<String>>,
+    /// `<dim>=<pattern>` rules as written by the user.
+    pub dimensions: Vec<String>,
+    /// Turn data-dependent problems from notices into errors.
+    pub strict: bool,
+    pub reference: Reference,
+    pub correction: Correction,
+    pub columns_cap: usize,
+    pub cell_format: CellFormat,
+    pub sort: MatrixSort,
+}
+
+impl Default for MatrixOptions {
+    fn default() -> Self {
+        MatrixOptions {
+            compare_by: String::new(),
+            group_by: None,
+            dimensions: Vec::new(),
+            strict: false,
+            reference: Reference::First,
+            correction: Correction::Holm,
+            columns_cap: 8,
+            cell_format: CellFormat::Full,
+            sort: MatrixSort::Delta,
+        }
+    }
+}
+
+/// Holm-adjusted p-value, always within `[0, 1]`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct PAdjusted(f64);
+
+impl PAdjusted {
+    /// Clamps into `[0, 1]`; NaN becomes 1 (not significant).
+    pub fn new(p: f64) -> Self {
+        Self(if p.is_nan() { 1.0 } else { p.clamp(0.0, 1.0) })
+    }
+
+    pub fn get(self) -> f64 {
+        self.0
+    }
+}
+
+/// Why a cell is not a comparison.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct Reason(pub String);
+
+/// A present cell's relation to the reference column. `Regressed`/`Improved` here mean
+/// significantly worse/better than the reference, never a change over time.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", content = "detail", rename_all = "snake_case")]
+pub enum Comparison {
+    /// This is the reference column.
+    Reference,
+    Compared {
+        verdict: Verdict,
+        /// Percent against the reference; `None` when the reference value is zero.
+        delta: Option<f64>,
+        method: Option<Method>,
+        p_value: Option<f64>,
+        /// Filled by the Holm post-pass (2.1.4a); `None` until then.
+        p_adjusted: Option<PAdjusted>,
+    },
+    Incomparable(Reason),
+    /// `better` differs from the reference's; shown raw, never reaches the kernel.
+    DirectionMismatch,
+    /// The reference has the metric but this variant's series was skipped as unusable.
+    /// The cell's `value` is NaN.
+    Invalid(Reason),
+    /// The reference lacks the metric, so there is nothing to compare against.
+    NoReference,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PresentCell {
+    pub value: f64,
+    #[serde(skip)]
+    pub samples: Samples,
+    pub vs_reference: Comparison,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", content = "cell", rename_all = "snake_case")]
+pub enum Cell {
+    /// Never rendered or counted as zero.
+    Missing,
+    Present(PresentCell),
+}
+
+/// One benchmark across all variants.
+#[derive(Debug, Clone, Serialize)]
+pub struct MatrixRow {
+    pub group: String,
+    /// The residual name.
+    pub name: String,
+    pub measure: String,
+    /// The reference's unit (the first present cell's when the reference is absent).
+    pub unit: String,
+    /// The reference's direction (the first present cell's when the reference is absent).
+    pub better: Better,
+    pub dims: Dims,
+    /// One per column, in column order.
+    pub cells: Vec<Cell>,
+    /// Column indices best first, oriented by `better`; empty when the reference is absent.
+    pub ranking: Vec<usize>,
+}
+
+impl MatrixRow {
+    /// `name` plus ` [k=v, ...]` for the row-identity dims.
+    pub fn label(&self) -> String {
+        if self.dims.is_empty() {
+            return self.name.clone();
+        }
+        let dims: Vec<String> = self.dims.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        format!("{} [{}]", self.name, dims.join(", "))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReferenceInfo {
+    pub label: String,
+    pub explicit: bool,
+}
+
+/// What one variant skipped on import.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct VariantSkipped {
+    pub label: String,
+    pub skipped: Vec<String>,
+    pub total: usize,
+}
+
+/// The matrix analogue of `Summary`: copied from `Options` and `MatrixOptions`, so renderers
+/// need only the report.
+#[derive(Debug, Clone, Serialize)]
+pub struct MatrixSummary {
+    pub title: String,
+    pub tag: String,
+    pub threshold_pct: f64,
+    pub min_abs: f64,
+    pub alpha: f64,
+    pub use_stats: bool,
+    pub only_changed: bool,
+    pub max_rows: Option<usize>,
+    pub fail_on_regression_pct: Option<f64>,
+    pub correction: Correction,
+    pub columns_cap: usize,
+    pub cell_format: CellFormat,
+    pub sort: MatrixSort,
+    /// `None` when no reference could be resolved (no variants, or an unknown label).
+    pub reference: Option<ReferenceInfo>,
+    pub skipped: Vec<VariantSkipped>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub threshold_overrides: BTreeMap<String, f64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub config_sources: Vec<ConfigSource>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MatrixReport {
+    pub summary: MatrixSummary,
+    /// Variant labels in input order.
+    pub columns: Vec<VariantLabel>,
+    pub rows: Vec<MatrixRow>,
+    /// Labels of rows the reference lacks (or skipped); these rows carry no deltas.
+    pub reference_absent: Vec<String>,
+    /// Notices raised here (class `Degradation`); rendering and ordering belong to the renderer.
+    #[serde(skip)]
+    pub notices: Vec<Notice>,
+}
+
+impl MatrixReport {
+    fn comparisons(&self) -> impl Iterator<Item = (usize, &Comparison)> {
+        self.rows.iter().flat_map(|r| {
+            r.cells
+                .iter()
+                .enumerate()
+                .filter_map(|(c, cell)| match cell {
+                    Cell::Present(p) => Some((c, &p.vs_reference)),
+                    Cell::Missing => None,
+                })
+        })
+    }
+
+    /// Cells with this verdict against the reference, over all non-reference columns.
+    pub fn count(&self, v: Verdict) -> usize {
+        self.comparisons()
+            .filter(|(_, cmp)| comparison_verdict(cmp) == Some(v))
+            .count()
+    }
+
+    /// Cells of column `col` that are `Invalid`.
+    pub fn invalid_in(&self, col: usize) -> usize {
+        self.comparisons()
+            .filter(|(c, cmp)| *c == col && matches!(cmp, Comparison::Invalid(_)))
+            .count()
+    }
+}
+
+fn comparison_verdict(c: &Comparison) -> Option<Verdict> {
+    match c {
+        Comparison::Compared { verdict, .. } => Some(*verdict),
+        Comparison::Incomparable(_) => Some(Verdict::Incomparable),
+        Comparison::Invalid(_) => Some(Verdict::Invalid),
+        Comparison::Reference | Comparison::DirectionMismatch | Comparison::NoReference => None,
+    }
+}
+
+/// The regression gate: `gate` is `fail-on-regression`. Without it nothing fails; with it, a
+/// `Regressed` cell of at least that many percent or any `Invalid` cell does. Requiring an
+/// explicit reference is the option validator's job (2.2.2a), not this function's.
+pub fn matrix_failed(report: &MatrixReport, gate: Option<f64>) -> bool {
+    let Some(limit) = gate else {
+        return false;
+    };
+    report.comparisons().any(|(_, c)| match c {
+        Comparison::Invalid(_) => true,
+        Comparison::Compared {
+            verdict: Verdict::Regressed,
+            delta,
+            ..
+        } => delta.is_none_or(|d| d.abs() >= limit),
+        _ => false,
+    })
+}
+
+fn labels_text(variants: &[Variant]) -> String {
+    variants
+        .iter()
+        .map(|v| v.label.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Index of the reference variant. Errors with `unknown reference 'x'; valid: a, b` for an
+/// unknown label and, for `First`, when there are no variants.
+pub fn resolve_reference(
+    variants: &[Variant],
+    reference: &Reference,
+) -> Result<usize, MatrixError> {
+    match reference {
+        Reference::First if variants.is_empty() => Err(MatrixError("no variants".into())),
+        Reference::First => Ok(0),
+        Reference::Label(l) => variants.iter().position(|v| &v.label == l).ok_or_else(|| {
+            MatrixError(format!(
+                "unknown reference '{l}'; valid: {}",
+                labels_text(variants)
+            ))
+        }),
+    }
+}
+
+/// Data-dependent reference problem: a notice when not `strict`, the error when `strict`.
+pub fn check_reference(
+    variants: &[Variant],
+    reference: &Reference,
+    strict: bool,
+) -> Result<Option<Notice>, MatrixError> {
+    let Reference::Label(l) = reference else {
+        return Ok(None);
+    };
+    match resolve_reference(variants, reference) {
+        Ok(_) => Ok(None),
+        Err(e) if strict => Err(e),
+        Err(_) => Ok(Some(Notice {
+            class: NoticeClass::Degradation,
+            text: format!(
+                "reference '{l}' is not one of: {}; no comparison made",
+                labels_text(variants)
+            ),
+        })),
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Counts kernel calls so tests can assert a path never reaches the kernel.
+    static KERNEL_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn kernel(base: &Metric, head: &Metric, opts: &Options) -> Row {
+    #[cfg(test)]
+    KERNEL_CALLS.with(|c| c.set(c.get() + 1));
+    compare_pair(base, head, opts)
+}
+
+type RowKey = (String, String, String, Dims);
+
+fn row_key(m: &Metric, group_axis: bool) -> RowKey {
+    // Under compare-by=group the group is the column, so it must not split rows.
+    let group = if group_axis {
+        String::new()
+    } else {
+        m.group.clone()
+    };
+    (group, m.name.clone(), m.measure.clone(), m.dims.clone())
+}
+
+fn is_skipped(v: &Variant, key: &RowKey, group_axis: bool) -> bool {
+    v.set.skipped.keys().iter().any(|k| {
+        (group_axis || k.group == key.0) && k.name == key.1 && k.measure == key.2 && k.dims == key.3
+    })
+}
+
+fn empty_report(
+    summary: MatrixSummary,
+    columns: Vec<VariantLabel>,
+    notices: Vec<Notice>,
+) -> MatrixReport {
+    MatrixReport {
+        summary,
+        columns,
+        rows: Vec::new(),
+        reference_absent: Vec::new(),
+        notices,
+    }
+}
+
+/// Compares every variant to the reference column (ADR-005). Pure and deterministic. An
+/// unknown reference label yields a notice-only report; use [`check_reference`] to make that
+/// an error under `strict`.
+pub fn compare_matrix(variants: &[Variant], opts: &Options, mopts: &MatrixOptions) -> MatrixReport {
+    let mut summary = MatrixSummary {
+        title: opts.title.clone(),
+        tag: opts.tag.clone(),
+        threshold_pct: opts.threshold_pct,
+        min_abs: opts.min_abs,
+        alpha: opts.alpha,
+        use_stats: opts.use_stats,
+        only_changed: opts.only_changed,
+        max_rows: opts.max_rows,
+        fail_on_regression_pct: opts.fail_on_regression_pct,
+        correction: mopts.correction,
+        columns_cap: mopts.columns_cap,
+        cell_format: mopts.cell_format,
+        sort: mopts.sort,
+        reference: None,
+        skipped: variants
+            .iter()
+            .map(|v| VariantSkipped {
+                label: v.label.to_string(),
+                skipped: v.set.skipped.labels(),
+                total: v.set.skipped.total,
+            })
+            .collect(),
+        threshold_overrides: opts.threshold_overrides.clone(),
+        config_sources: Vec::new(),
+    };
+    let columns: Vec<VariantLabel> = variants.iter().map(|v| v.label.clone()).collect();
+    if variants.is_empty() {
+        return empty_report(summary, Vec::new(), Vec::new());
+    }
+    let Ok(ref_col) = resolve_reference(variants, &mopts.reference) else {
+        let notice = check_reference(variants, &mopts.reference, false)
+            .ok()
+            .flatten();
+        return empty_report(summary, Vec::new(), notice.into_iter().collect());
+    };
+    summary.reference = Some(ReferenceInfo {
+        label: variants[ref_col].label.to_string(),
+        explicit: matches!(mopts.reference, Reference::Label(_)),
+    });
+    let group_axis = mopts.compare_by == GROUP_AXIS;
+
+    // Rows in first-seen order, reference column first, so the row order does not depend on
+    // where the explicit reference sits in the input.
+    let mut order: Vec<RowKey> = Vec::new();
+    let mut slots: HashMap<RowKey, Vec<Option<&Metric>>> = HashMap::new();
+    let walk = std::iter::once(ref_col).chain((0..variants.len()).filter(|c| *c != ref_col));
+    for col in walk {
+        for m in &variants[col].set.metrics {
+            let key = row_key(m, group_axis);
+            let row = slots.entry(key.clone()).or_insert_with(|| {
+                order.push(key);
+                vec![None; variants.len()]
+            });
+            row[col].get_or_insert(m);
+        }
+    }
+
+    let mut rows = Vec::with_capacity(order.len());
+    for key in order {
+        let metrics = &slots[&key];
+        rows.push(build_row(
+            variants, metrics, &key, ref_col, group_axis, opts,
+        ));
+    }
+    let reference_absent = rows
+        .iter()
+        .filter(|r| matches!(r.cells[ref_col], Cell::Missing))
+        .map(MatrixRow::label)
+        .collect();
+    sort_matrix_rows(&mut rows, mopts.sort, ref_col);
+    MatrixReport {
+        summary,
+        columns,
+        rows,
+        reference_absent,
+        notices: Vec::new(),
+    }
+}
+
+fn build_row(
+    variants: &[Variant],
+    metrics: &[Option<&Metric>],
+    key: &RowKey,
+    ref_col: usize,
+    group_axis: bool,
+    opts: &Options,
+) -> MatrixRow {
+    let reference = metrics[ref_col];
+    let first = reference
+        .or_else(|| metrics.iter().flatten().next().copied())
+        .expect("a row has at least one metric");
+    let mut ranked: Vec<(usize, f64)> = Vec::new();
+    let mut cells = Vec::with_capacity(variants.len());
+    for (col, variant) in variants.iter().enumerate() {
+        let cell = match (metrics[col], reference) {
+            (Some(m), _) if col == ref_col => Cell::Present(PresentCell {
+                value: m.value,
+                samples: reference_samples(m, opts),
+                vs_reference: Comparison::Reference,
+            }),
+            (Some(m), None) => present(m.value, Samples::default(), Comparison::NoReference),
+            (Some(m), Some(r)) => {
+                let (cmp, samples) = compare_cell(r, m, opts);
+                if matches!(cmp, Comparison::Compared { .. }) {
+                    // Only comparable units reach here, so the factor exists.
+                    let f = units::factor(&m.unit, &r.unit).unwrap_or(1.0);
+                    ranked.push((col, m.value * f));
+                }
+                present(m.value, samples, cmp)
+            }
+            (None, Some(_)) if is_skipped(variant, key, group_axis) => present(
+                f64::NAN,
+                Samples::default(),
+                Comparison::Invalid(Reason("no usable value in this variant".into())),
+            ),
+            (None, _) => Cell::Missing,
+        };
+        cells.push(cell);
+    }
+    if let Some(r) = reference {
+        ranked.push((ref_col, r.value));
+    }
+    ranked.sort_by_key(|(c, _)| *c);
+    let lower = first.better == Better::Lower;
+    // Stable sort over column order, so ties keep input order.
+    ranked.sort_by(|a, b| {
+        if lower {
+            a.1.total_cmp(&b.1)
+        } else {
+            b.1.total_cmp(&a.1)
+        }
+    });
+    let ranking = if reference.is_some() {
+        ranked.into_iter().map(|(c, _)| c).collect()
+    } else {
+        Vec::new()
+    };
+    MatrixRow {
+        group: first.group.clone(),
+        name: first.name.clone(),
+        measure: first.measure.clone(),
+        unit: first.unit.clone(),
+        better: first.better,
+        dims: first.dims.clone(),
+        cells,
+        ranking,
+    }
+}
+
+fn present(value: f64, samples: Samples, vs_reference: Comparison) -> Cell {
+    Cell::Present(PresentCell {
+        value,
+        samples,
+        vs_reference,
+    })
+}
+
+fn reference_samples(m: &Metric, opts: &Options) -> Samples {
+    if opts.keep_samples {
+        Samples {
+            base: Vec::new(),
+            head: m.samples.clone(),
+        }
+    } else {
+        Samples::default()
+    }
+}
+
+fn compare_cell(r: &Metric, m: &Metric, opts: &Options) -> (Comparison, Samples) {
+    // Direction is the matrix's job: a mismatch never reaches the kernel.
+    if r.better != m.better {
+        return (Comparison::DirectionMismatch, Samples::default());
+    }
+    // Under compare-by=group the variant's group differs; thresholds key on the reference's.
+    let row = if r.group == m.group {
+        kernel(r, m, opts)
+    } else {
+        let mut head = m.clone();
+        head.group = r.group.clone();
+        kernel(r, &head, opts)
+    };
+    if row.verdict == Verdict::Incomparable {
+        let reason = format!("units '{}' and '{}' cannot be compared", r.unit, m.unit);
+        return (Comparison::Incomparable(Reason(reason)), row.samples);
+    }
+    let cmp = Comparison::Compared {
+        verdict: row.verdict,
+        delta: row.delta_pct,
+        method: row.method,
+        p_value: row.p_value,
+        p_adjusted: None,
+    };
+    (cmp, row.samples)
+}
+
+/// Delta order: invalid and regressed cells first, then improved, then the rest; larger
+/// magnitude first within a class.
+fn delta_rank(row: &MatrixRow) -> (u8, f64) {
+    row.cells
+        .iter()
+        .filter_map(|c| match c {
+            Cell::Present(p) => Some(&p.vs_reference),
+            Cell::Missing => None,
+        })
+        .map(|c| match c {
+            Comparison::Invalid(_) => (0, f64::INFINITY),
+            Comparison::Compared { verdict, delta, .. } => {
+                let mag = delta.map_or(f64::INFINITY, f64::abs);
+                match verdict {
+                    Verdict::Regressed => (0, mag),
+                    Verdict::Improved => (1, mag),
+                    _ => (2, 0.0),
+                }
+            }
+            _ => (2, 0.0),
+        })
+        .fold((2, 0.0), |best, c| {
+            if c.0 < best.0 || (c.0 == best.0 && c.1 > best.1) {
+                c
+            } else {
+                best
+            }
+        })
+}
+
+fn sort_matrix_rows(rows: &mut [MatrixRow], sort: MatrixSort, ref_col: usize) {
+    // Stable sorts: ties keep input order.
+    match sort {
+        MatrixSort::Input => {}
+        MatrixSort::Name => rows.sort_by(|a, b| {
+            (&a.group, &a.name, &a.measure, &a.dims).cmp(&(&b.group, &b.name, &b.measure, &b.dims))
+        }),
+        MatrixSort::Delta => rows.sort_by(|a, b| {
+            let ((ca, ma), (cb, mb)) = (delta_rank(a), delta_rank(b));
+            ca.cmp(&cb).then(mb.total_cmp(&ma))
+        }),
+        MatrixSort::Rank => rows.sort_by_key(|r| {
+            // Reference farthest from best first; rows without a ranking go last.
+            let pos = r.ranking.iter().position(|c| *c == ref_col);
+            std::cmp::Reverse(pos.map_or(-1, |p| p as i64))
+        }),
+    }
 }
 
 #[cfg(test)]
@@ -510,5 +1133,523 @@ mod tests {
         );
         let ok = label_variant(VariantLabel::parse("quick").unwrap(), &d, "size").unwrap();
         assert_eq!(names(&ok), ["Sort"]);
+    }
+
+    // ---- compare_matrix ----
+
+    fn series(median: f64) -> Vec<f64> {
+        (0..10)
+            .map(|k| median * (1.0 + 0.001 * (k as f64 - 5.0)))
+            .collect()
+    }
+
+    fn metric_with(group: &str, name: &str, unit: &str, median: f64, better: Better) -> Metric {
+        let mut m = Metric::new(group, name, "", unit, median, better);
+        m.samples = series(median);
+        m
+    }
+
+    fn var(label: &str, items: &[(&str, f64)]) -> Variant {
+        Variant {
+            label: VariantLabel::parse(label).unwrap(),
+            set: MetricSet {
+                metrics: items
+                    .iter()
+                    .map(|(n, v)| metric_with("", n, "ns", *v, Better::Lower))
+                    .collect(),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn three() -> Vec<Variant> {
+        vec![
+            var("quick", &[("Sort", 100.0)]),
+            var("heap", &[("Sort", 130.0)]),
+            var("merge", &[("Sort", 80.0)]),
+        ]
+    }
+
+    fn mopts() -> MatrixOptions {
+        MatrixOptions {
+            compare_by: "impl".into(),
+            ..MatrixOptions::default()
+        }
+    }
+
+    fn compared(cell: &Cell) -> (&Verdict, Option<f64>) {
+        match cell {
+            Cell::Present(PresentCell {
+                vs_reference: Comparison::Compared { verdict, delta, .. },
+                ..
+            }) => (verdict, *delta),
+            other => panic!("not compared: {other:?}"),
+        }
+    }
+
+    fn kernel_calls() -> usize {
+        KERNEL_CALLS.with(std::cell::Cell::get)
+    }
+
+    #[test]
+    fn compare_matrix_should_emit_cells_for_all_variants_against_reference_when_three_variants() {
+        let r = compare_matrix(&three(), &Options::default(), &mopts());
+        assert_eq!(r.columns.len(), 3);
+        assert_eq!(r.rows.len(), 1);
+        assert_eq!(r.rows[0].cells.len(), 3);
+        assert!(matches!(
+            r.rows[0].cells[0],
+            Cell::Present(PresentCell {
+                vs_reference: Comparison::Reference,
+                ..
+            })
+        ));
+        assert_eq!(r.summary.reference.as_ref().unwrap().label, "quick");
+        assert!(!r.summary.reference.as_ref().unwrap().explicit);
+    }
+
+    #[test]
+    fn compare_matrix_should_mark_regressed_and_improved_cells_when_130_and_80_vs_100() {
+        let r = compare_matrix(&three(), &Options::default(), &mopts());
+        let row = &r.rows[0];
+        let (v, d) = compared(&row.cells[1]);
+        assert_eq!(
+            (*v, d.map(|x| (x * 10.0).round() / 10.0)),
+            (Verdict::Regressed, Some(30.0))
+        );
+        let (v, d) = compared(&row.cells[2]);
+        assert_eq!(
+            (*v, d.map(|x| (x * 10.0).round() / 10.0)),
+            (Verdict::Improved, Some(-20.0))
+        );
+        if let Cell::Present(PresentCell {
+            vs_reference:
+                Comparison::Compared {
+                    method,
+                    p_value,
+                    p_adjusted,
+                    ..
+                },
+            ..
+        }) = &row.cells[1]
+        {
+            assert_eq!(*method, Some(crate::Method::MannWhitney));
+            assert!(p_value.is_some());
+            assert!(p_adjusted.is_none());
+        }
+        assert_eq!(row.ranking, [2, 0, 1]);
+    }
+
+    #[test]
+    fn compare_matrix_should_orient_verdicts_and_ranking_by_reference_better_when_higher_is_better()
+    {
+        let mut vs = three();
+        for v in &mut vs {
+            for m in &mut v.set.metrics {
+                m.better = Better::Higher;
+            }
+        }
+        let r = compare_matrix(&vs, &Options::default(), &mopts());
+        assert_eq!(*compared(&r.rows[0].cells[1]).0, Verdict::Improved);
+        assert_eq!(*compared(&r.rows[0].cells[2]).0, Verdict::Regressed);
+        assert_eq!(r.rows[0].ranking, [1, 0, 2]);
+        assert_eq!(r.rows[0].better, Better::Higher);
+    }
+
+    #[test]
+    fn compare_matrix_should_mark_missing_cell_not_zero_when_variant_lacks_benchmark() {
+        let vs = vec![
+            var("quick", &[("Sort", 100.0), ("Search", 10.0)]),
+            var("merge", &[("Sort", 80.0)]),
+        ];
+        let r = compare_matrix(&vs, &Options::default(), &mopts());
+        let search = r.rows.iter().find(|x| x.name == "Search").unwrap();
+        assert!(matches!(search.cells[1], Cell::Missing));
+        assert_eq!(search.ranking, [0]);
+    }
+
+    #[test]
+    fn compare_matrix_should_list_reference_absent_rows_without_deltas_when_reference_lacks_benchmark(
+    ) {
+        let vs = vec![
+            var("quick", &[("Sort", 100.0)]),
+            var("merge", &[("Sort", 80.0), ("Insert", 5.0)]),
+        ];
+        let r = compare_matrix(&vs, &Options::default(), &mopts());
+        assert_eq!(r.reference_absent, ["Insert"]);
+        let insert = r.rows.iter().find(|x| x.name == "Insert").unwrap();
+        assert!(matches!(insert.cells[0], Cell::Missing));
+        assert!(matches!(
+            insert.cells[1],
+            Cell::Present(PresentCell {
+                vs_reference: Comparison::NoReference,
+                ..
+            })
+        ));
+        assert!(insert.ranking.is_empty());
+    }
+
+    #[test]
+    fn compare_matrix_should_return_direction_mismatch_without_calling_kernel_when_better_differs()
+    {
+        let mut vs = three();
+        vs[1].set.metrics[0].better = Better::Higher;
+        vs.truncate(2);
+        let before = kernel_calls();
+        let r = compare_matrix(&vs, &Options::default(), &mopts());
+        assert_eq!(kernel_calls(), before, "kernel must not be reached");
+        assert!(matches!(
+            r.rows[0].cells[1],
+            Cell::Present(PresentCell {
+                vs_reference: Comparison::DirectionMismatch,
+                value,
+                ..
+            }) if value == 130.0
+        ));
+        assert_eq!(r.count(Verdict::Regressed) + r.count(Verdict::Improved), 0);
+        assert!(r.rows[0].ranking == [0]);
+        compare_matrix(&three(), &Options::default(), &mopts());
+        assert_eq!(kernel_calls(), before + 2);
+    }
+
+    #[test]
+    fn compare_matrix_should_give_identical_deltas_and_verdicts_when_inputs_permuted_with_explicit_reference(
+    ) {
+        let base = three();
+        let perms = [
+            [0, 1, 2],
+            [0, 2, 1],
+            [1, 0, 2],
+            [1, 2, 0],
+            [2, 0, 1],
+            [2, 1, 0],
+        ];
+        let mo = MatrixOptions {
+            reference: Reference::Label(VariantLabel::parse("quick").unwrap()),
+            ..mopts()
+        };
+        let mut seen: Option<BTreeMap<String, String>> = None;
+        for p in perms {
+            let vs: Vec<Variant> = p.iter().map(|&i| base[i].clone()).collect();
+            let r = compare_matrix(&vs, &Options::default(), &mo);
+            let mut by_label = BTreeMap::new();
+            for (c, label) in r.columns.iter().enumerate() {
+                let cell = serde_json::to_string(&r.rows[0].cells[c]).unwrap();
+                by_label.insert(label.to_string(), cell);
+            }
+            let ranked: Vec<&str> = r.rows[0]
+                .ranking
+                .iter()
+                .map(|&c| r.columns[c].as_str())
+                .collect();
+            by_label.insert("rank".into(), ranked.join(","));
+            match &seen {
+                None => seen = Some(by_label),
+                Some(s) => assert_eq!(*s, by_label, "permutation {p:?}"),
+            }
+            assert!(r.summary.reference.as_ref().unwrap().explicit);
+        }
+    }
+
+    #[test]
+    fn compare_matrix_should_mark_incomparable_cell_when_units_differ() {
+        let mut vs = three();
+        vs[1].set.metrics[0].unit = "B/op".into();
+        let r = compare_matrix(&vs, &Options::default(), &mopts());
+        assert!(matches!(
+            r.rows[0].cells[1],
+            Cell::Present(PresentCell {
+                vs_reference: Comparison::Incomparable(_),
+                ..
+            })
+        ));
+        assert_eq!(r.rows[0].ranking, [2, 0]);
+        assert_eq!(r.count(Verdict::Incomparable), 1);
+    }
+
+    fn twelve_percent(group: &str, name: &str) -> Vec<Variant> {
+        let mk = |label: &str, v: f64| Variant {
+            label: VariantLabel::parse(label).unwrap(),
+            set: MetricSet {
+                metrics: vec![metric_with(group, name, "ns", v, Better::Lower)],
+                ..Default::default()
+            },
+        };
+        vec![mk("quick", 100.0), mk("heap", 112.0)]
+    }
+
+    #[test]
+    fn compare_matrix_should_apply_group_residual_threshold_override_when_sort_20_percent() {
+        let opts = Options {
+            threshold_overrides: BTreeMap::from([("Sort".to_string(), 20.0)]),
+            ..Options::default()
+        };
+        let sort = compare_matrix(&twelve_percent("", "Sort"), &opts, &mopts());
+        assert_eq!(*compared(&sort.rows[0].cells[1]).0, Verdict::Unchanged);
+        let other = compare_matrix(&twelve_percent("", "Other"), &opts, &mopts());
+        assert_eq!(*compared(&other.rows[0].cells[1]).0, Verdict::Regressed);
+    }
+
+    #[test]
+    fn compare_matrix_should_apply_group_threshold_when_only_group_key_matches() {
+        let opts = Options {
+            threshold_overrides: BTreeMap::from([("pkgA".to_string(), 20.0)]),
+            ..Options::default()
+        };
+        let a = compare_matrix(&twelve_percent("pkgA", "Sort"), &opts, &mopts());
+        assert_eq!(*compared(&a.rows[0].cells[1]).0, Verdict::Unchanged);
+        let b = compare_matrix(&twelve_percent("pkgB", "Sort"), &opts, &mopts());
+        assert_eq!(*compared(&b.rows[0].cells[1]).0, Verdict::Regressed);
+    }
+
+    #[test]
+    fn compare_matrix_should_join_rows_across_groups_and_use_reference_group_threshold_when_compare_by_group(
+    ) {
+        let mk = |label: &str, v: f64| Variant {
+            label: VariantLabel::parse(label).unwrap(),
+            set: MetricSet {
+                metrics: vec![metric_with(label, "Sort", "ns", v, Better::Lower)],
+                ..Default::default()
+            },
+        };
+        let vs = vec![mk("pkgA", 100.0), mk("pkgB", 112.0)];
+        let mo = MatrixOptions {
+            compare_by: "group".into(),
+            ..MatrixOptions::default()
+        };
+        let opts = Options {
+            threshold_overrides: BTreeMap::from([("pkgA".to_string(), 20.0)]),
+            ..Options::default()
+        };
+        let r = compare_matrix(&vs, &opts, &mo);
+        assert_eq!(r.rows.len(), 1, "group is not part of the row key");
+        assert_eq!(*compared(&r.rows[0].cells[1]).0, Verdict::Unchanged);
+    }
+
+    fn with_skipped(mut v: Variant, name: &str) -> Variant {
+        v.set.skipped.push_key(SkippedKey {
+            group: String::new(),
+            name: name.into(),
+            measure: String::new(),
+            dims: Dims::new(),
+            residual: None,
+        });
+        v
+    }
+
+    #[test]
+    fn compare_matrix_should_return_invalid_cell_and_trip_failed_when_variant_series_all_nan() {
+        let vs = vec![
+            var("quick", &[("Sort", 100.0)]),
+            with_skipped(var("merge", &[]), "Sort"),
+        ];
+        let r = compare_matrix(&vs, &Options::default(), &mopts());
+        let cell = &r.rows[0].cells[1];
+        assert!(matches!(
+            cell,
+            Cell::Present(PresentCell {
+                vs_reference: Comparison::Invalid(_),
+                ..
+            })
+        ));
+        assert_eq!(r.invalid_in(1), 1);
+        assert_eq!(r.invalid_in(0), 0);
+        assert!(matrix_failed(&r, Some(10.0)));
+        assert!(!matrix_failed(&r, None));
+        assert_eq!(r.rows[0].ranking, [0]);
+    }
+
+    #[test]
+    fn compare_matrix_should_match_skipped_by_group_residual_measure_and_dims_not_raw_name() {
+        let mut ref_v = var("quick", &[("Sort", 100.0)]);
+        ref_v.set.metrics[0].dims = dims(&[("size", "10")]);
+        let mut other = var("merge", &[]);
+        let key = |size: &str| SkippedKey {
+            group: String::new(),
+            name: "Sort".into(),
+            measure: String::new(),
+            dims: dims(&[("size", size)]),
+            residual: None,
+        };
+        other.set.skipped.push_key(key("1000"));
+        let r = compare_matrix(
+            &[ref_v.clone(), other.clone()],
+            &Options::default(),
+            &mopts(),
+        );
+        assert!(
+            matches!(r.rows[0].cells[1], Cell::Missing),
+            "different dims is not this row"
+        );
+        other.set.skipped.push_key(key("10"));
+        let r = compare_matrix(&[ref_v, other], &Options::default(), &mopts());
+        assert!(matches!(
+            r.rows[0].cells[1],
+            Cell::Present(PresentCell {
+                vs_reference: Comparison::Invalid(_),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn compare_matrix_should_keep_samples_for_charts_only_when_asked() {
+        let vs = vec![
+            var("quick", &[("Sort", 100.0)]),
+            var("heap", &[("Sort", 130.0)]),
+        ];
+        let off = compare_matrix(&vs, &Options::default(), &mopts());
+        let Cell::Present(p) = &off.rows[0].cells[1] else {
+            panic!()
+        };
+        assert!(p.samples.base.is_empty() && p.samples.head.is_empty());
+        let on = compare_matrix(
+            &vs,
+            &Options {
+                keep_samples: true,
+                ..Options::default()
+            },
+            &mopts(),
+        );
+        let Cell::Present(p) = &on.rows[0].cells[1] else {
+            panic!()
+        };
+        assert_eq!(p.samples.base, series(100.0));
+        assert_eq!(p.samples.head, series(130.0));
+        assert!(!serde_json::to_string(&on).unwrap().contains("samples"));
+    }
+
+    #[test]
+    fn compare_matrix_should_copy_options_and_matrix_options_into_summary_so_renderers_need_no_second_argument(
+    ) {
+        let opts = Options {
+            title: "T".into(),
+            tag: "x".into(),
+            max_rows: Some(20),
+            only_changed: true,
+            fail_on_regression_pct: Some(10.0),
+            ..Options::default()
+        };
+        let mo = MatrixOptions {
+            cell_format: CellFormat::Ratio,
+            columns_cap: 8,
+            reference: Reference::Label(VariantLabel::parse("heap").unwrap()),
+            ..mopts()
+        };
+        let r = compare_matrix(&three(), &opts, &mo);
+        let s = &r.summary;
+        assert_eq!((s.title.as_str(), s.tag.as_str()), ("T", "x"));
+        assert_eq!(s.max_rows, Some(20));
+        assert!(s.only_changed);
+        assert_eq!(s.fail_on_regression_pct, Some(10.0));
+        assert_eq!(s.cell_format, CellFormat::Ratio);
+        assert_eq!(s.columns_cap, 8);
+        assert_eq!(s.correction, Correction::Holm);
+        assert_eq!((s.threshold_pct, s.alpha), (5.0, 0.05));
+        let reference = s.reference.as_ref().unwrap();
+        assert_eq!(
+            (reference.label.as_str(), reference.explicit),
+            ("heap", true)
+        );
+    }
+
+    #[test]
+    fn matrix_failed_should_be_false_without_gate_and_true_only_for_post_holm_regressed_over_threshold_or_invalid(
+    ) {
+        let mk = |heap: f64| {
+            compare_matrix(
+                &[
+                    var("quick", &[("Sort", 100.0)]),
+                    var("heap", &[("Sort", heap)]),
+                ],
+                &Options::default(),
+                &mopts(),
+            )
+        };
+        assert!(!matrix_failed(&mk(130.0), None));
+        assert!(!matrix_failed(&mk(107.0), Some(10.0)));
+        assert!(matrix_failed(&mk(130.0), Some(10.0)));
+        assert!(!matrix_failed(&mk(80.0), Some(10.0)));
+    }
+
+    #[test]
+    fn compare_matrix_should_fail_with_unknown_reference_listing_valid_labels_when_reference_not_a_label(
+    ) {
+        let slow = Reference::Label(VariantLabel::parse("slow").unwrap());
+        let err = resolve_reference(&three(), &slow).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "unknown reference 'slow'; valid: quick, heap, merge"
+        );
+        assert_eq!(resolve_reference(&three(), &Reference::First).unwrap(), 0);
+    }
+
+    #[test]
+    fn project_by_axis_should_return_notice_not_error_when_reference_absent_from_axis_values_and_not_strict(
+    ) {
+        let d = dimensioned(&["Sort/impl=quick", "Sort/impl=heap"]);
+        let p = project_by_axis(&d, "impl", None).unwrap();
+        let slow = Reference::Label(VariantLabel::parse("slow").unwrap());
+        let notice = check_reference(&p.variants, &slow, false).unwrap().unwrap();
+        assert_eq!(notice.class, NoticeClass::Degradation);
+        assert_eq!(
+            notice.text,
+            "reference 'slow' is not one of: quick, heap; no comparison made"
+        );
+        let err = check_reference(&p.variants, &slow, true).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "unknown reference 'slow'; valid: quick, heap"
+        );
+        assert!(check_reference(&p.variants, &Reference::First, true)
+            .unwrap()
+            .is_none());
+
+        let r = compare_matrix(
+            &p.variants,
+            &Options::default(),
+            &MatrixOptions {
+                reference: slow,
+                ..mopts()
+            },
+        );
+        assert!(r.rows.is_empty() && r.columns.is_empty());
+        assert_eq!(r.notices.len(), 1);
+    }
+
+    #[test]
+    fn compare_matrix_should_sort_rows_by_mode() {
+        let mk = |name: &str, heap: f64| (name.to_string(), heap);
+        let rows = [mk("B", 80.0), mk("A", 130.0), mk("C", 80.0)];
+        let quick: Vec<(&str, f64)> = rows.iter().map(|(n, _)| (n.as_str(), 100.0)).collect();
+        let heap: Vec<(&str, f64)> = rows.iter().map(|(n, v)| (n.as_str(), *v)).collect();
+        let vs = vec![var("quick", &quick), var("heap", &heap)];
+        let names = |sort| {
+            let r = compare_matrix(&vs, &Options::default(), &MatrixOptions { sort, ..mopts() });
+            r.rows.iter().map(|x| x.name.clone()).collect::<Vec<_>>()
+        };
+        assert_eq!(names(MatrixSort::Input), ["B", "A", "C"]);
+        assert_eq!(names(MatrixSort::Name), ["A", "B", "C"]);
+        assert_eq!(names(MatrixSort::Delta), ["A", "B", "C"]);
+        assert_eq!(names(MatrixSort::Rank), ["B", "C", "A"]);
+    }
+
+    #[test]
+    fn compare_matrix_should_be_deterministic_and_report_nothing_for_no_variants() {
+        let a = serde_json::to_string(&compare_matrix(&three(), &Options::default(), &mopts()))
+            .unwrap();
+        let b = serde_json::to_string(&compare_matrix(&three(), &Options::default(), &mopts()))
+            .unwrap();
+        assert_eq!(a, b);
+        let r = compare_matrix(&[], &Options::default(), &mopts());
+        assert!(r.rows.is_empty() && r.summary.reference.is_none());
+    }
+
+    #[test]
+    fn p_adjusted_should_clamp_into_unit_interval() {
+        assert_eq!(PAdjusted::new(1.7).get(), 1.0);
+        assert_eq!(PAdjusted::new(-0.2).get(), 0.0);
+        assert_eq!(PAdjusted::new(f64::NAN).get(), 1.0);
+        assert_eq!(PAdjusted::new(0.06).get(), 0.06);
     }
 }
