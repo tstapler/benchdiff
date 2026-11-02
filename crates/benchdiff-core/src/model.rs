@@ -96,6 +96,10 @@ pub(crate) struct SkippedKey {
     pub group: String,
     pub name: String,
     pub measure: String,
+    /// Dimensions pulled out of `name` by `dimensions::apply`; empty until then.
+    pub dims: Dims,
+    /// `name` with the dimension spans removed; `None` until `dimensions::apply` runs.
+    pub residual: Option<String>,
 }
 
 impl SkippedKey {
@@ -128,7 +132,30 @@ impl Skipped {
                 group: group.into(),
                 name: name.into(),
                 measure: measure.into(),
+                dims: Dims::new(),
+                residual: None,
             });
+        }
+    }
+
+    /// Adds an already-attributed key (projection); counts toward `total`.
+    pub(crate) fn push_key(&mut self, key: SkippedKey) {
+        self.total += 1;
+        if self.keys.len() < MAX_SKIPPED {
+            self.keys.push(key);
+        }
+    }
+
+    pub(crate) fn keys(&self) -> &[SkippedKey] {
+        &self.keys
+    }
+
+    /// Records the dims and residual `dimensions::apply` extracted from each key's name.
+    pub(crate) fn attribute(&mut self, mut extract: impl FnMut(&str) -> (Dims, String)) {
+        for key in &mut self.keys {
+            let (dims, residual) = extract(&key.name);
+            key.dims = dims;
+            key.residual = Some(residual);
         }
     }
 

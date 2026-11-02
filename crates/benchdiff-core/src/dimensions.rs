@@ -162,6 +162,29 @@ pub fn extract_with_rules(rules: &[Rule], name: &str) -> Extracted {
     out
 }
 
+/// The built-in pseudo-dimension: a metric's group.
+pub const GROUP_AXIS: &str = "group";
+
+/// `measure` is deliberately not an axis: units differ per measure.
+pub const MEASURE_AXIS: &str = "measure";
+
+/// A metric's value on `axis`: the group for the pseudo-dimension, else the named dimension.
+pub fn axis_value<'a>(group: &'a str, dims: &'a Dims, axis: &str) -> Option<&'a str> {
+    if axis == GROUP_AXIS {
+        return Some(group).filter(|g| !g.is_empty());
+    }
+    dims.get(axis).map(String::as_str)
+}
+
+/// The non-axis dims that take part in row identity: all of them, or only those in `group_by`.
+pub fn row_dims(dims: &Dims, axis: &str, group_by: Option<&[String]>) -> Dims {
+    dims.iter()
+        .filter(|(k, _)| k.as_str() != axis)
+        .filter(|(k, _)| group_by.is_none_or(|g| g.iter().any(|x| x == *k)))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
+}
+
 /// Most unmatched names listed in diagnostics and strict errors.
 const MAX_LISTED: usize = 10;
 
@@ -211,7 +234,7 @@ impl std::error::Error for DimError {}
 /// without dims fall back to it. Zero-match rules and collisions on
 /// `(group, residual, measure, dims)` are diagnostics, or errors when `strict`
 /// (which also errors on any name left without dims). A collision keeps the
-/// first metric in input order. `set.skipped` is carried through unchanged.
+/// first metric in input order. `set.skipped` keys are run through the same extraction.
 pub fn apply(
     set: MetricSet,
     rules: &[Rule],
@@ -282,7 +305,12 @@ pub fn apply(
             diag.unmatched.join(", ")
         )));
     }
-    Ok((Dimensioned::from_parts(entries, set.skipped), diag))
+    let mut skipped = set.skipped;
+    skipped.attribute(|name| {
+        let e = extract_one(rules, name);
+        (e.dims, e.residual)
+    });
+    Ok((Dimensioned::from_parts(entries, skipped), diag))
 }
 
 fn extract_one(rules: &[Rule], name: &str) -> Extracted {
@@ -647,5 +675,18 @@ mod tests {
         let (d, diag) = apply(set(&["A/impl=1", "A/impl=2"]), &[], false).unwrap();
         assert_eq!(d.entries().count(), 2);
         assert!(diag.entries.is_empty());
+    }
+
+    #[test]
+    fn apply_should_attribute_skipped_keys_to_dims_and_residual_with_default_extractor() {
+        let mut s = set(&["Sort/impl=quick"]);
+        s.skipped.push("", "Sort/impl=merge", "");
+        s.skipped.push("", "Setup", "");
+        let (d, _) = apply(s, &[], false).unwrap();
+        let e: Vec<_> = d.skipped_entries().collect();
+        assert_eq!(e[0].residual, "Sort");
+        assert_eq!(e[0].name, "Sort/impl=merge");
+        assert_eq!(e[0].dims, &dims(&[("impl", "merge")]));
+        assert_eq!((e[1].residual, e[1].dims.is_empty()), ("Setup", true));
     }
 }

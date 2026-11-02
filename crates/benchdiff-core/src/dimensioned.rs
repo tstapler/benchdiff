@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use serde::Serialize;
 
-use crate::model::{Metric, MetricSet, Skipped};
+use crate::model::{Dims, Metric, MetricSet, Skipped};
 
 /// Maximum number of distinct values listed per dimension.
 const MAX_SUMMARY_VALUES: usize = 20;
@@ -33,6 +33,16 @@ pub struct DimensionSummary {
     pub value_count: usize,
     /// Number of metrics carrying the dimension.
     pub benchmarks: usize,
+}
+
+/// An importer-dropped metric attributed to its dimensions and row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SkippedEntry<'a> {
+    pub group: &'a str,
+    pub name: &'a str,
+    pub measure: &'a str,
+    pub dims: &'a Dims,
+    pub residual: &'a str,
 }
 
 /// Each metric paired with its residual, so a filter or reorder cannot desync them.
@@ -74,8 +84,20 @@ impl Dimensioned {
         self.entries.iter().map(|(m, r)| (m, r))
     }
 
-    pub fn skipped_entries(&self) -> &Skipped {
-        &self.skipped
+    /// Skipped keys with the dimensions and residual extracted from their names.
+    pub fn skipped_entries(&self) -> impl Iterator<Item = SkippedEntry<'_>> {
+        self.skipped.keys().iter().map(|k| SkippedEntry {
+            group: &k.group,
+            name: &k.name,
+            measure: &k.measure,
+            dims: &k.dims,
+            residual: k.residual.as_deref().unwrap_or(&k.name),
+        })
+    }
+
+    /// Full count of skipped metrics, including those past the stored cap.
+    pub fn skipped_total(&self) -> usize {
+        self.skipped.total
     }
 
     /// Metrics that carry no dimension at all.
@@ -214,7 +236,9 @@ mod tests {
             .map(|(m, r)| (m.name.as_str(), r.as_str()))
             .collect();
         assert_eq!(pairs, vec![("A", "A"), ("B", "B")]);
-        assert_eq!(d.skipped_entries().total, 1);
+        assert_eq!(d.skipped_total(), 1);
+        let e = d.skipped_entries().next().unwrap();
+        assert_eq!((e.residual, e.dims.is_empty()), ("C", true));
     }
 
     #[test]
