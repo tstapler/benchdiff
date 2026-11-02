@@ -235,7 +235,7 @@ pub fn compare(base: Option<&MetricSet>, head: &MetricSet, opts: &Options) -> Re
         .metrics
         .iter()
         .map(|h| match base_by_key.get(&h.key()) {
-            Some(b) => changed_row(b, h, opts),
+            Some(b) => compare_pair(b, h, opts),
             None => one_sided_row(h, Verdict::New),
         })
         .collect();
@@ -348,7 +348,7 @@ fn evidence(base: &Metric, head: &Metric, base_scale: f64, opts: &Options) -> Ev
     threshold_only
 }
 
-fn changed_row(base: &Metric, head: &Metric, opts: &Options) -> Row {
+pub(crate) fn compare_pair(base: &Metric, head: &Metric, opts: &Options) -> Row {
     let mut row = Row {
         group: head.group.clone(),
         name: head.name.clone(),
@@ -459,6 +459,26 @@ mod tests {
             skipped: Default::default(),
             metrics: vec![m],
         }
+    }
+
+    #[test]
+    fn compare_pair_should_equal_the_row_compare_produces_for_the_same_pair() {
+        let opts = Options::default();
+        let (b, h) = (
+            metric("m", 100.0, Better::Lower),
+            metric("m", 150.0, Better::Lower),
+        );
+        let via_compare = compare(
+            Some(&set(&[("m", 100.0, Better::Lower)])),
+            &set(&[("m", 150.0, Better::Lower)]),
+            &opts,
+        );
+        let row = compare_pair(&b, &h, &opts);
+        assert_eq!(row.verdict, Verdict::Regressed);
+        assert_eq!(
+            serde_json::to_string(&row).unwrap(),
+            serde_json::to_string(&via_compare.rows[0]).unwrap()
+        );
     }
 
     #[test]

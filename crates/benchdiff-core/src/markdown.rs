@@ -29,7 +29,7 @@ pub fn marker(tag: &str) -> String {
 
 /// Control characters (newlines included) become spaces, so text stays on one line; HTML
 /// comment delimiters get an invisible break so untrusted text can never forge a marker.
-fn flatten(text: &str) -> String {
+pub(crate) fn flatten(text: &str) -> String {
     let one_line: String = text
         .chars()
         .map(|c| if c.is_control() { ' ' } else { c })
@@ -40,7 +40,7 @@ fn flatten(text: &str) -> String {
 }
 
 /// Untrusted text as an inline code span: links, mentions, HTML and headings stay literal.
-fn code(text: &str) -> String {
+pub(crate) fn code(text: &str) -> String {
     let flat = flatten(text);
     if flat.is_empty() {
         return "—".into();
@@ -206,7 +206,7 @@ fn render_groups(out: &mut String, rows: &[&Row], collapsed: bool, has_base: boo
     }
 }
 
-fn value(v: Option<f64>, unit: &str) -> String {
+pub(crate) fn value(v: Option<f64>, unit: &str) -> String {
     match v {
         None => "—".into(),
         Some(v) if unit.is_empty() => fmt_num(v),
@@ -215,7 +215,7 @@ fn value(v: Option<f64>, unit: &str) -> String {
 }
 
 /// Signed percent with one decimal; a value that rounds to zero prints as plain `0.0%`.
-fn fmt_pct(p: f64) -> String {
+pub(crate) fn fmt_pct(p: f64) -> String {
     let s = format!("{p:+.1}");
     if s.trim_start_matches(['+', '-']) == "0.0" {
         "0.0%".into()
