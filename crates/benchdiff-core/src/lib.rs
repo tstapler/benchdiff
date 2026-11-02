@@ -30,6 +30,10 @@ pub use matrix::{
     MatrixOptions, MatrixReport, MatrixRow, MatrixSummary, Variant, VariantLabel,
 };
 pub use model::{Better, Metric, MetricSet};
+pub use svg::{
+    render_extras, render_svgs, ChartKind, ChartRows, ChartTheme, ChartWidth, EmbedMode,
+    EmbedSetting, RenderedSvgs, SkipReason, SvgFile, SvgInput, SvgOptions,
+};
 
 /// The machine-readable report: every row, the settings, and the verdict counts.
 pub fn render_json(report: &Report) -> String {

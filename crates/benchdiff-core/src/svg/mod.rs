@@ -5,8 +5,11 @@ pub mod style;
 pub mod text;
 pub mod writer;
 
+use self::style::Theme;
 use crate::compare::{Report, Row, Verdict};
+use crate::markdown::{ChartEmbed, RenderExtras, SkippedChart};
 use crate::matrix::{Cell, Comparison, MatrixReport, MatrixRow};
+use crate::notice::{Notice, NoticeClass};
 use std::fmt;
 
 /// Names the chart kinds in config/flag order; the single source for error text.
@@ -771,6 +774,159 @@ fn text_escape(text: &str) -> String {
     out
 }
 
+/// What [`render_svgs`] produced: the files, the charts that made none, and the chart notices.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RenderedSvgs {
+    /// In requested order; a `Both` theme yields a `-light` then a `-dark` file per chart.
+    pub files: Vec<SvgFile>,
+    /// One entry per requested chart kind that produced no file.
+    pub skipped: Vec<SkippedChart>,
+    /// Class `Chart` notices for charts that were cut to the row cap.
+    pub notices: Vec<Notice>,
+}
+
+impl RenderedSvgs {
+    /// The `produced=N skipped=M` log line.
+    pub fn summary(&self, themes: usize) -> String {
+        format!(
+            "produced={} skipped={}",
+            self.files.len() / themes.max(1),
+            self.skipped.len()
+        )
+    }
+}
+
+fn max_rows_of(input: &SvgInput) -> Option<usize> {
+    match input {
+        SvgInput::Pair(r) => r.summary.max_rows,
+        SvgInput::Matrix(r) => r.summary.max_rows,
+    }
+}
+
+/// Dispatches every requested chart kind over the report and returns the files.
+///
+/// A kind that does not fit the report kind is skipped with `NotApplicable`, a run with nothing
+/// to compare with `NothingToCompare`; neither is an error and the other kinds still render.
+pub fn render_svgs(input: SvgInput, opts: &SvgOptions) -> RenderedSvgs {
+    let nothing_to_compare = match input {
+        SvgInput::Pair(r) => !r.has_base,
+        SvgInput::Matrix(r) => r.columns.len() < 2,
+    };
+    let themes: &[Theme] = match opts.theme {
+        ChartTheme::Light => &[Theme::Light],
+        ChartTheme::Dark => &[Theme::Dark],
+        ChartTheme::Both => &[Theme::Light, Theme::Dark],
+    };
+    let mut out = RenderedSvgs::default();
+    for &kind in &opts.kinds {
+        if nothing_to_compare {
+            out.skipped.push(SkippedChart {
+                kind,
+                reason: SkipReason::NothingToCompare,
+            });
+            continue;
+        }
+        let drawn: Result<Vec<SvgFile>, SkipReason> = themes
+            .iter()
+            .map(|&theme| draw(kind, &input, opts, theme))
+            .collect();
+        match drawn {
+            Ok(files) => {
+                out.notices.extend(
+                    files
+                        .first()
+                        .and_then(|f| cap_notice(f, kind, &input, opts)),
+                );
+                out.files.extend(files);
+            }
+            Err(reason) => out.skipped.push(SkippedChart { kind, reason }),
+        }
+    }
+    out
+}
+
+fn draw(
+    kind: ChartKind,
+    input: &SvgInput,
+    opts: &SvgOptions,
+    theme: Theme,
+) -> Result<SvgFile, SkipReason> {
+    match (kind, *input) {
+        (ChartKind::Delta, SvgInput::Pair(r)) => delta::delta_chart_themed(r, opts, theme),
+        (ChartKind::Ranking, SvgInput::Matrix(r)) => ranking::ranking_chart_themed(r, opts, theme),
+        (ChartKind::Distribution, SvgInput::Pair(r)) => {
+            distribution::distribution_chart_themed(r, opts, theme)
+        }
+        (ChartKind::Distribution, SvgInput::Matrix(r)) => {
+            distribution::distribution_matrix_chart_themed(r, opts, theme)
+        }
+        (ChartKind::Delta | ChartKind::Ranking, _) => Err(SkipReason::NotApplicable { kind }),
+    }
+}
+
+fn cap_notice(
+    file: &SvgFile,
+    kind: ChartKind,
+    input: &SvgInput,
+    opts: &SvgOptions,
+) -> Option<Notice> {
+    let Some(SkipReason::CapExceeded { shown, total }) = file.skipped else {
+        return None;
+    };
+    let (cap, key) = opts.effective_cap(max_rows_of(input));
+    Some(Notice {
+        class: NoticeClass::Chart,
+        text: format!(
+            "{kind} chart: + {} more not shown ({}: {cap})",
+            total - shown,
+            key.name()
+        ),
+    })
+}
+
+/// The `RenderExtras` for a rendered run: placeholders and text bodies only when embedding.
+/// With a `Both` theme `file` is the light twin and `dark_file` the dark one.
+pub fn render_extras(
+    input: &SvgInput,
+    opts: &SvgOptions,
+    rendered: &RenderedSvgs,
+    svg_dir: Option<&str>,
+) -> RenderExtras {
+    let embed = opts.embed == EmbedMode::On;
+    let mut charts = vec![];
+    if embed {
+        for kind in &opts.kinds {
+            let Some(file) = rendered
+                .files
+                .iter()
+                .find(|f| f.name.starts_with(kind.name()))
+            else {
+                continue;
+            };
+            let dark_file = rendered
+                .files
+                .iter()
+                .find(|f| f.name == format!("{kind}-dark"))
+                .map(|f| format!("{}.svg", f.name));
+            charts.push(ChartEmbed {
+                kind: *kind,
+                file: format!("{}.svg", file.name),
+                dark_file,
+                alt: file.alt.clone(),
+                text: render_text_table(input, *kind, opts),
+            });
+        }
+    }
+    RenderExtras {
+        charts,
+        skipped: rendered.skipped.clone(),
+        notices: rendered.notices.clone(),
+        embed,
+        publish_images: opts.publish_images,
+        svg_dir: svg_dir.map(str::to_string),
+    }
+}
+
 impl fmt::Display for ChartKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.name())
@@ -1216,5 +1372,139 @@ mod tests {
         let r = preport(vec![prow("a|b<img>`x`", 9.0, Verdict::Regressed)], None);
         let md = render_text_table(&SvgInput::Pair(&r), ChartKind::Delta, &opts_rows(30)).unwrap();
         assert!(md.contains(r"| 1 | a\|b&lt;img&gt;\`x\` |"), "{md}");
+    }
+
+    fn kinds(list: &[ChartKind]) -> SvgOptions {
+        SvgOptions {
+            kinds: list.to_vec(),
+            ..SvgOptions::default()
+        }
+    }
+
+    fn pair_report(with_base: bool) -> Report {
+        use crate::import::{parse, Format};
+        let head = parse(
+            Format::Go,
+            "BenchmarkA-8 100 130 ns/op\nBenchmarkB-8 100 70 ns/op\n",
+        )
+        .unwrap();
+        let base = parse(
+            Format::Go,
+            "BenchmarkA-8 100 100 ns/op\nBenchmarkB-8 100 100 ns/op\n",
+        )
+        .unwrap();
+        crate::compare(
+            with_base.then_some(&base),
+            &head,
+            &crate::Options::default(),
+        )
+    }
+
+    #[test]
+    fn render_svgs_should_skip_every_kind_as_nothing_to_compare_when_head_only() {
+        let rep = pair_report(false);
+        let r = render_svgs(
+            SvgInput::Pair(&rep),
+            &kinds(&[ChartKind::Delta, ChartKind::Ranking]),
+        );
+        assert!(r.files.is_empty());
+        assert_eq!(r.skipped.len(), 2);
+        assert!(r
+            .skipped
+            .iter()
+            .all(|s| s.reason == SkipReason::NothingToCompare));
+    }
+
+    #[test]
+    fn render_svgs_should_render_delta_and_skip_ranking_as_not_applicable_when_two_way() {
+        let rep = pair_report(true);
+        let r = render_svgs(
+            SvgInput::Pair(&rep),
+            &kinds(&[ChartKind::Delta, ChartKind::Ranking]),
+        );
+        assert_eq!(
+            r.files.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
+            ["delta"]
+        );
+        assert_eq!(
+            r.skipped,
+            [SkippedChart {
+                kind: ChartKind::Ranking,
+                reason: SkipReason::NotApplicable {
+                    kind: ChartKind::Ranking
+                }
+            }]
+        );
+        assert_eq!(r.summary(1), "produced=1 skipped=1");
+    }
+
+    #[test]
+    fn render_svgs_should_render_ranking_and_skip_delta_as_not_applicable_when_n_way() {
+        let rep = ranking_fixture();
+        let r = render_svgs(
+            SvgInput::Matrix(&rep),
+            &kinds(&[ChartKind::Delta, ChartKind::Ranking]),
+        );
+        assert_eq!(
+            r.files.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
+            ["ranking"]
+        );
+        assert_eq!(
+            r.skipped[0].reason,
+            SkipReason::NotApplicable {
+                kind: ChartKind::Delta
+            }
+        );
+    }
+
+    #[test]
+    fn render_svgs_should_skip_distribution_as_no_samples_when_report_kept_none() {
+        let rep = pair_report(true);
+        let r = render_svgs(SvgInput::Pair(&rep), &kinds(&[ChartKind::Distribution]));
+        assert!(r.files.is_empty());
+        assert_eq!(r.skipped[0].reason, SkipReason::NoSamples);
+    }
+
+    #[test]
+    fn render_svgs_should_emit_light_and_dark_twins_when_theme_is_both() {
+        let rep = pair_report(true);
+        let mut o = kinds(&[ChartKind::Delta]);
+        o.theme = ChartTheme::Both;
+        o.embed = EmbedMode::On;
+        let r = render_svgs(SvgInput::Pair(&rep), &o);
+        let names: Vec<_> = r.files.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["delta-light", "delta-dark"]);
+        assert_ne!(r.files[0].svg, r.files[1].svg);
+        let extras = render_extras(&SvgInput::Pair(&rep), &o, &r, Some("out"));
+        assert_eq!(extras.charts.len(), 1);
+        assert_eq!(extras.charts[0].file, "delta-light.svg");
+        assert_eq!(
+            extras.charts[0].dark_file.as_deref(),
+            Some("delta-dark.svg")
+        );
+        assert_eq!(r.summary(2), "produced=1 skipped=0");
+    }
+
+    #[test]
+    fn render_extras_should_carry_no_charts_when_embed_is_off() {
+        let rep = pair_report(true);
+        let o = kinds(&[ChartKind::Delta]);
+        let r = render_svgs(SvgInput::Pair(&rep), &o);
+        let extras = render_extras(&SvgInput::Pair(&rep), &o, &r, None);
+        assert!(extras.charts.is_empty() && !extras.embed);
+    }
+
+    #[test]
+    fn render_svgs_should_notice_the_cap_and_name_the_limiting_key_when_rows_are_cut() {
+        let rep = pair_report(true);
+        let mut o = kinds(&[ChartKind::Delta]);
+        o.rows = ChartRows::new(1).unwrap();
+        let r = render_svgs(SvgInput::Pair(&rep), &o);
+        assert_eq!(r.notices.len(), 1);
+        assert_eq!(r.notices[0].class, NoticeClass::Chart);
+        assert_eq!(
+            r.notices[0].text,
+            "delta chart: + 1 more not shown (chart-rows: 1)"
+        );
     }
 }

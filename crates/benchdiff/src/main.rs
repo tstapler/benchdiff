@@ -8,7 +8,7 @@ use benchdiff_core::config::{
 };
 use benchdiff_core::dimensioned::Dimensioned;
 use benchdiff_core::dimensions::{self, Rule};
-use benchdiff_core::markdown_matrix::{render_matrix_markdown, render_notice_report};
+use benchdiff_core::markdown_matrix::{render_matrix_markdown_with, render_notice_report};
 use benchdiff_core::matrix::{
     check_reference, label_variant, project_by_axis, MatrixOptions, MatrixSort, Reference, Variant,
     VariantLabel,
@@ -18,7 +18,10 @@ use benchdiff_core::svg::{ChartKind, ChartRows, ChartTheme, ChartWidth, EmbedSet
 use benchdiff_core::{
     compare, compare_matrix, matrix_failed,
     options::{matrix_sort_of, MatrixOptionsOverlay, OptionsOverlay, SvgOptionsOverlay},
-    parse, render_json, render_json_with_matrix, render_markdown, Format, MetricSet, Options, Sort,
+    parse, render_json, render_json_with_matrix, Format, MetricSet, Options, Sort,
+};
+use benchdiff_core::{
+    render_extras, render_markdown_with, render_svgs, RenderExtras, SvgFile, SvgInput,
 };
 use serde_json::{json, Value};
 use std::process::ExitCode;
@@ -100,10 +103,7 @@ struct Effective {
     base_format: Option<Format>,
     sources: Vec<(String, String, &'static str)>,
     file_overrides_set: bool,
-    /// Consumed by the `--svg-dir` write (3.3.1b).
-    #[allow(dead_code)]
     svg: SvgOptions,
-    #[allow(dead_code)]
     svg_dir: Option<String>,
     matrix: MatrixOptions,
 }
@@ -148,6 +148,7 @@ impl Args {
         let svg_overlay = svg_overlay.merge(self.svg_flags.clone());
         let mut svg = SvgOptions::default();
         svg_overlay.apply(&mut svg);
+        options.keep_samples = svg.kinds.contains(&ChartKind::Distribution);
         let flag_values = layer_values(
             &self.flags,
             &self.matrix_flags,
@@ -402,14 +403,15 @@ fn run() -> Result<bool, String> {
     // Only an explicit config surfaces sources, so flag-only runs keep their exact output.
     if args.config.is_some() {
         // `compare` is a private module of the core crate, so the type is named by inference.
-        for (key, value, source) in eff.sources {
+        for (key, value, source) in &eff.sources {
             report.summary.config_sources.push(Default::default());
             if let Some(c) = report.summary.config_sources.last_mut() {
-                (c.key, c.value, c.source) = (key, value, source.into());
+                (c.key, c.value, c.source) = (key.clone(), value.clone(), (*source).into());
             }
         }
     }
-    let markdown = with_notices(render_markdown(&report), &fallback_notices);
+    let (extras, write_error) = chart_extras(SvgInput::Pair(&report), &eff);
+    let markdown = with_notices(render_markdown_with(&report, &extras), &fallback_notices);
     match &args.markdown {
         Some(path) => write(path, &markdown)?,
         None => print!("{markdown}"),
@@ -419,6 +421,9 @@ fn run() -> Result<bool, String> {
     }
     if let Some(path) = &args.head_json {
         write(path, &head.to_json())?;
+    }
+    if let Some(e) = write_error {
+        return Err(e);
     }
     Ok(report.exceeds_failure_threshold())
 }
@@ -617,11 +622,15 @@ fn run_matrix(args: &Args, eff: &Effective) -> Result<MatrixOutcome, String> {
             }
         }
     }
+    let (extras, write_error) = chart_extras(SvgInput::Matrix(&report), eff);
     emit(
         args,
-        &render_matrix_markdown(&report),
+        &render_matrix_markdown_with(&report, &extras),
         &render_json_with_matrix(&report, gate),
     )?;
+    if let Some(e) = write_error {
+        return Err(e);
+    }
     Ok(MatrixOutcome::Done(matrix_failed(&report, gate)))
 }
 
@@ -644,6 +653,42 @@ fn degraded_outcome(
         &render_json_with_matrix(&empty, None),
     )?;
     Ok(MatrixOutcome::Done(false))
+}
+
+/// Renders the requested charts, writes them to `--svg-dir`, and returns the Markdown extras.
+/// A failed write is returned as the exit-2 message after the report is printed (AC-S3-8);
+/// the extras then carry no chart, so the report does not point at files that do not exist.
+fn chart_extras(input: SvgInput, eff: &Effective) -> (RenderExtras, Option<String>) {
+    if eff.svg.kinds.is_empty() {
+        return (RenderExtras::default(), None);
+    }
+    let rendered = render_svgs(input, &eff.svg);
+    let themes = if eff.svg.theme == ChartTheme::Both {
+        2
+    } else {
+        1
+    };
+    eprintln!("charts: {}", rendered.summary(themes));
+    let mut extras = render_extras(&input, &eff.svg, &rendered, eff.svg_dir.as_deref());
+    let error = eff.svg_dir.as_deref().and_then(|dir| {
+        write_svgs(dir, &rendered.files)
+            .err()
+            .map(|cause| format!("cannot write {dir}: {cause}; report printed without charts"))
+    });
+    if error.is_some() {
+        extras.charts.clear();
+    }
+    (extras, error)
+}
+
+fn write_svgs(dir: &str, files: &[SvgFile]) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    for file in files {
+        let path = std::path::Path::new(dir).join(format!("{}.svg", file.name));
+        std::fs::write(&path, &file.svg)?;
+        eprintln!("wrote {}", path.display());
+    }
+    Ok(())
 }
 
 fn emit(args: &Args, markdown: &str, json: &str) -> Result<(), String> {
