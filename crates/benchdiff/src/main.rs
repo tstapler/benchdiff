@@ -6,12 +6,19 @@ use benchdiff_core::config::{
     check_compare_by, matrix_help, parse_cell_format, parse_config, parse_correction,
     parse_dimension_rules, parse_group_by, parse_reference, ConfigFormat,
 };
-use benchdiff_core::matrix::{MatrixOptions, MatrixSort, Reference, VariantLabel};
+use benchdiff_core::dimensioned::Dimensioned;
+use benchdiff_core::dimensions::{self, Rule};
+use benchdiff_core::markdown_matrix::{render_matrix_markdown, render_notice_report};
+use benchdiff_core::matrix::{
+    check_reference, label_variant, project_by_axis, MatrixOptions, MatrixSort, Reference, Variant,
+    VariantLabel,
+};
+use benchdiff_core::notice::{Notice, NoticeClass};
 use benchdiff_core::svg::{ChartKind, ChartRows, ChartTheme, ChartWidth, EmbedSetting, SvgOptions};
 use benchdiff_core::{
-    compare,
+    compare, compare_matrix, matrix_failed,
     options::{matrix_sort_of, MatrixOptionsOverlay, OptionsOverlay, SvgOptionsOverlay},
-    parse, render_json, render_markdown, Format, MetricSet, Options, Sort,
+    parse, render_json, render_json_with_matrix, render_markdown, Format, MetricSet, Options, Sort,
 };
 use serde_json::{json, Value};
 use std::process::ExitCode;
@@ -98,8 +105,6 @@ struct Effective {
     svg: SvgOptions,
     #[allow(dead_code)]
     svg_dir: Option<String>,
-    /// Consumed by the N-way wiring (2.2.2b).
-    #[allow(dead_code)]
     matrix: MatrixOptions,
 }
 
@@ -375,10 +380,16 @@ fn run() -> Result<bool, String> {
         print!("{}", print_config(&args, &eff));
         return Ok(false);
     }
-    if !args.variants.is_empty() || args.print_dimensions {
-        return Err(
-            "N-way runs (--variant, --print-dimensions) are parsed but not wired yet".into(),
-        );
+    if args.print_dimensions {
+        print!("{}", print_dimensions(&args, &eff)?);
+        return Ok(false);
+    }
+    let mut fallback_notices = vec![];
+    if !args.variants.is_empty() || !eff.matrix.compare_by.is_empty() {
+        match run_matrix(&args, &eff)? {
+            MatrixOutcome::Done(failed) => return Ok(failed),
+            MatrixOutcome::TwoWay(notices) => fallback_notices = notices,
+        }
     }
     let head = load(&args.head, eff.format)?;
     let base = if args.base.is_empty() {
@@ -398,7 +409,7 @@ fn run() -> Result<bool, String> {
             }
         }
     }
-    let markdown = render_markdown(&report);
+    let markdown = with_notices(render_markdown(&report), &fallback_notices);
     match &args.markdown {
         Some(path) => write(path, &markdown)?,
         None => print!("{markdown}"),
@@ -410,6 +421,288 @@ fn run() -> Result<bool, String> {
         write(path, &head.to_json())?;
     }
     Ok(report.exceeds_failure_threshold())
+}
+
+/// Inserts one `⚠️` line per notice under the report's `###` heading.
+fn with_notices(markdown: String, notices: &[Notice]) -> String {
+    if notices.is_empty() {
+        return markdown;
+    }
+    let block: String = notices
+        .iter()
+        .map(|n| format!("⚠️ {}\n\n", n.text))
+        .collect();
+    match markdown.find("\n### ") {
+        Some(start) => {
+            let after = markdown[start + 1..]
+                .find("\n\n")
+                .map_or(markdown.len(), |i| start + 1 + i + 2);
+            format!("{}{block}{}", &markdown[..after], &markdown[after..])
+        }
+        None => format!("{block}{markdown}"),
+    }
+}
+
+enum MatrixOutcome {
+    /// The matrix (or notice-only) report was written; the flag is the gate verdict.
+    Done(bool),
+    /// No matrix could be built and `--head` was given: render the two-way report with these.
+    TwoWay(Vec<Notice>),
+}
+
+/// Variants with their notices, or why there is no matrix; the outer error is static (exit 2).
+type Built = Result<Result<(Vec<Variant>, Vec<Notice>), Degraded>, String>;
+
+/// Why no matrix can be rendered: the notices, the cause last.
+struct Degraded(Vec<Notice>);
+
+fn degradation(text: impl Into<String>) -> Notice {
+    Notice {
+        class: NoticeClass::Degradation,
+        text: text.into(),
+    }
+}
+
+/// `dimensions::apply`, except that names without dimensions never fail: the axis comes from the
+/// file label or is reported by the projection, so that strict check would pre-empt its notice.
+fn apply_dimensions(
+    set: MetricSet,
+    rules: &[Rule],
+    strict: bool,
+) -> Result<(Dimensioned, dimensions::Diagnostics), String> {
+    match dimensions::apply(set.clone(), rules, strict) {
+        Err(e) if e.0.starts_with("dimensions-strict:") => {
+            dimensions::apply(set, rules, false).map_err(|e| e.0)
+        }
+        other => other.map_err(|e| e.0),
+    }
+}
+
+fn parse_rules(matrix: &MatrixOptions) -> Result<Vec<Rule>, String> {
+    matrix.dimensions.iter().map(|r| Rule::parse(r)).collect()
+}
+
+/// Strict mode turns the data-dependent problem `text` into the exit-2 error.
+fn degrade(strict: bool, mut notices: Vec<Notice>, text: String) -> Result<Degraded, String> {
+    if strict {
+        return Err(text);
+    }
+    notices.push(degradation(text));
+    Ok(Degraded(notices))
+}
+
+fn read_variant(path: &str, format: Format) -> Result<Option<MetricSet>, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    Ok(parse(format, &text).ok().filter(|s| !s.metrics.is_empty()))
+}
+
+/// Labelled files, never merged. A file with no data is dropped with a notice.
+fn labelled_variants(args: &Args, eff: &Effective, rules: &[Rule]) -> Built {
+    let strict = eff.matrix.strict;
+    let mut variants = vec![];
+    let mut dropped = vec![];
+    let mut notices = vec![];
+    for (i, (label, path)) in args.variants.iter().enumerate() {
+        let Some(set) = read_variant(path, eff.format)? else {
+            dropped.push((i, label, path));
+            continue;
+        };
+        let (dimensioned, diagnostics) = apply_dimensions(set, rules, strict)?;
+        notices.extend(diagnostics.notices());
+        variants.push(
+            label_variant(label.clone(), &dimensioned, &eff.matrix.compare_by).map_err(|e| e.0)?,
+        );
+    }
+    let reference_label = match &eff.matrix.reference {
+        Reference::Label(l) => l,
+        Reference::First => &args.variants[0].0,
+    };
+    for (_, label, _) in &dropped {
+        if *label == reference_label {
+            let text = format!("reference '{label}' produced no data; no comparison made");
+            return degrade(strict, notices, text).map(Err);
+        }
+    }
+    let kept = || {
+        variants
+            .iter()
+            .map(|v| v.label.as_str())
+            .collect::<Vec<_>>()
+    };
+    for (_, label, path) in &dropped {
+        let base = format!("variant '{label}' produced no data ({path})");
+        if strict {
+            return Err(base);
+        }
+        notices.push(degradation(format!(
+            "{base}; comparing {}",
+            kept().join(" and ")
+        )));
+    }
+    Ok(Ok((variants, notices)))
+}
+
+/// One input split by `compare-by`.
+fn axis_variants(args: &Args, eff: &Effective, rules: &[Rule]) -> Built {
+    let strict = eff.matrix.strict;
+    let head = load(&args.head, eff.format)?;
+    let (dimensioned, diagnostics) = apply_dimensions(head, rules, strict)?;
+    let mut notices = diagnostics.notices();
+    let projection = project_by_axis(
+        &dimensioned,
+        &eff.matrix.compare_by,
+        eff.matrix.group_by.as_deref(),
+    )
+    .map_err(|e| e.0)?;
+    if projection.variants.is_empty() {
+        let text = projection
+            .notices
+            .first()
+            .map(|n| n.text.clone())
+            .unwrap_or_default();
+        return degrade(strict, notices, text).map(Err);
+    }
+    if let (true, Some(first)) = (strict, projection.notices.first()) {
+        return Err(first.text.clone());
+    }
+    notices.extend(projection.notices);
+    Ok(Ok((projection.variants, notices)))
+}
+
+fn run_matrix(args: &Args, eff: &Effective) -> Result<MatrixOutcome, String> {
+    let strict = eff.matrix.strict;
+    let rules = parse_rules(&eff.matrix)?;
+    let built = if args.variants.is_empty() {
+        axis_variants(args, eff, &rules)?
+    } else {
+        labelled_variants(args, eff, &rules)?
+    };
+    let built = built.and_then(|(variants, mut notices)| {
+        if variants.len() < 2 {
+            let have: Vec<&str> = variants.iter().map(|v| v.label.as_str()).collect();
+            let text = format!(
+                "only {} has data; a matrix needs at least 2 variants; no comparison made",
+                if have.is_empty() {
+                    "none".into()
+                } else {
+                    have.join(", ")
+                }
+            );
+            notices.push(degradation(text));
+            return Err(Degraded(notices));
+        }
+        match check_reference(&variants, &eff.matrix.reference, false) {
+            Ok(Some(n)) => Err(Degraded(vec![n])),
+            _ => {
+                notices.sort_by_key(|n| n.class);
+                Ok((variants, notices))
+            }
+        }
+    });
+    let (variants, notices) = match built {
+        Ok(ok) => ok,
+        Err(Degraded(notices)) => {
+            return degraded_outcome(args, eff, notices);
+        }
+    };
+    check_reference(&variants, &eff.matrix.reference, strict).map_err(|e| e.0)?;
+    let gate = eff.options.fail_on_regression_pct;
+    let mut report = compare_matrix(&variants, &eff.options, &eff.matrix);
+    report.notices.extend(notices);
+    if args.config.is_some() {
+        for (key, value, source) in &eff.sources {
+            report.summary.config_sources.push(Default::default());
+            if let Some(c) = report.summary.config_sources.last_mut() {
+                (c.key, c.value, c.source) = (key.clone(), value.clone(), (*source).into());
+            }
+        }
+    }
+    emit(
+        args,
+        &render_matrix_markdown(&report),
+        &render_json_with_matrix(&report, gate),
+    )?;
+    Ok(MatrixOutcome::Done(matrix_failed(&report, gate)))
+}
+
+/// The ladder past "drop what is offending": two-way when `--head` exists, else notice-only.
+fn degraded_outcome(
+    args: &Args,
+    eff: &Effective,
+    mut notices: Vec<Notice>,
+) -> Result<MatrixOutcome, String> {
+    if !args.head.is_empty() {
+        if let Some(last) = notices.last_mut() {
+            last.text.push_str("; showing the two-way report");
+        }
+        return Ok(MatrixOutcome::TwoWay(notices));
+    }
+    let empty = compare_matrix(&[], &eff.options, &eff.matrix);
+    emit(
+        args,
+        &render_notice_report(&eff.options, &notices),
+        &render_json_with_matrix(&empty, None),
+    )?;
+    Ok(MatrixOutcome::Done(false))
+}
+
+fn emit(args: &Args, markdown: &str, json: &str) -> Result<(), String> {
+    match &args.markdown {
+        Some(path) => write(path, markdown)?,
+        None => print!("{markdown}"),
+    }
+    if let Some(path) = &args.json {
+        write(path, json)?;
+    }
+    Ok(())
+}
+
+/// `--print-dimensions`: what the default (or custom) rules find in the same inputs a run reads.
+/// For `--variant` runs the first file with data stands in for all of them.
+fn print_dimensions(args: &Args, eff: &Effective) -> Result<String, String> {
+    let rules = parse_rules(&eff.matrix)?;
+    let set = if args.variants.is_empty() {
+        load(&args.head, eff.format)?
+    } else {
+        let mut found = None;
+        for (_, path) in &args.variants {
+            if let Some(set) = read_variant(path, eff.format)? {
+                found = Some(set);
+                break;
+            }
+        }
+        found.unwrap_or_default()
+    };
+    let (dimensioned, _) = dimensions::apply(set, &rules, false).map_err(|e| e.to_string())?;
+    Ok(dimensions_json(&dimensioned, rules.len()))
+}
+
+fn dimensions_json(d: &Dimensioned, rules: usize) -> String {
+    let dims: Vec<Value> = d
+        .dimension_summary()
+        .into_iter()
+        .filter(|s| s.name != dimensions::GROUP_AXIS)
+        .map(|s| {
+            let mut o = json!({"name": s.name, "values": s.values, "benchmarks": s.benchmarks});
+            if s.value_count > s.values.len() {
+                o["values-truncated"] = json!(true);
+            }
+            o
+        })
+        .collect();
+    let mut out = json!({
+        "dimensions": dims,
+        "pseudo": [dimensions::GROUP_AXIS],
+        "rules": if rules == 0 { "default".to_string() } else { format!("custom ({rules})") },
+        "unmatched": d.unmatched(),
+    });
+    if dims.is_empty() {
+        out["hint"] = json!(
+            "no dimensions found; the zero-config rules read /key=value segments and [k=v] \
+             groups; add a 'dimensions' rule (<dim>=<regex with a named group>)"
+        );
+    }
+    format!("{out:#}\n")
 }
 
 fn load(paths: &[String], format: Format) -> Result<MetricSet, String> {

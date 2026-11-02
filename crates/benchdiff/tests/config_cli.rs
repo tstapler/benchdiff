@@ -363,3 +363,60 @@ fn help_should_list_every_new_flag_with_default_and_allowed_values_from_key_tabl
     assert!(help.contains("allowed: holm, none") && help.contains("allowed: full, ratio"));
     assert!(help.contains("default"));
 }
+
+#[test]
+fn config_should_drive_an_nway_run_and_label_its_sources_in_the_matrix_json() {
+    let cfg = config_file(
+        "nway",
+        "benchdiff.config.json",
+        r#"{"version":1,"reference":"quick","cell-format":"ratio"}"#,
+    );
+    let json_path = config_file("nway-json", "out.json", "");
+    let out = run(&[
+        "--config",
+        &cfg,
+        "--variant",
+        "quick=testdata/nway/quick.txt",
+        "--variant",
+        "heap=testdata/nway/heap.txt",
+        "--json",
+        &json_path,
+    ]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let md = stdout(&out);
+    assert!(
+        md.contains("x 🟢") || md.contains("x ~") || md.contains("x 🔴"),
+        "{md}"
+    );
+    let json: Value = serde_json::from_str(&std::fs::read_to_string(&json_path).unwrap()).unwrap();
+    let sources = json["matrix"]["summary"]["config_sources"].to_string();
+    assert!(
+        sources.contains("cell-format") && sources.contains("config"),
+        "{sources}"
+    );
+}
+
+#[test]
+fn config_should_let_a_flag_override_the_file_in_an_nway_run() {
+    let cfg = config_file(
+        "nway-flag",
+        "benchdiff.config.json",
+        r#"{"version":1,"reference":"quick","cell-format":"ratio"}"#,
+    );
+    let out = run(&[
+        "--config",
+        &cfg,
+        "--cell-format",
+        "full",
+        "--variant",
+        "quick=testdata/nway/quick.txt",
+        "--variant",
+        "heap=testdata/nway/heap.txt",
+    ]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert!(
+        stdout(&out).contains(" ns/op** (0.69x)"),
+        "{}",
+        stdout(&out)
+    );
+}
