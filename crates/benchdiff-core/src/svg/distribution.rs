@@ -62,13 +62,11 @@ enum Mode {
 /// `min(chart-rows, max-rows)`) that have samples on both sides, with a `+ N more not shown`
 /// footer and `skipped = CapExceeded` when rows were cut. `Err(NoSamples)` when none has
 /// samples, e.g. the report was built without `keep_samples`.
-#[allow(dead_code)] // wired by the dispatcher in 3.3.1b
 pub fn distribution_chart(report: &Report, opts: &SvgOptions) -> Result<SvgFile, SkipReason> {
     distribution_chart_themed(report, opts, theme_of(opts))
 }
 
 /// As `distribution_chart`, with the palette chosen by the caller.
-#[allow(dead_code)] // wired by the dispatcher in 3.3.1b
 pub fn distribution_chart_themed(
     report: &Report,
     opts: &SvgOptions,
@@ -115,7 +113,6 @@ pub fn distribution_chart_themed(
 
 /// N-way distribution chart: one lane per variant that has samples, for the `opts.rows`
 /// benchmarks with the largest |delta| against the reference. File name `distribution`.
-#[allow(dead_code)] // wired by the dispatcher in 3.3.1b
 pub fn distribution_matrix_chart(
     report: &MatrixReport,
     opts: &SvgOptions,
@@ -124,7 +121,6 @@ pub fn distribution_matrix_chart(
 }
 
 /// As `distribution_matrix_chart`, with the palette chosen by the caller.
-#[allow(dead_code)] // wired by the dispatcher in 3.3.1b
 pub fn distribution_matrix_chart_themed(
     report: &MatrixReport,
     opts: &SvgOptions,

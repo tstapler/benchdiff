@@ -69,7 +69,6 @@ struct Plan<'a> {
 /// Draws the rows `select_rows` picks (largest |delta| first, capped at `min(chart-rows, max-rows)`) and at most
 /// `opts.max_series` variants. `Err(NothingToCompare)` without a variant to compare,
 /// `Err(Empty)` when no row has a usable reference value.
-#[allow(dead_code)] // wired up by render_svgs (3.3.1b)
 pub fn ranking_chart(report: &MatrixReport, opts: &SvgOptions) -> Result<SvgFile, SkipReason> {
     let theme = match opts.theme {
         ChartTheme::Dark => Theme::Dark,
@@ -80,7 +79,6 @@ pub fn ranking_chart(report: &MatrixReport, opts: &SvgOptions) -> Result<SvgFile
 
 /// As `ranking_chart`, with the palette chosen by the caller; the file name carries a
 /// `-light`/`-dark` suffix only when `opts.theme` is `Both`.
-#[allow(dead_code)] // wired up by render_svgs (3.3.1b)
 pub fn ranking_chart_themed(
     report: &MatrixReport,
     opts: &SvgOptions,
