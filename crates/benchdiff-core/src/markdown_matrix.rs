@@ -4,13 +4,15 @@
 //! Wording rule (ADR-005): only each variant against the reference is tested, so prose says
 //! "slower/faster than reference" and "has the best geomean", never "regression" or "fastest".
 
-use crate::compare::{Method, Verdict};
+use crate::compare::{Method, Options, Verdict};
 use crate::markdown::{code, flatten, fmt_num, marker};
+use crate::matrix::{matrix_failures, FailedCell, FailureKind};
 use crate::matrix::{
     Cell, CellFormat, Comparison, Correction, GeomeanFamily, MatrixReport, MatrixRow,
     MatrixSummary, PresentCell,
 };
 use crate::model::Better;
+use crate::notice::{Notice, NoticeClass};
 use std::fmt::Write;
 
 /// Longest Holm-adjusted list in the Method note.
@@ -30,7 +32,12 @@ pub fn render_matrix_markdown(report: &MatrixReport) -> String {
     if let Some(line) = reference_line(s) {
         let _ = writeln!(out, "{line}\n");
     }
-    // 2.2.1b inserts, in this order: gate line, then notice lines (after the reference line).
+    let failures = gate_failures(report);
+    if let Some(line) = gate_line(s, failures.as_deref()) {
+        let _ = writeln!(out, "{line}\n");
+    }
+    let notices = collect_notices(report);
+    out.push_str(&render_notices(&notices));
 
     let cols = display_columns(report);
     let sel = select_rows(report);
@@ -62,7 +69,12 @@ pub fn render_matrix_markdown(report: &MatrixReport) -> String {
         );
     }
     out.push('\n');
-    render_method(&mut out, report);
+    render_method(
+        &mut out,
+        report,
+        &notices,
+        failures.as_deref().unwrap_or_default(),
+    );
     out
 }
 
@@ -420,9 +432,254 @@ fn legend(used: &Used) -> String {
     format!("_{}_", parts.join(" · "))
 }
 
+// ---- notices and the gate ----
+
+/// Notices rendered inline before the rest collapse into one overflow line.
+const NOTICES_INLINE: usize = 5;
+/// Longest `gate:` line, in characters.
+const GATE_LINE_MAX: usize = 200;
+/// Cells named in the `gate:` line.
+const GATE_NAMED: usize = 3;
+/// Longest `variant on row` name in the `gate:` line, before it is trimmed further to fit.
+const GATE_NAME_MAX: usize = 40;
+/// Failing cells listed in the Method note.
+const METHOD_FAILURES: usize = 50;
+/// Names listed in a reference-absent notice.
+const ABSENT_LISTED: usize = 10;
+
+/// Stable sort by class: the fixed display order, insertion order within a class.
+fn sorted(notices: &[Notice]) -> Vec<&Notice> {
+    let mut v: Vec<&Notice> = notices.iter().collect();
+    v.sort_by_key(|n| n.class);
+    v
+}
+
+/// One `⚠️ text` paragraph per notice in class order; past the fifth, one overflow line.
+/// Empty input renders nothing.
+pub(crate) fn render_notices(notices: &[Notice]) -> String {
+    let mut out = String::new();
+    let all = sorted(notices);
+    for n in all.iter().take(NOTICES_INLINE) {
+        let _ = writeln!(out, "⚠️ {}\n", esc_notice(&n.text));
+    }
+    let more = all.len().saturating_sub(NOTICES_INLINE);
+    if more > 0 {
+        let noun = if more == 1 { "notice" } else { "notices" };
+        let _ = writeln!(out, "⚠️ {more} more {noun} (see Method)\n");
+    }
+    out
+}
+
+/// Every notice the report implies: the ones raised while building it, plus skipped metrics,
+/// rows the reference lacks and invalid cells.
+fn collect_notices(report: &MatrixReport) -> Vec<Notice> {
+    let mut out = report.notices.clone();
+    for v in &report.summary.skipped {
+        if v.total == 0 {
+            continue;
+        }
+        let shown: Vec<String> = v
+            .skipped
+            .iter()
+            .take(ABSENT_LISTED)
+            .map(|l| code(l))
+            .collect();
+        let first = if v.total > shown.len() {
+            format!(" (first {})", shown.len())
+        } else {
+            String::new()
+        };
+        out.push(Notice {
+            class: NoticeClass::Skipped,
+            text: format!(
+                "{} metric(s) in {} had no usable value and were ignored: {}{first}",
+                v.total,
+                v.label,
+                shown.join(", ")
+            ),
+        });
+    }
+    if let (Some(r), n @ 1..) = (&report.summary.reference, report.reference_absent.len()) {
+        let names: Vec<&str> = report
+            .reference_absent
+            .iter()
+            .take(ABSENT_LISTED)
+            .map(String::as_str)
+            .collect();
+        let tail = if n > names.len() {
+            format!(" (first {ABSENT_LISTED}, and {} more)", n - names.len())
+        } else {
+            String::new()
+        };
+        let noun = if n == 1 { "benchmark" } else { "benchmarks" };
+        out.push(Notice {
+            class: NoticeClass::ReferenceAbsent,
+            text: format!(
+                "reference \"{}\" absent from {n} {noun}: {}{tail}; set 'reference' to another variant",
+                r.label,
+                names.join(", ")
+            ),
+        });
+    }
+    let per_variant: Vec<(String, usize)> = report
+        .columns
+        .iter()
+        .enumerate()
+        .filter_map(|(c, label)| {
+            let n = report
+                .rows
+                .iter()
+                .filter(|row| {
+                    matches!(&row.cells[c], Cell::Present(p) if matches!(p.vs_reference, Comparison::Invalid(_)))
+                })
+                .count();
+            (n > 0).then(|| (label.to_string(), n))
+        })
+        .collect();
+    let total: usize = per_variant.iter().map(|(_, n)| n).sum();
+    if total > 0 {
+        let noun = if total == 1 { "cell" } else { "cells" };
+        let by: Vec<String> = per_variant
+            .iter()
+            .map(|(l, n)| format!("{l}: {n}"))
+            .collect();
+        out.push(Notice {
+            class: NoticeClass::Invalid,
+            text: format!("{total} invalid {noun} ({})", by.join(", ")),
+        });
+    }
+    out
+}
+
+/// Failing cells when the gate applies: `fail-on-regression` set against an explicit reference.
+/// A defaulted reference never gates (the option validator rejects it; this is the backstop).
+fn gate_failures(report: &MatrixReport) -> Option<Vec<FailedCell>> {
+    let s = &report.summary;
+    let explicit = s.reference.as_ref().is_some_and(|r| r.explicit);
+    s.fail_on_regression_pct
+        .filter(|_| explicit)
+        .map(|limit| matrix_failures(report, Some(limit)))
+}
+
+/// Keeps the head and tail of `text`, replacing the middle with `…`, in at most `max` chars.
+fn middle_cut(text: &str, max: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= max {
+        return text.to_string();
+    }
+    let keep = max.saturating_sub(1);
+    let head = keep.div_ceil(2);
+    let tail = keep - head;
+    let mut out: String = chars[..head].iter().collect();
+    out.push('…');
+    out.extend(&chars[chars.len() - tail..]);
+    out
+}
+
+fn failure_name(f: &FailedCell, max: usize) -> String {
+    let name = esc(&middle_cut(
+        &flatten(&format!("{} on {}", f.variant, f.row)),
+        max,
+    ));
+    match f.kind {
+        FailureKind::Invalid => format!("{name} invalid"),
+        FailureKind::Regressed { .. } => name,
+    }
+}
+
+/// `gate: fail-on-regression 10% vs quick: passed | FAILED (...)`; `None` without a gate.
+fn gate_line(s: &MatrixSummary, failures: Option<&[FailedCell]>) -> Option<String> {
+    let failures = failures?;
+    let limit = s.fail_on_regression_pct?;
+    let reference = esc(&s.reference.as_ref()?.label);
+    let head = format!(
+        "gate: fail-on-regression {}% vs {reference}:",
+        fmt_num(limit)
+    );
+    if failures.is_empty() {
+        return Some(format!("{head} passed"));
+    }
+    let n = failures.len();
+    let noun = if n == 1 { "cell" } else { "cells" };
+    let more = n.saturating_sub(GATE_NAMED);
+    // Trim the names, never the count, until the line fits.
+    let build = |max: usize| {
+        let names: Vec<String> = failures
+            .iter()
+            .take(GATE_NAMED)
+            .map(|f| failure_name(f, max))
+            .collect();
+        let tail = if more > 0 {
+            format!(" and {more} more; full list in Method")
+        } else {
+            String::new()
+        };
+        format!("{head} FAILED ({n} {noun}: {}{tail})", names.join(", "))
+    };
+    let mut max = GATE_NAME_MAX;
+    let mut line = build(max);
+    while line.chars().count() > GATE_LINE_MAX && max > 8 {
+        max -= 1;
+        line = build(max);
+    }
+    Some(line)
+}
+
+fn method_failures(failures: &[FailedCell]) -> String {
+    let items: Vec<String> = failures
+        .iter()
+        .take(METHOD_FAILURES)
+        .map(|f| {
+            let name = failure_name(f, usize::MAX);
+            match f.kind {
+                FailureKind::Regressed { pct: Some(p) } => format!("{name} ({p:+.1}%)"),
+                _ => name,
+            }
+        })
+        .collect();
+    let more = failures.len().saturating_sub(METHOD_FAILURES);
+    let tail = if more > 0 {
+        format!(" and {more} more; the JSON report has them all")
+    } else {
+        String::new()
+    };
+    format!(
+        "Gate failures ({}): {}{tail}.",
+        failures.len(),
+        items.join("; ")
+    )
+}
+
+/// The report for a run that could not compare anything: sticky marker, title, the notices
+/// in class order, all of them (there is no Method note to collapse into). No verdict, and the
+/// gate does not apply.
+pub fn render_notice_report(opts: &Options, notices: &[Notice]) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "{}", marker(&opts.tag));
+    let title = esc(&opts.title);
+    let _ = writeln!(
+        out,
+        "### {}\n",
+        if title.trim().is_empty() {
+            "benchdiff"
+        } else {
+            &title
+        }
+    );
+    for n in sorted(notices) {
+        let _ = writeln!(out, "⚠️ {}\n", esc_notice(&n.text));
+    }
+    out
+}
+
 // ---- Method note ----
 
-fn render_method(out: &mut String, report: &MatrixReport) {
+fn render_method(
+    out: &mut String,
+    report: &MatrixReport,
+    notices: &[Notice],
+    failures: &[FailedCell],
+) {
     let s = &report.summary;
     let floor = if s.min_abs > 0.0 {
         format!(" and ≥ {} absolute", fmt_num(s.min_abs))
@@ -458,7 +715,15 @@ fn render_method(out: &mut String, report: &MatrixReport) {
         missing_sentence(report),
         holm_sentence(report),
     );
-    // 2.2.1b inserts the full notice list here.
+    if !failures.is_empty() {
+        let _ = writeln!(out, "\n{}", method_failures(failures));
+    }
+    if !notices.is_empty() {
+        let _ = writeln!(out, "\nNotices:\n");
+        for n in sorted(notices) {
+            let _ = writeln!(out, "- ⚠️ {}", esc_notice(&n.text));
+        }
+    }
     let _ = writeln!(out, "\n</details>");
 }
 
@@ -561,6 +826,25 @@ fn holm_sentence(report: &MatrixReport) -> String {
         " Raw p was below α but the adjusted p was not: {}{tail}.",
         items.join("; ")
     )
+}
+
+/// Notice text is built from untrusted names but written by us, so only what could turn it into
+/// a link, tag, table cell or emphasis is escaped; `(s)` and `(first 10)` stay readable.
+fn esc_notice(text: &str) -> String {
+    let mut out = String::new();
+    for ch in flatten(text).chars() {
+        match ch {
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '&' => out.push_str("&amp;"),
+            '\\' | '`' | '*' | '_' | '[' | ']' | '|' | '@' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 /// Untrusted text as plain Markdown: one line, markup characters backslash-escaped.
@@ -936,6 +1220,272 @@ mod tests {
             }
             assert!(!md.contains("regress"), "{md}");
         }
+    }
+
+    fn notice(class: NoticeClass, text: &str) -> Notice {
+        Notice {
+            class,
+            text: text.into(),
+        }
+    }
+
+    fn explicit(label: &str) -> MatrixOptions {
+        MatrixOptions {
+            reference: Reference::Label(VariantLabel::parse(label).unwrap()),
+            ..mopts()
+        }
+    }
+
+    fn seven_notices() -> Vec<Notice> {
+        vec![
+            notice(NoticeClass::Chart, "c1"),
+            notice(NoticeClass::Invalid, "i1"),
+            notice(NoticeClass::Degradation, "d1"),
+            notice(NoticeClass::Skipped, "s1"),
+            notice(NoticeClass::Degradation, "d2"),
+            notice(NoticeClass::ReferenceAbsent, "r1"),
+            notice(NoticeClass::Skipped, "s2"),
+        ]
+    }
+
+    #[test]
+    fn render_notices_should_order_by_class_cap_at_five_and_never_precede_the_verdict() {
+        let got = render_notices(&seven_notices());
+        let lines: Vec<&str> = got.lines().filter(|l| !l.is_empty()).collect();
+        assert_eq!(
+            lines,
+            [
+                "⚠️ d1",
+                "⚠️ d2",
+                "⚠️ s1",
+                "⚠️ s2",
+                "⚠️ r1",
+                "⚠️ 2 more notices (see Method)"
+            ]
+        );
+        assert_eq!(render_notices(&[]), "");
+
+        let mut report = compare_matrix(&fifteen(2), &Options::default(), &mopts());
+        report.notices = seven_notices();
+        let md = render_matrix_markdown(&report);
+        let content: Vec<&str> = md.lines().filter(|l| !l.is_empty()).collect();
+        assert!(content[1].starts_with("### "), "{md}");
+        assert!(
+            content[2].starts_with("**merge** has the best geomean"),
+            "{md}"
+        );
+        assert!(content[3].starts_with("reference: "), "{md}");
+        assert_eq!(content[4], "⚠️ d1", "{md}");
+        // Method lists all seven, in the same order.
+        let method = md.split("<summary>Method</summary>").nth(1).unwrap();
+        let listed: Vec<&str> = method.lines().filter(|l| l.starts_with("- ⚠️ ")).collect();
+        assert_eq!(
+            listed,
+            [
+                "- ⚠️ d1",
+                "- ⚠️ d2",
+                "- ⚠️ s1",
+                "- ⚠️ s2",
+                "- ⚠️ r1",
+                "- ⚠️ i1",
+                "- ⚠️ c1"
+            ]
+        );
+    }
+
+    #[test]
+    fn ux_s1_11_notices_should_follow_fixed_order_cap_at_five_and_collapse_overflow_into_method() {
+        let mut v = fifteen(0);
+        v[1].set.metrics.retain(|m| m.name != "Bench00");
+        let mut report = compare_matrix(&v, &Options::default(), &mopts());
+        report.reference_absent = vec!["Zed".into()];
+        if let Cell::Present(p) = &mut report.rows[1].cells[2] {
+            p.vs_reference = Comparison::Invalid(crate::matrix::Reason("bad".into()));
+        }
+        report.summary.skipped = vec![crate::matrix::VariantSkipped {
+            label: "heap".into(),
+            skipped: vec!["Odd".into()],
+            total: 1,
+        }];
+        report.notices = vec![notice(NoticeClass::Chart, "chart one")];
+        let md = render_matrix_markdown(&report);
+        let at = |needle: &str| {
+            md.find(needle)
+                .unwrap_or_else(|| panic!("{needle} in {md}"))
+        };
+        let skipped = at("⚠️ 1 metric(s) in heap");
+        let absent = at("⚠️ reference \"quick\" absent from 1 benchmark: Zed; set 'reference'");
+        let invalid = at("⚠️ 1 invalid cell (merge: 1)");
+        let chart = at("⚠️ chart one");
+        assert!(
+            skipped < absent && absent < invalid && invalid < chart,
+            "{md}"
+        );
+        assert!(at("reference: quick") < skipped);
+        assert!(!md.contains("more notice"));
+    }
+
+    fn gate_report(extra_invalid: bool) -> MatrixReport {
+        let rows = ["Sort/size=100", "Sort/size=10", "Parse"];
+        let col = |label: &str, f: f64| {
+            let items: Vec<(&str, f64)> = rows.iter().map(|r| (*r, f)).collect();
+            variant(label, &items)
+        };
+        let v = vec![col("quick", 100.0), col("heap", 130.0), col("merge", 300.0)];
+        let opts = Options {
+            fail_on_regression_pct: Some(10.0),
+            ..Options::default()
+        };
+        let mut report = compare_matrix(&v, &opts, &explicit("quick"));
+        if extra_invalid {
+            let last = report.rows.len() - 1;
+            if let Cell::Present(p) = &mut report.rows[last].cells[2] {
+                p.vs_reference = Comparison::Invalid(crate::matrix::Reason("bad".into()));
+            }
+        }
+        report
+    }
+
+    #[test]
+    fn gate_line_should_name_one_failing_cell_and_pass_otherwise() {
+        let opts = Options {
+            fail_on_regression_pct: Some(10.0),
+            ..Options::default()
+        };
+        let v = vec![
+            variant("quick", &[("Sort/size=100", 100.0)]),
+            variant("heap", &[("Sort/size=100", 130.0)]),
+        ];
+        let md = render(&v, &opts, &explicit("quick"));
+        let lines: Vec<&str> = md.lines().collect();
+        let r = lines
+            .iter()
+            .position(|l| l.starts_with("reference: "))
+            .unwrap();
+        assert_eq!(
+            lines[r + 2],
+            "gate: fail-on-regression 10% vs quick: FAILED (1 cell: heap on Sort/size=100)"
+        );
+        let v = vec![
+            variant("quick", &[("Sort/size=100", 100.0)]),
+            variant("heap", &[("Sort/size=100", 101.0)]),
+        ];
+        let md = render(&v, &opts, &explicit("quick"));
+        assert!(
+            md.contains("\ngate: fail-on-regression 10% vs quick: passed\n"),
+            "{md}"
+        );
+        // No flag: no gate line. Defaulted reference: the gate never applies.
+        assert!(!render(&v, &Options::default(), &explicit("quick")).contains("gate:"));
+        assert!(!render(&v, &opts, &mopts()).contains("gate:"));
+    }
+
+    #[test]
+    fn gate_line_should_name_three_cells_cut_each_to_forty_chars_cap_at_two_hundred_and_list_all_in_method_when_seven_fail(
+    ) {
+        // 3 rows x 2 slower variants = 6 cells, one of them Invalid; a cloned row with one
+        // Missing cell adds a seventh.
+        let mut report = gate_report(true);
+        let mut extra = report.rows[0].clone();
+        extra.cells[2] = Cell::Missing;
+        report.rows.push(extra);
+        let md = render_matrix_markdown(&report);
+        let gate = md.lines().find(|l| l.starts_with("gate:")).unwrap();
+        assert!(
+            gate.starts_with("gate: fail-on-regression 10% vs quick: FAILED (7 cells: "),
+            "{gate}"
+        );
+        assert!(
+            gate.ends_with(" and 4 more; full list in Method)"),
+            "{gate}"
+        );
+        assert_eq!(gate.matches(" on ").count(), 3, "{gate}");
+        assert!(gate.chars().count() <= 200);
+        let method = md.split("<summary>Method</summary>").nth(1).unwrap();
+        let list = method
+            .lines()
+            .find(|l| l.starts_with("Gate failures (7): "))
+            .unwrap();
+        assert_eq!(list.matches(" on ").count(), 7, "{list}");
+        assert!(list.contains("merge on Parse invalid"), "{list}");
+
+        // Long names are cut to 40 characters and the whole line stays within 200.
+        let mut report = gate_report(false);
+        let long = "L".repeat(120);
+        for row in &mut report.rows {
+            row.name = format!("{long}{}", row.name);
+        }
+        let md = render_matrix_markdown(&report);
+        let gate = md.lines().find(|l| l.starts_with("gate:")).unwrap();
+        assert!(gate.chars().count() <= 200, "{}", gate.chars().count());
+        assert!(gate.contains("FAILED (6 cells: "), "{gate}");
+        assert!(
+            gate.contains('…') && gate.ends_with("and 3 more; full list in Method)"),
+            "{gate}"
+        );
+        assert!(!gate.contains(&"L".repeat(41)), "{gate}");
+    }
+
+    #[test]
+    fn middle_cut_should_keep_head_and_tail_within_max() {
+        assert_eq!(middle_cut("short", 40), "short");
+        let cut = middle_cut(
+            &"a".repeat(30)
+                .chars()
+                .chain("b".repeat(30).chars())
+                .collect::<String>(),
+            40,
+        );
+        assert_eq!(cut.chars().count(), 40);
+        assert!(cut.starts_with('a') && cut.ends_with('b') && cut.contains('…'));
+    }
+
+    #[test]
+    fn render_notice_report_should_match_the_committed_notice_only_golden() {
+        let got = render_notice_report(
+            &Options::default(),
+            &[notice(
+                NoticeClass::Degradation,
+                "reference 'quick' produced no data; no comparison made",
+            )],
+        );
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../testdata/nway/expected/notice-only.md"
+        );
+        if std::env::var_os("UPDATE_SNAPSHOTS").is_some() {
+            std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
+            std::fs::write(path, &got).unwrap();
+        }
+        let want = std::fs::read_to_string(path).expect("golden file");
+        assert_eq!(got, want);
+        assert_eq!(got.lines().next(), Some(marker("default").as_str()));
+        assert!(!got.contains("gate:") && !got.contains("geomean"));
+    }
+
+    #[test]
+    fn render_notice_report_should_list_every_notice_in_class_order_and_escape_text() {
+        let got = render_notice_report(
+            &Options {
+                title: String::new(),
+                tag: "t".into(),
+                ..Options::default()
+            },
+            &[
+                notice(NoticeClass::Chart, "c"),
+                notice(
+                    NoticeClass::Degradation,
+                    "[x](http://evil)\n<!-- benchdiff:t -->",
+                ),
+            ],
+        );
+        assert!(got.contains("### benchdiff\n"));
+        assert_eq!(got.matches("<!-- benchdiff:").count(), 1, "{got}");
+        assert!(!got.contains("[x]("), "{got}");
+        assert!(
+            got.find("⚠️ \\[x").unwrap() < got.find("⚠️ c").unwrap(),
+            "{got}"
+        );
     }
 
     #[test]
