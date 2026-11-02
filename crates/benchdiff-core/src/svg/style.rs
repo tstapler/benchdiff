@@ -165,7 +165,7 @@ impl Shape {
 }
 
 fn parse_hex(hex: &str) -> Option<[f64; 3]> {
-    let h = hex.strip_prefix('#').filter(|h| h.len() == 6)?;
+    let h = hex.strip_prefix('#').filter(|h| h.len() == 6 && h.is_ascii())?;
     let ch = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).ok().map(f64::from);
     Some([ch(0)?, ch(2)?, ch(4)?])
 }
@@ -208,6 +208,13 @@ mod tests {
         assert!((cr("#000000", "#ffffff") - 21.0).abs() < 1e-9);
         assert!((cr("#ffffff", "#ffffff") - 1.0).abs() < 1e-9);
         assert!(contrast_ratio("nope", "#fff").is_none());
+    }
+
+    #[test]
+    fn parse_hex_rejects_non_ascii_without_panicking() {
+        // six bytes, so the length check passes, but byte 2 is mid-character
+        assert!(parse_hex("#€€").is_none());
+        assert!(contrast_ratio("#€€", "#ffffff").is_none());
     }
 
     #[test]
