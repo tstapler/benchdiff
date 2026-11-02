@@ -3,6 +3,13 @@
 //! Advances are Helvetica widths per 1000 em for ASCII 0x20..=0x7E, from Adobe's
 //! Core 14 `Helvetica.afm` (Adobe's AFM licence permits free redistribution with the
 //! copyright notice); Arial is metric-compatible. Non-ASCII counts 1.0 em.
+//!
+//! Verified 2026-11-01 against
+//! <https://raw.githubusercontent.com/foliojs/pdfkit/master/lib/font/data/Helvetica.afm>
+//! ("Copyright (c) 1985, 1987, 1989, 1990, 1997 Adobe Systems Incorporated. All Rights
+//! Reserved."). All 95 entries match by ASCII glyph name; the AFM's own code column is
+//! Adobe StandardEncoding, so `'` and `` ` `` are taken from `quotesingle` (191) and
+//! `grave` (333), not StandardEncoding's `quoteright`/`quoteleft` (222).
 
 /// Safety margin on every estimate, since the real font may differ from Helvetica.
 const MARGIN: f64 = 1.10;
@@ -82,6 +89,22 @@ fn longest_prefix(chars: &[char], suffix: &str, font_px: f64, max_px: f64) -> Op
 mod tests {
     use super::*;
     use crate::svg::writer::xml_escape;
+
+    #[test]
+    fn advance_table_should_match_helvetica_afm_when_pinned_glyphs_sampled() {
+        for (c, afm) in [
+            (' ', 278),
+            ('i', 222),
+            ('W', 944),
+            ('m', 833),
+            ('@', 1015),
+            ('\'', 191),
+            ('`', 333),
+            ('~', 584),
+        ] {
+            assert_eq!(ADVANCE_1000[c as usize - 0x20], afm, "advance for {c:?}");
+        }
+    }
 
     #[test]
     fn text_width_should_use_advance_table_with_ten_percent_margin_when_ascii_label() {
