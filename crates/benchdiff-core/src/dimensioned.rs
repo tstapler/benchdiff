@@ -84,6 +84,15 @@ impl Dimensioned {
         self.entries.iter().map(|(m, r)| (m, r))
     }
 
+    /// All entries of `parts` in order, for summaries over several files. Skipped keys are not
+    /// carried: a union is only ever summarized, never compared.
+    pub fn concat(parts: impl IntoIterator<Item = Dimensioned>) -> Self {
+        Self {
+            entries: parts.into_iter().flat_map(|d| d.entries).collect(),
+            skipped: Skipped::default(),
+        }
+    }
+
     /// Skipped keys with the dimensions and residual extracted from their names.
     pub fn skipped_entries(&self) -> impl Iterator<Item = SkippedEntry<'_>> {
         self.skipped.keys().iter().map(|k| SkippedEntry {

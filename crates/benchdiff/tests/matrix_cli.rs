@@ -651,3 +651,184 @@ fn cli_should_cap_dimension_values_at_twenty_and_flag_the_truncation() {
     assert_eq!(n["values"].as_array().unwrap().len(), 20);
     assert_eq!(n["values-truncated"], true);
 }
+
+// ---- Phase 5 review fixes: matrix thresholds, --base with --compare-by, union dimensions ----
+
+fn config(test: &str, json: &str) -> String {
+    tmp(test, "c.json", json)
+}
+
+/// Data rows whose Quick-vs-other cell carries a verdict emoji.
+fn verdict_rows(md: &str) -> usize {
+    md.lines()
+        .filter(|l| l.starts_with("| `") && (l.contains('🔴') || l.contains('🟢')))
+        .count()
+}
+
+fn two_variants(extra: &[&str]) -> Output {
+    let (q, h) = (labelled("quick", QUICK), labelled("heap", HEAP));
+    let mut args = vec!["--variant", &q, "--variant", &h];
+    args.extend_from_slice(extra);
+    run(&args)
+}
+
+#[test]
+fn cli_should_apply_config_thresholds_to_variant_matrix_by_group_residual_then_group() {
+    let none = config("thr-var-0", r#"{"version":1}"#);
+    assert_eq!(
+        verdict_rows(&stdout(&two_variants(&["--config", &none]))),
+        4
+    );
+    let group = config(
+        "thr-var-1",
+        r#"{"version":1,"thresholds":{"sortbench":1000}}"#,
+    );
+    assert_eq!(
+        verdict_rows(&stdout(&two_variants(&["--config", &group]))),
+        0
+    );
+    let exact = config(
+        "thr-var-2",
+        r#"{"version":1,"thresholds":{"sortbench/Sort":1000}}"#,
+    );
+    let out = two_variants(&["--config", &exact]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(verdict_rows(&stdout(&out)), 2, "{}", stdout(&out));
+    // The exact key beats the group key.
+    let both = config(
+        "thr-var-3",
+        r#"{"version":1,"thresholds":{"sortbench":1000,"sortbench/Sort":1}}"#,
+    );
+    assert_eq!(
+        verdict_rows(&stdout(&two_variants(&["--config", &both]))),
+        2
+    );
+}
+
+#[test]
+fn cli_should_apply_config_thresholds_to_compare_by_matrix_on_the_residual_name() {
+    let file = tmp("thr-cmp", "impl.txt", &impl_file());
+    let cfg = config("thr-cmp", r#"{"version":1,"thresholds":{"Sort":80}}"#);
+    let out = run(&["--head", &file, "--compare-by", "impl", "--config", &cfg]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(verdict_rows(&stdout(&out)), 0, "{}", stdout(&out));
+    assert!(
+        !stdout(&out).contains("matches no benchmark"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn cli_should_apply_the_reference_group_threshold_when_compare_by_group() {
+    let mut text = String::new();
+    for (pkg, ns) in [("pkgA", 100.0), ("pkgB", 112.0)] {
+        text += &format!("pkg: {pkg}\n");
+        for i in 0..10 {
+            text += &format!(
+                "BenchmarkSort-8 \t 1000 \t {:.1} ns/op\n",
+                ns + f64::from(i) * 0.1
+            );
+        }
+    }
+    let file = tmp("thr-grp", "g.txt", &text);
+    let by_group = |cfg: &str| {
+        let c = config("thr-grp", cfg);
+        stdout(&run(&[
+            "--head",
+            &file,
+            "--compare-by",
+            "group",
+            "--config",
+            &c,
+        ]))
+    };
+    assert_eq!(verdict_rows(&by_group(r#"{"version":1}"#)), 1);
+    assert_eq!(
+        verdict_rows(&by_group(r#"{"version":1,"thresholds":{"pkgA":20}}"#)),
+        0
+    );
+    assert_eq!(
+        verdict_rows(&by_group(r#"{"version":1,"thresholds":{"pkgB":20}}"#)),
+        1
+    );
+}
+
+#[test]
+fn cli_should_notice_a_threshold_key_that_matches_no_matrix_benchmark() {
+    let cfg = config(
+        "thr-notice",
+        r#"{"version":1,"thresholds":{"Sort/impl=quick":20,"sortbench/Sort":9,"sortbench":8,"Nope":3}}"#,
+    );
+    let out = two_variants(&["--config", &cfg]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let md = stdout(&out);
+    let text = |k: &str| {
+        format!(
+            "threshold key '{k}' matches no benchmark (matrix keys are group/residual or group)"
+        )
+    };
+    assert!(md.contains(&text("Sort/impl=quick")), "{md}");
+    assert!(md.contains(&text("Nope")), "{md}");
+    assert!(!md.contains(&text("sortbench/Sort")), "{md}");
+    assert!(!md.contains(&text("sortbench")), "{md}");
+    let one = config(
+        "thr-notice-strict",
+        r#"{"version":1,"thresholds":{"Sort/impl=quick":20}}"#,
+    );
+    let strict = two_variants(&["--config", &one, "--dimensions-strict"]);
+    assert_eq!(strict.status.code(), Some(2));
+    assert!(
+        stderr(&strict).contains(&text("Sort/impl=quick")),
+        "{}",
+        stderr(&strict)
+    );
+}
+
+#[test]
+fn cli_should_notice_that_base_is_ignored_when_compare_by_builds_the_matrix() {
+    let file = tmp("base-ignored", "impl.txt", &impl_file());
+    let out = run(&["--head", &file, "--base", BASE, "--compare-by", "impl"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let md = stdout(&out);
+    assert!(md.contains("| Benchmark"), "{md}");
+    assert!(
+        md.contains(
+            "--base is ignored: the matrix is built from --head split by compare-by 'impl'; \
+             --base only feeds the two-way fallback"
+        ),
+        "{md}"
+    );
+    let plain = run(&["--head", &file, "--compare-by", "impl"]);
+    assert!(!stdout(&plain).contains("--base is ignored"));
+}
+
+#[test]
+fn cli_should_union_print_dimensions_across_all_variant_files() {
+    let a = tmp(
+        "dims-union",
+        "a.txt",
+        "BenchmarkS/impl=quick-8 \t 10 \t 5.0 ns/op\nBenchmarkS/impl=heap-8 \t 10 \t 5.0 ns/op\n",
+    );
+    let b = tmp(
+        "dims-union",
+        "b.txt",
+        "BenchmarkS/impl=merge-8 \t 10 \t 5.0 ns/op\nBenchmarkS/impl=heap/size=3-8 \t 10 \t 5.0 ns/op\n",
+    );
+    let (va, vb) = (labelled("a", &a), labelled("b", &b));
+    let out = run(&["--variant", &va, "--variant", &vb, "--print-dimensions"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let v: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
+    let dim = |n: &str| {
+        v["dimensions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["name"] == n)
+            .cloned()
+    };
+    let imp = dim("impl").unwrap_or_else(|| panic!("{v}"));
+    assert_eq!(imp["values"], serde_json::json!(["quick", "heap", "merge"]));
+    assert_eq!(imp["benchmarks"], 4);
+    assert!(dim("size").is_some(), "dimension only in the 2nd file: {v}");
+}

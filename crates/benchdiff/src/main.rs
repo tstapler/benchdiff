@@ -10,8 +10,8 @@ use benchdiff_core::dimensioned::Dimensioned;
 use benchdiff_core::dimensions::{self, Rule};
 use benchdiff_core::markdown_matrix::{render_matrix_markdown_with, render_notice_report};
 use benchdiff_core::matrix::{
-    check_reference, label_variant, project_by_axis, MatrixOptions, MatrixSort, Reference, Variant,
-    VariantLabel,
+    check_reference, label_variant, project_by_axis, unmatched_threshold_notices, MatrixOptions,
+    MatrixSort, Reference, Variant, VariantLabel,
 };
 use benchdiff_core::notice::{Notice, NoticeClass};
 use benchdiff_core::svg::{ChartKind, ChartRows, ChartTheme, ChartWidth, EmbedSetting, SvgOptions};
@@ -613,6 +613,20 @@ fn run_matrix(args: &Args, eff: &Effective) -> Result<MatrixOutcome, String> {
     check_reference(&variants, &eff.matrix.reference, strict).map_err(|e| e.0)?;
     let gate = eff.options.fail_on_regression_pct;
     let mut report = compare_matrix(&variants, &eff.options, &eff.matrix);
+    let mut notices = notices;
+    if !args.base.is_empty() && args.variants.is_empty() {
+        notices.push(degradation(format!(
+            "--base is ignored: the matrix is built from --head split by compare-by '{}'; \
+             --base only feeds the two-way fallback",
+            eff.matrix.compare_by
+        )));
+    }
+    let stray_keys = unmatched_threshold_notices(&report, &eff.options);
+    if let (true, Some(first)) = (strict, stray_keys.first()) {
+        return Err(first.text.clone());
+    }
+    notices.extend(stray_keys);
+    notices.sort_by_key(|n| n.class);
     report.notices.extend(notices);
     if args.config.is_some() {
         for (key, value, source) in &eff.sources {
@@ -703,23 +717,27 @@ fn emit(args: &Args, markdown: &str, json: &str) -> Result<(), String> {
 }
 
 /// `--print-dimensions`: what the default (or custom) rules find in the same inputs a run reads.
-/// For `--variant` runs the first file with data stands in for all of them.
+/// `--variant` files are summarized as a union: values first-seen across files in order,
+/// benchmark counts summed.
 fn print_dimensions(args: &Args, eff: &Effective) -> Result<String, String> {
     let rules = parse_rules(&eff.matrix)?;
-    let set = if args.variants.is_empty() {
-        load(&args.head, eff.format)?
+    let mut sets = vec![];
+    if args.variants.is_empty() {
+        sets.push(load(&args.head, eff.format)?);
     } else {
-        let mut found = None;
         for (_, path) in &args.variants {
-            if let Some(set) = read_variant(path, eff.format)? {
-                found = Some(set);
-                break;
-            }
+            sets.extend(read_variant(path, eff.format)?);
         }
-        found.unwrap_or_default()
-    };
-    let (dimensioned, _) = dimensions::apply(set, &rules, false).map_err(|e| e.to_string())?;
-    Ok(dimensions_json(&dimensioned, rules.len()))
+    }
+    let mut parts = vec![];
+    for set in sets {
+        parts.push(
+            dimensions::apply(set, &rules, false)
+                .map_err(|e| e.to_string())?
+                .0,
+        );
+    }
+    Ok(dimensions_json(&Dimensioned::concat(parts), rules.len()))
 }
 
 fn dimensions_json(d: &Dimensioned, rules: usize) -> String {

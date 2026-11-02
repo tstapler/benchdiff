@@ -120,6 +120,16 @@ test('N-way, config and gate semantics are stated', () => {
   }
 });
 
+test('matrix threshold-key and --base notices are documented', () => {
+  for (const needle of [
+    "threshold key '...' matches no benchmark (matrix keys are group/residual or group)",
+    '`--base` given with `--compare-by` is ignored by the matrix',
+    'summarizes the union of all variant files',
+  ]) {
+    assert.ok(readme.includes(needle), `README lacks "${needle}"`);
+  }
+});
+
 test('concept map, source labels, notice rules and gate-line rules are documented', () => {
   const sec = readme.split(/^### Concept map$/m)[1].split(/^## /m)[0];
   assert.match(sec, /\| Concept \| Action input \| CLI flag \| Config key \|/);

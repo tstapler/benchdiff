@@ -1104,6 +1104,32 @@ fn compare_cell(r: &Metric, m: &Metric, opts: &Options) -> (Comparison, Samples)
     (cmp, row.samples)
 }
 
+/// One `Degradation` notice per threshold key that is neither a row's `group/residual` (bare
+/// residual when the group is empty) nor its `group`; such a key can never apply in the matrix.
+/// Keys written against raw benchmark names are the usual cause.
+pub fn unmatched_threshold_notices(report: &MatrixReport, opts: &Options) -> Vec<Notice> {
+    let matched = |key: &str| {
+        report.rows.iter().any(|row| {
+            let exact = if row.group.is_empty() {
+                row.name.clone()
+            } else {
+                format!("{}/{}", row.group, row.name)
+            };
+            key == exact || (!row.group.is_empty() && key == row.group)
+        })
+    };
+    opts.threshold_overrides
+        .keys()
+        .filter(|key| !matched(key))
+        .map(|key| Notice {
+            class: NoticeClass::Degradation,
+            text: format!(
+                "threshold key '{key}' matches no benchmark (matrix keys are group/residual or group)"
+            ),
+        })
+        .collect()
+}
+
 /// Delta order: invalid and regressed cells first, then improved, then the rest; larger
 /// magnitude first within a class.
 fn delta_rank(row: &MatrixRow) -> (u8, f64) {

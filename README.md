@@ -127,7 +127,8 @@ zero-config rules read only `key=value` path segments (a/impl=quick) and bracket
 
 * `dimensions` adds rules `dim=regex`, each with a `(?P<dim>...)` group, to those defaults (repeatable flag, or one per line in the Action input; YAML block scalars need no backslash doubling, JSON does: `\\d`).
 * `group` is a pseudo-dimension: the benchmark's group, usable in `compare-by` and `group-by`.
-* `benchdiff --head FILE --print-dimensions` prints the detected dimensions as JSON and exits. A wrong dimension name fails with an `available dimensions: ...` suffix.
+* `benchdiff --head FILE --print-dimensions` prints the detected dimensions as JSON and exits (with `--variant`, it summarizes the union of all variant files). A wrong dimension name fails with an `available dimensions: ...` suffix.
+* In an N-way run, a `thresholds` key matches `group/residual` (bare residual when the group is empty) before `group`; a key that matches no benchmark, such as one written against a raw name like `Sort/impl=quick`, produces the notice `threshold key '...' matches no benchmark (matrix keys are group/residual or group)` (exit 2 with `dimensions-strict`). `--base` given with `--compare-by` is ignored by the matrix, which is built from `--head`, and produces a notice; it only feeds the two-way fallback.
 * `dimensions-strict` has no negative form: a `true` set in the config file cannot be switched off by an input or flag.
 
 ## Config file
