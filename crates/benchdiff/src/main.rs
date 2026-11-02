@@ -2,11 +2,15 @@
 //! Built natively and as `wasm32-wasip1` (the GitHub Action runs the latter, with the
 //! files in a preopened directory), so it sticks to `std::fs` and `std::env::args`.
 
-use benchdiff_core::config::{parse_config, ConfigFormat};
+use benchdiff_core::config::{
+    check_compare_by, matrix_help, parse_cell_format, parse_config, parse_correction,
+    parse_dimension_rules, parse_group_by, parse_reference, ConfigFormat,
+};
+use benchdiff_core::matrix::{MatrixOptions, MatrixSort, Reference, VariantLabel};
 use benchdiff_core::svg::{ChartKind, ChartRows, ChartTheme, ChartWidth, EmbedSetting, SvgOptions};
 use benchdiff_core::{
     compare,
-    options::{OptionsOverlay, SvgOptionsOverlay},
+    options::{matrix_sort_of, MatrixOptionsOverlay, OptionsOverlay, SvgOptionsOverlay},
     parse, render_json, render_markdown, Format, MetricSet, Options, Sort,
 };
 use serde_json::{json, Value};
@@ -31,7 +35,7 @@ OPTIONS:
     --no-stats             skip the significance test; thresholds only
     --only-changed         hide unchanged rows
     --no-only-changed      show unchanged rows even if the config file hides them
-    --sort delta|name|input [delta]
+    --sort delta|name|input|rank [delta]; rank needs an N-way run
     --max-rows N           show at most N changed rows
     --title TEXT           report heading [Benchmark comparison]
     --tag TEXT             sticky-comment key [default]
@@ -52,9 +56,16 @@ OPTIONS:
                            true, false or auto (on iff --charts is set) [false]
     --publish-images[=BOOL]
                            host embedded charts as images: true or false [true]
-    -h, --help
+";
+
+const USAGE_TAIL: &str = "    -h, --help
 
 FORMATS: ";
+
+/// `--help`: the fixed lines, the matrix flags generated from the config key table, the tail.
+fn help_text() -> String {
+    format!("{USAGE}{}{USAGE_TAIL}{}", matrix_help(), Format::NAMES)
+}
 
 #[derive(Debug)]
 struct Args {
@@ -69,6 +80,10 @@ struct Args {
     head_json: Option<String>,
     flags: OptionsOverlay,
     svg_flags: SvgOptionsOverlay,
+    matrix_flags: MatrixOptionsOverlay,
+    /// `--variant label=path` in input order.
+    variants: Vec<(VariantLabel, String)>,
+    print_dimensions: bool,
 }
 
 /// Defaults, then the config file, then flags; `sources` names the layer of each non-default key.
@@ -83,6 +98,9 @@ struct Effective {
     svg: SvgOptions,
     #[allow(dead_code)]
     svg_dir: Option<String>,
+    /// Consumed by the N-way wiring (2.2.2b).
+    #[allow(dead_code)]
+    matrix: MatrixOptions,
 }
 
 impl Args {
@@ -101,6 +119,7 @@ impl Args {
         let mut file_values = vec![];
         let mut file_overrides_set = false;
         let mut svg_overlay = SvgOptionsOverlay::default();
+        let mut matrix_overlay = MatrixOptionsOverlay::default();
         if let Some(path) = &self.config {
             let text = std::fs::read_to_string(path).map_err(|e| match e.kind() {
                 std::io::ErrorKind::NotFound => format!("config file not found: {path}"),
@@ -110,16 +129,26 @@ impl Args {
             let config = parse_config(&text, name, ConfigFormat::Json)?;
             (format, base_format) = (config.format, config.base_format);
             svg_overlay = config.svg_overlay();
+            matrix_overlay = config.matrix_overlay();
             let overlay = config.into_overlay();
             file_overrides_set = overlay.threshold_overrides.is_some();
-            file_values = layer_values(&overlay, format, base_format);
+            file_values = layer_values(&overlay, &matrix_overlay, format, base_format);
             overlay.apply(&mut options);
         }
         self.flags.apply(&mut options);
+        let matrix_overlay = matrix_overlay.merge(self.matrix_flags.clone());
+        let mut matrix = MatrixOptions::default();
+        matrix_overlay.apply(&mut matrix);
+        self.check_run_shape(&options, &matrix)?;
         let svg_overlay = svg_overlay.merge(self.svg_flags.clone());
         let mut svg = SvgOptions::default();
         svg_overlay.apply(&mut svg);
-        let flag_values = layer_values(&self.flags, self.format, self.base_format);
+        let flag_values = layer_values(
+            &self.flags,
+            &self.matrix_flags,
+            self.format,
+            self.base_format,
+        );
 
         let mut sources = vec![];
         for key in SETTING_KEYS {
@@ -143,12 +172,38 @@ impl Args {
             file_overrides_set,
             svg,
             svg_dir: svg_overlay.svg_dir,
+            matrix,
         })
+    }
+
+    /// Static checks that need the layered settings (exit 2, whatever the data).
+    fn check_run_shape(&self, options: &Options, matrix: &MatrixOptions) -> Result<(), String> {
+        let n_way = !self.variants.is_empty() || !matrix.compare_by.is_empty();
+        if matrix.sort == MatrixSort::Rank && !n_way {
+            return Err("--sort rank needs an N-way run (--variant or --compare-by)".into());
+        }
+        if n_way && self.head_json.is_some() {
+            return Err("--head-json is two-way only".into());
+        }
+        if let (Reference::Label(label), false) = (&matrix.reference, self.variants.is_empty()) {
+            if !self.variants.iter().any(|(l, _)| l == label) {
+                let valid: Vec<&str> = self.variants.iter().map(|(l, _)| l.as_str()).collect();
+                return Err(format!(
+                    "unknown reference '{label}'; valid: {}",
+                    valid.join(", ")
+                ));
+            }
+        }
+        if n_way && options.fail_on_regression_pct.is_some() && matrix.reference == Reference::First
+        {
+            return Err("fail-on-regression in an N-way run needs an explicit 'reference' (the baseline to protect); set 'reference'".into());
+        }
+        Ok(())
     }
 }
 
 /// Config-governed keys in display order.
-const SETTING_KEYS: [&str; 10] = [
+const SETTING_KEYS: [&str; 17] = [
     "threshold",
     "min-abs",
     "sort",
@@ -159,11 +214,19 @@ const SETTING_KEYS: [&str; 10] = [
     "tag",
     "format",
     "base-format",
+    "compare-by",
+    "group-by",
+    "dimensions",
+    "dimensions-strict",
+    "reference",
+    "correction",
+    "cell-format",
 ];
 
 /// The config-governed settings a layer sets, as display text.
 fn layer_values(
     o: &OptionsOverlay,
+    m: &MatrixOptionsOverlay,
     format: Option<Format>,
     base_format: Option<Format>,
 ) -> Vec<(&'static str, String)> {
@@ -176,6 +239,8 @@ fn layer_values(
     }
     if let Some(x) = o.sort {
         v.push(("sort", sort_name(x).into()));
+    } else if m.sort == Some(MatrixSort::Rank) {
+        v.push(("sort", "rank".into()));
     }
     if let Some(x) = o.max_rows {
         v.push(("max-rows", x.to_string()));
@@ -199,6 +264,27 @@ fn layer_values(
     }
     if let Some(x) = base_format {
         v.push(("base-format", format_name(x).into()));
+    }
+    if let Some(x) = &m.compare_by {
+        v.push(("compare-by", x.clone()));
+    }
+    if let Some(x) = &m.group_by {
+        v.push(("group-by", x.join(",")));
+    }
+    if let Some(x) = &m.dimensions {
+        v.push(("dimensions", x.join("; ")));
+    }
+    if let Some(x) = m.strict {
+        v.push(("dimensions-strict", x.to_string()));
+    }
+    if let Some(x) = &m.reference {
+        v.push(("reference", x.to_string()));
+    }
+    if let Some(x) = m.correction {
+        v.push(("correction", format!("{x:?}").to_lowercase()));
+    }
+    if let Some(x) = m.cell_format {
+        v.push(("cell-format", format!("{x:?}").to_lowercase()));
     }
     v
 }
@@ -240,7 +326,7 @@ fn print_config(args: &Args, eff: &Effective) -> String {
         "threshold": o.threshold_pct,
         "thresholds": o.threshold_overrides,
         "min-abs": o.min_abs,
-        "sort": sort_name(o.sort),
+        "sort": if eff.matrix.sort == MatrixSort::Rank { "rank" } else { sort_name(o.sort) },
         "max-rows": o.max_rows,
         "only-changed": o.only_changed,
         "fail-on-regression": o.fail_on_regression_pct,
@@ -248,6 +334,16 @@ fn print_config(args: &Args, eff: &Effective) -> String {
         "tag": o.tag,
         "format": format_name(eff.format),
         "base-format": eff.base_format.map(format_name),
+        "compare-by": (!eff.matrix.compare_by.is_empty()).then_some(&eff.matrix.compare_by),
+        "group-by": eff.matrix.group_by,
+        "dimensions": eff.matrix.dimensions,
+        "dimensions-strict": eff.matrix.strict,
+        "reference": match &eff.matrix.reference {
+            Reference::First => None,
+            Reference::Label(l) => Some(l.to_string()),
+        },
+        "correction": eff.matrix.correction,
+        "cell-format": eff.matrix.cell_format,
     });
     let out = json!({"config-file": args.config, "config": config, "sources": sources});
     format!("{out:#}\n")
@@ -271,13 +367,18 @@ fn main() -> ExitCode {
 
 fn run() -> Result<bool, String> {
     let Some(args) = parse_args(std::env::args().skip(1))? else {
-        println!("{USAGE}{}", Format::NAMES);
+        println!("{}", help_text());
         return Ok(false);
     };
     let eff = args.effective()?;
     if args.print_config {
         print!("{}", print_config(&args, &eff));
         return Ok(false);
+    }
+    if !args.variants.is_empty() || args.print_dimensions {
+        return Err(
+            "N-way runs (--variant, --print-dimensions) are parsed but not wired yet".into(),
+        );
     }
     let head = load(&args.head, eff.format)?;
     let base = if args.base.is_empty() {
@@ -338,6 +439,21 @@ fn optional_value(
         .unwrap_or_else(|| "true".into())
 }
 
+/// `label=path`, split at the first `=`; the label must be a valid [`VariantLabel`].
+fn parse_variant(arg: &str) -> Result<(VariantLabel, String), String> {
+    let (label, path) = arg.split_once('=').unwrap_or((arg, ""));
+    let label = VariantLabel::parse(label).map_err(|_| {
+        format!(
+            "--variant: label '{label}' is invalid (use [A-Za-z0-9._-], max 40) in '{arg}'; \
+             expected label=path"
+        )
+    })?;
+    if path.is_empty() {
+        return Err(format!("--variant {label}=: path is empty"));
+    }
+    Ok((label, path.to_string()))
+}
+
 fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String> {
     let mut a = Args {
         head: vec![],
@@ -351,6 +467,9 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
         head_json: None,
         flags: OptionsOverlay::default(),
         svg_flags: SvgOptionsOverlay::default(),
+        matrix_flags: MatrixOptionsOverlay::default(),
+        variants: vec![],
+        print_dimensions: false,
     };
     let mut raw = raw.peekable();
     let (mut saw_only_changed, mut saw_no_only_changed) = (false, false);
@@ -414,7 +533,14 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
                 a.flags.only_changed = Some(false);
                 saw_no_only_changed = true;
             }
-            "--sort" => a.flags.sort = Some(Sort::from_name(&value("--sort")?)?),
+            "--sort" => match value("--sort")?.as_str() {
+                "rank" => a.matrix_flags.sort = Some(MatrixSort::Rank),
+                other => {
+                    let sort = Sort::from_name(other)?;
+                    a.flags.sort = Some(sort);
+                    a.matrix_flags.sort = Some(matrix_sort_of(sort));
+                }
+            },
             "--max-rows" => {
                 let n = value("--max-rows")?;
                 a.flags.max_rows = Some(
@@ -483,6 +609,45 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
                     },
                 );
             }
+            "--variant" => {
+                let (label, path) = parse_variant(&value("--variant")?)?;
+                if let Some((_, first)) = a.variants.iter().find(|(l, _)| *l == label) {
+                    return Err(format!("label \"{label}\" given twice ({first}, {path})"));
+                }
+                a.variants.push((label, path));
+            }
+            "--compare-by" => {
+                let dim = value("--compare-by")?;
+                check_compare_by(&dim)?;
+                a.matrix_flags.compare_by = Some(dim);
+            }
+            "--group-by" => {
+                a.matrix_flags.group_by = Some(parse_group_by(&value("--group-by")?)?);
+            }
+            "--dimensions" => {
+                let rules = parse_dimension_rules(&value("--dimensions")?)?;
+                a.matrix_flags
+                    .dimensions
+                    .get_or_insert_with(Vec::new)
+                    .extend(rules);
+            }
+            "--dimensions-strict" => {
+                reject_inline("--dimensions-strict")?;
+                a.matrix_flags.strict = Some(true);
+            }
+            "--reference" => {
+                a.matrix_flags.reference = Some(parse_reference(&value("--reference")?)?)
+            }
+            "--correction" => {
+                a.matrix_flags.correction = Some(parse_correction(&value("--correction")?)?)
+            }
+            "--cell-format" => {
+                a.matrix_flags.cell_format = Some(parse_cell_format(&value("--cell-format")?)?)
+            }
+            "--print-dimensions" => {
+                reject_inline("--print-dimensions")?;
+                a.print_dimensions = true;
+            }
             "--markdown" => a.markdown = Some(value("--markdown")?),
             "--json" => a.json = Some(value("--json")?),
             "--head-json" => a.head_json = Some(value("--head-json")?),
@@ -495,7 +660,13 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
     if a.flags.fail_on_regression_pct.is_some() && a.flags.fail_on_regression_off {
         return Err("--fail-on-regression conflicts with --no-fail-on-regression; use one".into());
     }
-    if a.head.is_empty() && !a.print_config {
+    if !a.variants.is_empty() && (!a.head.is_empty() || !a.base.is_empty()) {
+        return Err("--variant cannot be combined with --base/--head".into());
+    }
+    if !a.variants.is_empty() && a.head_json.is_some() {
+        return Err("--head-json is two-way only".into());
+    }
+    if a.head.is_empty() && a.variants.is_empty() && !a.print_config {
         return Err("--head is required; try --help".into());
     }
     Ok(Some(a))

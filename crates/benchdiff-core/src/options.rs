@@ -2,6 +2,7 @@
 //! An unset field means "not given", so a flag equal to the default still overrides a file.
 
 use crate::compare::{Options, Sort};
+use crate::matrix::{CellFormat, Correction, MatrixOptions, MatrixSort, Reference, VariantLabel};
 use crate::svg::{
     ChartKind, ChartRows, ChartTheme, ChartWidth, EmbedMode, EmbedSetting, SvgOptions,
 };
@@ -167,6 +168,76 @@ impl SvgOptionsOverlay {
     }
 }
 
+/// The matrix sort a pair sort corresponds to (`rank` has no pair equivalent).
+pub fn matrix_sort_of(s: Sort) -> MatrixSort {
+    match s {
+        Sort::Input => MatrixSort::Input,
+        Sort::Name => MatrixSort::Name,
+        Sort::Delta => MatrixSort::Delta,
+    }
+}
+
+/// Partial N-way settings, layered like [`OptionsOverlay`] but kept apart from `Options`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MatrixOptionsOverlay {
+    pub compare_by: Option<String>,
+    pub group_by: Option<Vec<String>>,
+    pub dimensions: Option<Vec<String>>,
+    pub strict: Option<bool>,
+    pub reference: Option<VariantLabel>,
+    pub correction: Option<Correction>,
+    pub cell_format: Option<CellFormat>,
+    pub sort: Option<MatrixSort>,
+}
+
+impl MatrixOptionsOverlay {
+    /// Overwrites each field of `opts` that this overlay sets.
+    pub fn apply(&self, opts: &mut MatrixOptions) {
+        if let Some(v) = &self.compare_by {
+            opts.compare_by = v.clone();
+        }
+        if let Some(v) = &self.group_by {
+            opts.group_by = Some(v.clone());
+        }
+        if let Some(v) = &self.dimensions {
+            opts.dimensions = v.clone();
+        }
+        if let Some(v) = self.strict {
+            opts.strict = v;
+        }
+        if let Some(v) = &self.reference {
+            opts.reference = Reference::Label(v.clone());
+        }
+        if let Some(v) = self.correction {
+            opts.correction = v;
+        }
+        if let Some(v) = self.cell_format {
+            opts.cell_format = v;
+        }
+        if let Some(v) = self.sort {
+            opts.sort = v;
+        }
+    }
+
+    /// Fields set in `later` replace those set here.
+    pub fn merge(mut self, later: MatrixOptionsOverlay) -> MatrixOptionsOverlay {
+        macro_rules! take {
+            ($($f:ident),*) => { $(if later.$f.is_some() { self.$f = later.$f; })* };
+        }
+        take!(
+            compare_by,
+            group_by,
+            dimensions,
+            strict,
+            reference,
+            correction,
+            cell_format,
+            sort
+        );
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,5 +379,33 @@ mod tests {
         };
         let o = svg_applied(&file.merge(flags));
         assert_eq!((o.rows.get(), o.publish_images), (30, false));
+    }
+
+    #[test]
+    fn matrix_overlay_should_equal_default_when_nothing_set() {
+        let mut m = MatrixOptions::default();
+        MatrixOptionsOverlay::default().apply(&mut m);
+        assert_eq!(format!("{m:?}"), format!("{:?}", MatrixOptions::default()));
+    }
+
+    #[test]
+    fn matrix_overlay_should_let_flags_win_over_file() {
+        let label = |s: &str| VariantLabel::parse(s).unwrap();
+        let file = MatrixOptionsOverlay {
+            reference: Some(label("quick")),
+            cell_format: Some(CellFormat::Ratio),
+            sort: Some(MatrixSort::Rank),
+            ..Default::default()
+        };
+        let flags = MatrixOptionsOverlay {
+            reference: Some(label("heap")),
+            sort: Some(MatrixSort::Name),
+            ..Default::default()
+        };
+        let mut m = MatrixOptions::default();
+        file.merge(flags).apply(&mut m);
+        assert_eq!(m.reference, Reference::Label(label("heap")));
+        assert_eq!(m.cell_format, CellFormat::Ratio);
+        assert_eq!(m.sort, MatrixSort::Name);
     }
 }

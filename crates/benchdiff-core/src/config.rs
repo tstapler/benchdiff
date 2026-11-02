@@ -1,9 +1,11 @@
 //! `benchdiff.config.json`: strict, validated file settings that map onto an [`OptionsOverlay`] (ADR-001).
-//! Later tasks extend [`KEYS`] and [`Config`] with chart keys (3.3.1a) and matrix keys (2.2.2a).
+//! [`KEYS`] holds the core, chart and matrix keys; the matrix keys' help text lives in [`MATRIX_DOCS`].
 
 use crate::compare::Sort;
+use crate::dimensions::Rule;
 use crate::import::Format;
-use crate::options::{OptionsOverlay, SvgOptionsOverlay};
+use crate::matrix::{CellFormat, Correction, MatrixSort, VariantLabel};
+use crate::options::{matrix_sort_of, MatrixOptionsOverlay, OptionsOverlay, SvgOptionsOverlay};
 use crate::svg::{ChartKind, ChartRows, ChartTheme, ChartWidth, EmbedSetting};
 use serde::Deserialize;
 use serde_json::Value;
@@ -31,7 +33,174 @@ pub const KEYS: &[&str] = &[
     "svg-dir",
     "svg-embed",
     "publish-images",
+    "compare-by",
+    "group-by",
+    "dimensions",
+    "dimensions-strict",
+    "reference",
+    "correction",
+    "cell-format",
 ];
+
+/// One help entry per matrix flag, so `--help` cannot drift from the keys (`key` is `None`
+/// for CLI-only flags). Rendered by [`matrix_help`].
+pub struct FlagDoc {
+    pub key: Option<&'static str>,
+    pub flag: &'static str,
+    pub summary: &'static str,
+    pub default: &'static str,
+    pub allowed: &'static str,
+}
+
+/// Zero-config extraction rules; stated once in `--help`, under `--compare-by`.
+pub const ZERO_CONFIG_RULES: &str = "\
+zero-config rules read only `key=value` path segments (a/impl=quick) and bracket groups\n\
+[k=v, k2=v2] / (k = v); nothing else (Criterion group/function/param ids carry no '=')";
+
+pub const MATRIX_DOCS: &[FlagDoc] = &[
+    FlagDoc {
+        key: None,
+        flag: "--variant LABEL=PATH",
+        summary: "one N-way variant (repeatable; split at the first '='; label is\n[A-Za-z0-9._-], max 40); not combinable with --base/--head",
+        default: "none",
+        allowed: "label=path",
+    },
+    FlagDoc {
+        key: Some("compare-by"),
+        flag: "--compare-by DIM",
+        summary: "pivot one dimension of the head results into columns (N-way)",
+        default: "off",
+        allowed: "a dimension name or group",
+    },
+    FlagDoc {
+        key: Some("group-by"),
+        flag: "--group-by DIMS",
+        summary: "non-axis dimensions that identify a row (comma-separated)",
+        default: "all non-axis dimensions",
+        allowed: "dimension names",
+    },
+    FlagDoc {
+        key: Some("dimensions"),
+        flag: "--dimensions RULE",
+        summary: "extra extraction rule `dim=regex` with a (?P<dim>...) group (repeatable,\nor newline-delimited); added to the zero-config rules above",
+        default: "none",
+        allowed: "dim=regex",
+    },
+    FlagDoc {
+        key: Some("dimensions-strict"),
+        flag: "--dimensions-strict",
+        summary: "exit 2 instead of printing a notice on data-dependent dimension problems",
+        default: "false",
+        allowed: "flag",
+    },
+    FlagDoc {
+        key: Some("reference"),
+        flag: "--reference LABEL",
+        summary: "variant every other column is compared against; required for\n--fail-on-regression in an N-way run",
+        default: "first variant",
+        allowed: "a --variant label or an axis value",
+    },
+    FlagDoc {
+        key: Some("correction"),
+        flag: "--correction NAME",
+        summary: "multiple-comparison correction across one row's cells",
+        default: "holm",
+        allowed: "holm, none",
+    },
+    FlagDoc {
+        key: Some("cell-format"),
+        flag: "--cell-format NAME",
+        summary: "matrix cell shape: `1210 ns (0.74x) \u{1f7e2}` or `0.74x \u{1f7e2}`",
+        default: "full",
+        allowed: "full, ratio",
+    },
+    FlagDoc {
+        key: None,
+        flag: "--print-dimensions",
+        summary: "print the detected dimensions as JSON, then exit (same inputs as a run)",
+        default: "off",
+        allowed: "flag",
+    },
+];
+
+/// The OPTIONS lines for the matrix flags, generated from [`MATRIX_DOCS`].
+pub fn matrix_help() -> String {
+    let mut out = String::new();
+    for d in MATRIX_DOCS {
+        let head = format!("    {}", d.flag);
+        let mut lines = d.summary.lines();
+        out.push_str(&format!("{head:<27}{}\n", lines.next().unwrap_or("")));
+        for l in lines {
+            out.push_str(&format!("{:<27}{l}\n", ""));
+        }
+        let allowed = if d.allowed == "flag" {
+            String::new()
+        } else {
+            format!("; allowed: {}", d.allowed)
+        };
+        out.push_str(&format!("{:<27}(default: {}{allowed})\n", "", d.default));
+        if d.flag.starts_with("--compare-by") {
+            for l in ZERO_CONFIG_RULES.lines() {
+                out.push_str(&format!("{:<27}{l}\n", ""));
+            }
+        }
+    }
+    out
+}
+
+/// `compare-by` is an axis name; `measure` mixes units so it cannot be one.
+pub fn check_compare_by(dim: &str) -> Result<(), String> {
+    if dim.trim().is_empty() {
+        return Err("compare-by: value is empty".into());
+    }
+    if dim == crate::dimensions::MEASURE_AXIS {
+        return Err("compare-by 'measure' is not an axis (units differ per measure)".into());
+    }
+    Ok(())
+}
+
+/// Splits a comma-separated `group-by` list into dimension names.
+pub fn parse_group_by(text: &str) -> Result<Vec<String>, String> {
+    let dims: Vec<String> = text.split(',').map(|d| d.trim().to_string()).collect();
+    if dims.iter().any(String::is_empty) {
+        return Err(format!("group-by: {text:?} has an empty dimension name"));
+    }
+    Ok(dims)
+}
+
+/// Splits newline-delimited `dim=regex` rules and validates each with `Rule::parse`.
+pub fn parse_dimension_rules(text: &str) -> Result<Vec<String>, String> {
+    let mut rules = vec![];
+    for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        Rule::parse(line).map_err(|e| format!("dimensions: {e}"))?;
+        rules.push(line.to_string());
+    }
+    Ok(rules)
+}
+
+pub fn parse_correction(s: &str) -> Result<Correction, String> {
+    match s {
+        "holm" => Ok(Correction::Holm),
+        "none" => Ok(Correction::None),
+        other => Err(format!(
+            "correction: \"{other}\" is not valid; use holm, none"
+        )),
+    }
+}
+
+pub fn parse_cell_format(s: &str) -> Result<CellFormat, String> {
+    match s {
+        "full" => Ok(CellFormat::Full),
+        "ratio" => Ok(CellFormat::Ratio),
+        other => Err(format!(
+            "cell-format: \"{other}\" is not valid; use full, ratio"
+        )),
+    }
+}
+
+pub fn parse_reference(s: &str) -> Result<VariantLabel, String> {
+    VariantLabel::parse(s).map_err(|e| format!("reference: {e}"))
+}
 
 const SUPPORTED_VERSION: u64 = 1;
 const SORT_NAMES: &str = "input, name, delta";
@@ -65,6 +234,15 @@ pub struct Config {
     pub svg_dir: Option<String>,
     pub svg_embed: Option<EmbedSetting>,
     pub publish_images: Option<bool>,
+    pub compare_by: Option<String>,
+    pub group_by: Option<Vec<String>>,
+    pub dimensions: Option<Vec<String>>,
+    pub dimensions_strict: Option<bool>,
+    pub reference: Option<VariantLabel>,
+    pub correction: Option<Correction>,
+    pub cell_format: Option<CellFormat>,
+    /// The `sort` key as a matrix sort; `rank` exists only here (`sort` holds the pair enums).
+    pub matrix_sort: Option<MatrixSort>,
 }
 
 #[derive(Deserialize)]
@@ -92,6 +270,13 @@ struct Raw {
     svg_dir: Option<Value>,
     svg_embed: Option<Value>,
     publish_images: Option<Value>,
+    compare_by: Option<Value>,
+    group_by: Option<Value>,
+    dimensions: Option<Value>,
+    dimensions_strict: Option<Value>,
+    reference: Option<Value>,
+    correction: Option<Value>,
+    cell_format: Option<Value>,
 }
 
 /// Parses and validates `text`; `file_name` only appears in error text.
@@ -157,11 +342,15 @@ fn parse_json(text: &str, file: &str) -> Result<Config, String> {
         threshold,
         threshold_overrides: overrides,
         min_abs: raw.min_abs,
-        sort: raw
-            .sort
-            .as_deref()
-            .map(|s| parse_sort(file, s))
-            .transpose()?,
+        sort: match raw.sort.as_deref() {
+            Some("rank") | None => None,
+            Some(s) => Some(parse_sort(file, s)?),
+        },
+        matrix_sort: match raw.sort.as_deref() {
+            Some("rank") => Some(MatrixSort::Rank),
+            Some(s) => Some(matrix_sort_of(parse_sort(file, s)?)),
+            None => None,
+        },
         max_rows: raw.max_rows,
         only_changed: raw.only_changed,
         fail_on_regression: raw.fail_on_regression,
@@ -231,6 +420,79 @@ fn parse_json(text: &str, file: &str) -> Result<Config, String> {
                 other => Err(format!(
                     "{file}: publish-images: {other} is not valid; use true, false"
                 )),
+            })
+            .transpose()?,
+        compare_by: raw
+            .compare_by
+            .as_ref()
+            .map(|v| {
+                let dim = string_value(file, "compare-by", v)?;
+                check_compare_by(dim).map_err(|e| format!("{file}: {e}"))?;
+                Ok::<_, String>(dim.to_string())
+            })
+            .transpose()?,
+        group_by: raw
+            .group_by
+            .as_ref()
+            .map(|v| {
+                let text = match v {
+                    Value::Array(items) => items
+                        .iter()
+                        .map(|i| string_value(file, "group-by", i))
+                        .collect::<Result<Vec<_>, _>>()?
+                        .join(","),
+                    other => string_value(file, "group-by", other)?.to_string(),
+                };
+                parse_group_by(&text).map_err(|e| format!("{file}: {e}"))
+            })
+            .transpose()?,
+        dimensions: raw
+            .dimensions
+            .as_ref()
+            .map(|v| {
+                let text = match v {
+                    Value::Array(items) => items
+                        .iter()
+                        .map(|i| string_value(file, "dimensions", i))
+                        .collect::<Result<Vec<_>, _>>()?
+                        .join("\n"),
+                    other => string_value(file, "dimensions", other)?.to_string(),
+                };
+                parse_dimension_rules(&text).map_err(|e| format!("{file}: {e}"))
+            })
+            .transpose()?,
+        dimensions_strict: raw
+            .dimensions_strict
+            .as_ref()
+            .map(|v| match v {
+                Value::Bool(b) => Ok(*b),
+                other => Err(format!(
+                    "{file}: dimensions-strict: {other} is not valid; use true, false"
+                )),
+            })
+            .transpose()?,
+        reference: raw
+            .reference
+            .as_ref()
+            .map(|v| {
+                parse_reference(string_value(file, "reference", v)?)
+                    .map_err(|e| format!("{file}: {e}"))
+            })
+            .transpose()?,
+        correction: raw
+            .correction
+            .as_ref()
+            .map(|v| {
+                parse_correction(string_value(file, "correction", v)?)
+                    .map_err(|e| format!("{file}: {e}"))
+            })
+            .transpose()?,
+        cell_format: raw
+            .cell_format
+            .as_ref()
+            .map(|v| {
+                parse_cell_format(string_value(file, "cell-format", v)?)
+                    .map_err(|e| format!("{file}: {e}"))
             })
             .transpose()?,
     })
@@ -350,6 +612,20 @@ impl Config {
             publish_images: self.publish_images,
             svg_dir: self.svg_dir.clone(),
             ..Default::default()
+        }
+    }
+
+    /// The matrix settings; call before [`Config::into_overlay`], which consumes the config.
+    pub fn matrix_overlay(&self) -> MatrixOptionsOverlay {
+        MatrixOptionsOverlay {
+            compare_by: self.compare_by.clone(),
+            group_by: self.group_by.clone(),
+            dimensions: self.dimensions.clone(),
+            strict: self.dimensions_strict,
+            reference: self.reference.clone(),
+            correction: self.correction,
+            cell_format: self.cell_format,
+            sort: self.matrix_sort,
         }
     }
 
@@ -582,5 +858,62 @@ mod tests {
             e.contains("unknown key 'chart-row'; did you mean 'chart-rows'?"),
             "{e}"
         );
+    }
+
+    #[test]
+    fn parse_config_should_map_matrix_keys_into_matrix_overlay() {
+        let c = parse(
+            r#"{"version":1,"threshold":3,"sort":"name","reference":"quick",
+                "dimensions":["impl=/impl=(?P<impl>\\w+)"]}"#,
+        )
+        .unwrap();
+        let m = c.matrix_overlay();
+        assert_eq!(m.reference, Some(VariantLabel::parse("quick").unwrap()));
+        assert_eq!(m.dimensions.as_ref().map(Vec::len), Some(1));
+        assert_eq!(m.sort, Some(MatrixSort::Name));
+        let o = c.into_overlay();
+        assert_eq!((o.threshold_pct, o.sort), (Some(3.0), Some(Sort::Name)));
+
+        let c = parse(r#"{"version":1,"cell-format":"ratio","sort":"rank"}"#).unwrap();
+        assert_eq!(c.matrix_overlay().cell_format, Some(CellFormat::Ratio));
+        assert_eq!(c.matrix_overlay().sort, Some(MatrixSort::Rank));
+        assert_eq!(c.sort, None);
+    }
+
+    #[test]
+    fn parse_config_should_report_enum_and_key_errors_for_matrix_keys() {
+        let e = parse(r#"{"version":1,"correction":"bonf"}"#).unwrap_err();
+        assert!(
+            e.contains("correction: \"bonf\" is not valid; use holm, none"),
+            "{e}"
+        );
+        let e = parse(r#"{"version":1,"compare-bi":"impl"}"#).unwrap_err();
+        assert!(
+            e.contains("unknown key 'compare-bi'; did you mean 'compare-by'?"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn matrix_docs_should_name_only_keys_in_the_key_table() {
+        for d in MATRIX_DOCS {
+            if let Some(k) = d.key {
+                assert!(KEYS.contains(&k), "{k}");
+            }
+        }
+        for k in [
+            "compare-by",
+            "group-by",
+            "dimensions",
+            "dimensions-strict",
+            "reference",
+            "correction",
+            "cell-format",
+        ] {
+            assert!(
+                MATRIX_DOCS.iter().any(|d| d.key == Some(k)),
+                "{k} undocumented"
+            );
+        }
     }
 }

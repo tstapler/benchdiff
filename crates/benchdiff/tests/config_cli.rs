@@ -236,3 +236,130 @@ fn negative_flags_should_reject_inline_values() {
     let out = run(&["--head", HEAD, "--no-only-changed=true"]);
     assert_eq!(out.status.code(), Some(2));
 }
+
+fn config_error(test: &str, text: &str) -> String {
+    let c = config_file(test, "c.json", text);
+    let out = run(&["--config", &c, "--head", HEAD]);
+    assert_eq!(out.status.code(), Some(2), "{text}: {}", stderr(&out));
+    stderr(&out)
+}
+
+#[test]
+fn print_config_should_show_matrix_keys_with_sources_when_config_and_flags_set() {
+    let c = config_file(
+        "matrix",
+        "c.json",
+        r#"{"version":1,"threshold":3,"sort":"rank","reference":"quick","cell-format":"ratio",
+            "compare-by":"impl","dimensions":["impl=/impl=(?P<impl>\\w+)"]}"#,
+    );
+    let v = print_config(&[
+        "--config",
+        &c,
+        "--reference",
+        "heap",
+        "--correction",
+        "none",
+    ]);
+    let cfg = &v["config"];
+    assert_eq!(cfg["sort"], "rank");
+    assert_eq!(cfg["reference"], "heap");
+    assert_eq!(cfg["cell-format"], "ratio");
+    assert_eq!(cfg["compare-by"], "impl");
+    assert_eq!(cfg["correction"], "none");
+    assert_eq!(cfg["dimensions"].as_array().unwrap().len(), 1);
+    assert_eq!(v["sources"]["reference"], "flag");
+    assert_eq!(v["sources"]["cell-format"], "config");
+    assert_eq!(v["sources"]["sort"], "config");
+}
+
+#[test]
+fn print_config_should_leave_matrix_keys_null_when_not_set() {
+    let v = print_config(&[]);
+    assert_eq!(v["config"]["reference"], Value::Null);
+    assert_eq!(v["config"]["compare-by"], Value::Null);
+    assert_eq!(v["config"]["correction"], "holm");
+    assert_eq!(v["config"]["cell-format"], "full");
+}
+
+#[test]
+fn config_should_exit_two_for_each_static_matrix_key_error() {
+    let cases = [
+        (
+            r#"{"version":1,"correction":"bonf"}"#,
+            "correction: \"bonf\" is not valid; use holm, none",
+        ),
+        (
+            r#"{"version":1,"cell-format":"wide"}"#,
+            "cell-format: \"wide\" is not valid; use full, ratio",
+        ),
+        (
+            r#"{"version":1,"compare-bi":"impl"}"#,
+            "unknown key 'compare-bi'; did you mean 'compare-by'?",
+        ),
+        (r#"{"version":1,"strict":true}"#, "unknown key 'strict'"),
+        (r#"{"version":1,"variant":"a=b"}"#, "unknown key 'variant'"),
+        (
+            r#"{"version":1,"compare-by":"measure"}"#,
+            "compare-by 'measure' is not an axis",
+        ),
+        (
+            r#"{"version":1,"dimensions":["impl=(?P<impl>"]}"#,
+            "invalid pattern",
+        ),
+        (
+            r#"{"version":1,"dimensions":["impl=impl=x"]}"#,
+            "no named capture group",
+        ),
+        (
+            r#"{"version":1,"reference":"bad label"}"#,
+            "not a valid variant label",
+        ),
+        (
+            r#"{"version":1,"dimensions-strict":"yes"}"#,
+            "dimensions-strict",
+        ),
+    ];
+    for (text, want) in cases {
+        let e = config_error("static", text);
+        assert!(e.contains(want), "{text}: {e}");
+    }
+}
+
+#[test]
+fn config_should_apply_the_same_run_shape_rules_as_flags() {
+    let e = config_error("rank", r#"{"version":1,"sort":"rank"}"#);
+    assert!(e.contains("--sort rank needs an N-way run"), "{e}");
+    let e = config_error(
+        "gate",
+        r#"{"version":1,"compare-by":"impl","fail-on-regression":10}"#,
+    );
+    assert!(e.contains("needs an explicit 'reference'"), "{e}");
+    // A flag moves the sort off rank, so the file's rank no longer applies.
+    let c = config_file("rank-flag", "c.json", r#"{"version":1,"sort":"rank"}"#);
+    let out = run(&[
+        "--config", &c, "--sort", "name", "--head", HEAD, "--base", BASE,
+    ]);
+    assert!(out.status.success(), "{}", stderr(&out));
+}
+
+#[test]
+fn help_should_list_every_new_flag_with_default_and_allowed_values_from_key_table() {
+    let out = run(&["--help"]);
+    assert!(out.status.success());
+    let help = stdout(&out);
+    for flag in [
+        "--variant",
+        "--compare-by",
+        "--group-by",
+        "--dimensions",
+        "--dimensions-strict",
+        "--reference",
+        "--correction",
+        "--cell-format",
+        "--print-dimensions",
+    ] {
+        assert!(help.contains(flag), "{flag}");
+    }
+    assert!(help.contains("allowed: holm, none") && help.contains("allowed: full, ratio"));
+    assert!(help.contains("default"));
+}
