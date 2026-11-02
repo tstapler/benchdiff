@@ -62,6 +62,129 @@ Outputs: `regressed`, `improved`, `unchanged`, `new`, `removed`, `failed`, `repo
 Unchanged rows are collapsed in `<details>`; the environment of both runs (CPU, Go version,
 commit, whatever the importer or your JSON provides) is in a second `<details>`.
 
+### More inputs
+
+Every input below has a CLI flag and a config key of the same kebab-case name, except `head`/`base`/`variants` (flags `--head`, `--base`, `--variant`) and the GitHub-only `comment` and `github-token`. Precedence: flags > inputs > config file > defaults (the binary sees inputs as flags). `--print-config` shows the effective settings and the layer each came from (`default`, `config` or `flag`).
+
+| Input | Default | |
+|---|---|---|
+| `variants` | | N-way input, one `label=path-or-glob` per line; see [N-way comparison](#n-way-comparison) |
+| `compare-by` | | N-way: the dimension to pivot into columns (a dimension name or group) |
+| `group-by` | all but the axis | N-way: comma-separated dimensions that identify a row |
+| `dimensions` | | extra `dim=regex` rules, one per line; see [Dimensions](#dimensions) |
+| `dimensions-strict` | `false` | `true` turns data-dependent dimension notices into exit 2 |
+| `reference` | first variant | the variant (or axis value) every other column is compared against |
+| `correction` | `holm` | `holm` or `none`, across one row's cells |
+| `cell-format` | `full` | `full` (`1210 ns (0.74x)`) or `ratio` (`0.74x`, shorter for phones) |
+| `charts` | | `none`, or any of `delta`, `ranking`, `distribution`; see [Charts](#charts) |
+| `chart-rows` | `30` | rows per chart, 1 to 200; the effective cap is `min(chart-rows, max-rows)` when `max-rows` is set |
+| `chart-width` | `760` | pixels, 480 to 1600 |
+| `chart-theme` | `light` | `light`, `dark` or `both` |
+| `svg-dir` | | copy the SVG files to this workspace directory |
+| `svg-embed` | `auto` | embed charts in the comment and summary; `auto` embeds iff `charts` is set |
+| `publish-images` | `true` | host embedded charts as images; see [Hosting images](#hosting-images) |
+| `config` | | path to a settings file; see [Config file](#config-file) |
+
+Outputs added: `svg-dir`, `svg-paths` (newline-separated). In an N-way run, `regressed`, `improved`, `unchanged`, `new`, `removed` and `failed` count cells against the reference, and `head-json-path` is empty.
+
+**Naming.** A *variant* is one labelled input to an N-way comparison: `--variant` is the repeatable CLI flag, `variants` the multi-line Action input.
+
+## N-way comparison
+
+Compare more than two runs (implementations, libraries, versions) in one matrix. Two ways to supply them:
+
+```yaml
+- uses: tstapler/benchdiff@v0
+  with:
+    variants: |
+      std=bench-std.txt
+      radix=bench-radix.txt
+      quick=bench-quick.txt
+    reference: std
+    cell-format: ratio
+```
+
+```sh
+benchdiff --variant std=std.txt --variant radix=radix.txt --reference std
+benchdiff --head all.txt --compare-by impl      # pivot a dimension of one result set
+```
+
+* `variants` grammar: the first `=` splits label from path; labels use `A-Za-z0-9._-` (at most 40 characters); one label is exactly one file (a glob that matches several is an error); entries are newline-separated only; it cannot be combined with `head`, `base` or `base-format`.
+* `compare-by` pivots one [dimension](#dimensions) of the head results into columns; `group-by` names the dimensions that identify a row (default: all others).
+* **Reference.** Every other column is compared against one reference: the variant or axis value named by `reference`. The default is the first variant, and for variants split from benchmark names the first one encountered in the input. Set `reference` explicitly whenever the input order is not under your control.
+* **Ratio, not percent.** N-way cells are ratios against the reference: `0.74x` means a value 26% lower. Two-way reports keep percent. Prose says faster or slower, never higher or lower.
+* **Holm correction.** The cells of one row are tested against the reference, and Holm's step-down procedure (`correction: holm`, the default) controls the family-wise error rate across that row only. It is not applied across rows, so pair an N-way `fail-on-regression` with a `threshold` and `min-abs`. `correction: none` skips it.
+* **Geomean and the headline.** The geometric mean of a variant's ratios is taken over the rows it shares with the reference; the headline uses only the rows every variant ran (the common set) and reads `not comparable` when that set is under 3 rows or under half of all rows. Bold, the Rank column and "has the best geomean" are orderings: only each variant against the reference is tested, and there is no head-to-head claim between variants.
+* **Gate.** A cell is `Regressed` only against the reference. `fail-on-regression` in an N-way run requires an explicit `reference` (exit 2 otherwise), fails on any regressed cell over the limit (after Holm) or any invalid cell, and without it `failed` is `false`.
+* `sort: rank` orders rows by variant ranking and needs an N-way run.
+* A variant with unreadable or malformed data is skipped with a notice (warn by default); `dimensions-strict` turns data-dependent dimension problems into exit 2.
+
+## Dimensions
+
+Dimensions are the key/value facets of a benchmark name (`impl=quick`, `size=100`) that `compare-by` and `group-by` refer to. Zero-config extraction:
+
+zero-config rules read only `key=value` path segments (a/impl=quick) and bracket groups [k=v, k2=v2] / (k = v); nothing else (Criterion group/function/param ids carry no '=')
+
+* `dimensions` adds rules `dim=regex`, each with a `(?P<dim>...)` group, to those defaults (repeatable flag, or one per line in the Action input; YAML block scalars need no backslash doubling, JSON does: `\\d`).
+* `group` is a pseudo-dimension: the benchmark's group, usable in `compare-by` and `group-by`.
+* `benchdiff --head FILE --print-dimensions` prints the detected dimensions as JSON and exits. A wrong dimension name fails with an `available dimensions: ...` suffix.
+* `dimensions-strict` has no negative form: a `true` set in the config file cannot be switched off by an input or flag.
+
+## Config file
+
+Put shared settings in `benchdiff.config.json` and pass it explicitly with `config:` or `--config`. It is never auto-discovered. The [JSON Schema](benchdiff.config.schema.json) validates it and [`examples/benchdiff.config.json`](examples/benchdiff.config.json) is a tested starter (line one is the `$schema` reference).
+
+Layering is defaults < config file < flags (inputs act as flags). Boolean-like settings have negative flags so a flag can undo the file: `--no-only-changed` and `--no-fail-on-regression` (the Action inputs `only-changed: false` and `fail-on-regression: false` do the same). `dimensions-strict` has none. Run `--print-config` to see each effective value and its source.
+
+## Charts
+
+`charts` renders SVG files: `delta` (change per benchmark), `ranking` (N-way ratio vs the reference) and `distribution` (samples). A non-empty `charts` embeds them in the comment and job summary and hosts them as images, unless you set `svg-embed: false` or `publish-images: false`. The CLI defaults are off: `--svg-embed` writes `benchdiff-svg:` placeholders into the Markdown, which are dangling links until something hosts the files.
+
+* `chart-theme: both` embeds a light/dark pair with `<picture>`.
+* Chart rows are the top `chart-rows` by absolute delta; the table follows `sort`. Match them by name or by the `#` column of the `Chart data (text)` block.
+* Files in `svg-dir` (output `svg-paths`) are the standalone artifact; there is no HTML wrapper. For a download link, add `actions/upload-artifact` with `archive: false` yourself.
+* GitHub shows the chart as an opaque `<img>`: the alt text and the `Chart data (text)` table are the accessible path. The table is the primary view on phones (chart text scales to about 7 px at 375 px width). Forced-colors and print show the chart as drawn.
+* Roll back by unsetting `charts`. Never delete `benchdiff-assets`: old comments link to it.
+
+## Hosting images
+
+GitHub has no upload API for comment images, so benchdiff commits the SVGs to a branch and links the raw URL. This is an opt-in side effect of `charts`; every item here applies only when images are hosted.
+
+```yaml
+permissions:
+  contents: write         # extra: only needed for hosted chart images
+  pull-requests: write    # sticky comment
+```
+
+* Needs `permissions: contents: write`, on top of what the report already uses.
+* Creates or updates the branch `benchdiff-assets` with at most one commit per run that has new bytes. Commits are kept and never pruned; deleting the branch breaks images in old comments.
+* Anyone with the URL can read the images. For a public repository that is the same audience as the comment.
+* Private repositories are never hosted: nothing is written there (reason `private`), and the report carries a text chart instead. GHES falls back the same way.
+* Fork PRs have a read-only token: no write happens, the report shows a notice and a text chart, and often no comment can be posted at all.
+* The step log prints one line before the first write: `images: publishing to branch benchdiff-assets (needs contents: write; commits are kept; see README "Hosting images")`.
+* First run: with a read-only default `GITHUB_TOKEN`, `charts: delta` alone often shows the permission warning. Add the `permissions:` block above and rerun. When hosting fails, the SVG files are in the directory named in the notice (not an artifact); use `actions/upload-artifact` to keep them.
+
+Support by repository class (every class gets the standalone files and a text chart in the report; only the hosted inline image varies):
+
+| Repo class / event | Comment | Job summary |
+|---|---|---|
+| Public, same-repo PR, `contents: write` | hosted SVG inline, collapsed `Chart data (text)` | hosted SVG inline |
+| Public, same-repo PR, no `contents: write` | table, `permission` notice, open text chart | same |
+| Public, fork PR | usually no comment (INFERRED); otherwise notice and open text chart | notice and open text chart |
+| Private repo | `private` notice and open text chart | same |
+| GHES | `unsupported-host` notice and open text chart | same |
+| Public, non-PR event (`push`, `workflow_dispatch`, `release`) | no comment | hosted SVG inline |
+
+Status: VERIFIED for a public same-repo PR (a plain SHA-pinned raw URL renders in the comment). UNVERIFIED: rendering in the job summary. Not tested: private repositories and fork PRs, which is why they fall back to text.
+
+## Adoption
+
+benchdiff has no telemetry. Adoption is counted by hand: how many of the maintainer's repositories set `variants` or `charts` 30 and 90 days after release.
+
+## wasm size
+
+`dist/benchdiff.wasm` is committed and checked against a byte budget (currently 820,000 bytes, `scripts/check-wasm-size.sh`). The budget is a CI gate, not a runtime limit.
+
 ## Baseline in a PR workflow
 
 Keep the base from the default branch in the Actions cache (the pattern stapler-squad uses):
@@ -162,6 +285,8 @@ run verbatim: never build them from `github.event.*` data.
 cargo run -p benchdiff -- --base base.txt --head head.txt --format go
 cargo run -p benchdiff -- --head new.json --head-json canonical.json   # convert to canonical JSON
 ```
+Flags with no Action input: `--alpha P` (Mann-Whitney significance level, `0.05`), `--no-stats` (thresholds only), `--markdown FILE`, `--json FILE`, `--head-json FILE`, `--print-config`, `--print-dimensions`, `--no-only-changed`, `--no-fail-on-regression`, `--help`. All other flags mirror the inputs above (`--variant` for `variants`): `--base-format`, `--threshold`, `--min-abs`, `--only-changed`, `--sort`, `--max-rows`, `--title`, `--tag`, `--compare-by`, `--group-by`, `--dimensions`, `--dimensions-strict`, `--reference`, `--correction`, `--cell-format`, `--charts`, `--chart-rows`, `--chart-width`, `--chart-theme`, `--svg-dir`, `--svg-embed`, `--publish-images`. `--fail-on-regression` takes an optional `=PCT`.
+
 The CLI rejects non-finite or negative numbers and flags that would swallow the next flag.
 Exit codes: `0` ok, `1` the `--fail-on-regression` limit was exceeded, `2` bad input or usage.
 
