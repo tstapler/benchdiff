@@ -153,3 +153,7 @@ test('concept map, source labels, notice rules and gate-line rules are documente
     assert.ok(sec.includes('`' + key + '`'), `concept map lacks \`${key}\``);
   }
 });
+
+test('README documents the sanitised axis-value labels', () => {
+  assert.ok(readme.includes('shown with disallowed characters replaced by `_`'), 'README lacks the label sanitising sentence');
+});

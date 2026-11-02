@@ -1,6 +1,6 @@
 //! N-way projection: split a [`Dimensioned`] set into [`Variant`]s along an axis.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 
 use serde::Serialize;
@@ -204,10 +204,9 @@ pub fn project_by_axis(
             });
     }
 
+    let (labels, renamed) = derive_labels(&order);
     let mut variants = Vec::with_capacity(order.len());
-    for value in order {
-        let label = VariantLabel::parse(&value)
-            .map_err(|e| MatrixError(format!("axis '{axis}' value {e}")))?;
+    for (value, label) in order.into_iter().zip(labels) {
         let col = columns.remove(&value).unwrap_or_default();
         let mut set = MetricSet {
             metrics: col.metrics,
@@ -234,7 +233,73 @@ pub fn project_by_axis(
             ),
         });
     }
+    if !renamed.is_empty() {
+        let mut items: Vec<String> = renamed
+            .iter()
+            .take(MAX_RENAMED_LISTED)
+            .map(|(from, to)| format!("axis value '{from}' shown as '{to}'"))
+            .collect();
+        if renamed.len() > MAX_RENAMED_LISTED {
+            items.push(format!("and {} more", renamed.len() - MAX_RENAMED_LISTED));
+        }
+        notices.push(Notice {
+            class: NoticeClass::Degradation,
+            text: items.join("; "),
+        });
+    }
     Ok(Projection { variants, notices })
+}
+
+const MAX_RENAMED_LISTED: usize = 5;
+const MAX_LABEL_LEN: usize = 40;
+
+/// A label for every projected axis value: valid values as they are, others with each disallowed
+/// character replaced by `_` and cut to 40, made unique with `-2`, `-3`. Also returns the
+/// `(value, label)` pairs that changed. Data-dependent, so never an error (explicit `--variant`
+/// labels still go through the strict `VariantLabel::parse`).
+fn derive_labels(values: &[String]) -> (Vec<VariantLabel>, Vec<(String, String)>) {
+    let mut used: HashSet<String> = values
+        .iter()
+        .filter(|v| VariantLabel::parse(v).is_ok())
+        .cloned()
+        .collect();
+    let mut renamed = Vec::new();
+    let labels = values
+        .iter()
+        .map(|value| {
+            if let Ok(label) = VariantLabel::parse(value) {
+                return label;
+            }
+            let mut base: String = value
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
+                .take(MAX_LABEL_LEN)
+                .collect();
+            if base.is_empty() {
+                base.push('_');
+            }
+            let mut candidate = base.clone();
+            let mut n = 2;
+            while used.contains(&candidate) {
+                let suffix = format!("-{n}");
+                candidate = format!(
+                    "{}{suffix}",
+                    &base[..base.len().min(MAX_LABEL_LEN - suffix.len())]
+                );
+                n += 1;
+            }
+            used.insert(candidate.clone());
+            renamed.push((value.clone(), candidate.clone()));
+            VariantLabel(candidate)
+        })
+        .collect();
+    (labels, renamed)
 }
 
 fn column<'a>(
@@ -1406,12 +1471,59 @@ mod tests {
     }
 
     #[test]
-    fn project_by_axis_should_error_when_axis_value_is_not_a_valid_label() {
-        let d = dimensioned(&["Sort/impl=a_b/size=1"]);
-        assert!(project_by_axis(&d, "size", None).is_ok());
-        let d = dimensioned(&["Sort[impl=a b]"]);
-        let err = project_by_axis(&d, "impl", None).unwrap_err();
-        assert!(err.to_string().contains("'a b'"), "{err}");
+    fn project_by_axis_should_sanitise_invalid_axis_values_and_say_so() {
+        let d = dimensioned(&["Sort[impl=a b]", "Sort[impl=ok]"]);
+        let p = project_by_axis(&d, "impl", None).unwrap();
+        assert_eq!(labels(&p), ["a_b", "ok"]);
+        assert_eq!(p.notices.len(), 1);
+        assert_eq!(p.notices[0].class, NoticeClass::Degradation);
+        assert_eq!(p.notices[0].text, "axis value 'a b' shown as 'a_b'");
+    }
+
+    #[test]
+    fn project_by_axis_should_accept_go_package_paths_under_compare_by_group() {
+        let s = set(&[("net/http", "Get"), ("net/url", "Get")]);
+        let d = apply(s, &[], false).unwrap().0;
+        let p = project_by_axis(&d, "group", None).unwrap();
+        assert_eq!(labels(&p), ["net_http", "net_url"]);
+        assert_eq!(names(&p.variants[0]), ["Get"]);
+    }
+
+    #[test]
+    fn project_by_axis_should_make_colliding_sanitised_labels_unique() {
+        let s = set(&[
+            ("net/http", "Get"),
+            ("net_http", "Get"),
+            ("net:http", "Get"),
+        ]);
+        let d = apply(s, &[], false).unwrap().0;
+        let p = project_by_axis(&d, "group", None).unwrap();
+        assert_eq!(labels(&p), ["net_http-2", "net_http", "net_http-3"]);
+        assert_eq!(
+            p.notices[0].text,
+            "axis value 'net/http' shown as 'net_http-2'; axis value 'net:http' shown as 'net_http-3'"
+        );
+    }
+
+    #[test]
+    fn project_by_axis_should_truncate_long_values_and_cap_the_notice_list() {
+        let long = format!("p/{}", "x".repeat(60));
+        let names: Vec<String> = (0..7).map(|i| format!("a/{i}")).collect();
+        let mut items: Vec<(&str, &str)> = vec![(long.as_str(), "B")];
+        items.extend(names.iter().map(|n| (n.as_str(), "B")));
+        let d = apply(set(&items), &[], false).unwrap().0;
+        let p = project_by_axis(&d, "group", None).unwrap();
+        assert!(p.variants.iter().all(|v| v.label.as_str().len() <= 40));
+        assert_eq!(p.variants[0].label.as_str().len(), 40);
+        let text = &p.notices[0].text;
+        assert_eq!(text.matches("shown as").count(), 5, "{text}");
+        assert!(text.ends_with("; and 3 more"), "{text}");
+    }
+
+    #[test]
+    fn variant_label_parse_should_still_error_for_explicit_labels() {
+        assert!(VariantLabel::parse("net/http").is_err());
+        assert!(VariantLabel::parse("a b").is_err());
     }
 
     #[test]
