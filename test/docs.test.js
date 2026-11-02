@@ -157,3 +157,41 @@ test('concept map, source labels, notice rules and gate-line rules are documente
 test('README documents the sanitised axis-value labels', () => {
   assert.ok(readme.includes('shown with disallowed characters replaced by `_`'), 'README lacks the label sanitising sentence');
 });
+
+const chartsSection = readme.split(/^## Charts$/m)[1].split(/^## /m)[0];
+const hostingSection = readme.split(/^## Hosting images$/m)[1].split(/^## /m)[0];
+
+test('readme_should_state_svg_is_standalone_artifact_and_no_html_wrapper_when_read', () => {
+  for (const needle of ['standalone artifact', 'no HTML wrapper', 'actions/upload-artifact']) {
+    assert.ok(chartsSection.includes(needle), `Charts lacks "${needle}"`);
+  }
+});
+
+test('readme_should_state_table_is_primary_on_phones', () => {
+  assert.ok(chartsSection.includes('table is the primary view on phones'));
+});
+
+test('readme_should_document_chart_scope_accessibility_contrast_and_first_run_permissions', () => {
+  const needles = [
+    [readme, 'across that row only'], // per-row Holm scope
+    [readme, '`svg-embed`'],
+    [hostingSection, 'Support by repository class'], // the support matrix
+    [chartsSection, 'alt text'],
+    [chartsSection, 'Chart data (text)'],
+    [chartsSection, 'Forced-colors and print'],
+    [chartsSection, '3:1'],
+    [hostingSection, 'permissions:'],
+    [hostingSection, 'contents: write'],
+    [hostingSection, 'pull-requests: write'],
+    [hostingSection, 'First run: with a read-only default `GITHUB_TOKEN`'],
+  ];
+  for (const [text, needle] of needles) {
+    assert.ok(text.includes(needle), `README lacks "${needle}"`);
+  }
+});
+
+test('readme_should_note_regex_backslashes_are_doubled_in_json_examples', () => {
+  assert.ok(squash(readme).includes('Regex backslashes are doubled in the JSON examples'));
+  const example = fs.readFileSync(path.join(root, 'examples/benchdiff.config.json'), 'utf8');
+  assert.ok(example.includes('\\\\d'), 'the example config really doubles the backslash');
+});

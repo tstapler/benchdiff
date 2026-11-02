@@ -134,7 +134,7 @@ zero-config rules read only `key=value` path segments (a/impl=quick) and bracket
 
 ## Config file
 
-Put shared settings in `benchdiff.config.json` and pass it explicitly with `config:` or `--config`. It is never auto-discovered. The [JSON Schema](benchdiff.config.schema.json) validates it and [`examples/benchdiff.config.json`](examples/benchdiff.config.json) is a tested starter (line one is the `$schema` reference).
+Put shared settings in `benchdiff.config.json` and pass it explicitly with `config:` or `--config`. It is never auto-discovered. The [JSON Schema](benchdiff.config.schema.json) validates it and [`examples/benchdiff.config.json`](examples/benchdiff.config.json) is a tested starter (line one is the `$schema` reference). Regex backslashes are doubled in the JSON examples (`\\d`), because a JSON string needs it; in an Action input or a flag they are written as-is.
 
 Layering is defaults < config file < flags (inputs act as flags). Boolean-like settings have negative flags so a flag can undo the file: `--no-only-changed` and `--no-fail-on-regression` (the Action inputs `only-changed: false` and `fail-on-regression: false` do the same). `dimensions-strict` has none. Run `--print-config` to see each effective value and its source.
 
@@ -177,6 +177,7 @@ Each concept has the same kebab-case name as an Action input, a CLI flag and a c
 * Chart rows are the top `chart-rows` by absolute delta; the table follows `sort`. Match them by name or by the `#` column of the `Chart data (text)` block.
 * Files in `svg-dir` (output `svg-paths`) are the standalone artifact; there is no HTML wrapper. For a download link, add `actions/upload-artifact` with `archive: false` yourself.
 * GitHub shows the chart as an opaque `<img>`: the alt text and the `Chart data (text)` table are the accessible path. The table is the primary view on phones (chart text scales to about 7 px at 375 px width). Forced-colors and print show the chart as drawn.
+* Contrast: text is at least 4.5:1 and chart marks at least 3:1 against the card in both themes; a fill under 3:1 gets an outline in the secondary ink.
 * Roll back by unsetting `charts`. Never delete `benchdiff-assets`: old comments link to it.
 
 ## Hosting images
