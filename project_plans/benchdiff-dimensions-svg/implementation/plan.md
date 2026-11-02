@@ -167,7 +167,9 @@ No database. Data-format change only:
 
 ## Unresolved Questions
 - [ ] Do SHA-pinned raw URLs render in a PR comment AND a step summary (Camo `Content-Type`/`nosniff`, dark mode, mobile), and which of the other embed variants (`data:` URI in the summary, repo-tracked path, `github.com/.../raw/`) work for private-repo and fork-PR runs? The widened spike matrix is in 0.2.1a. — blocks Stories 4.1.2, 4.2.1 and ADR-003 finalization — owner: Tyler (task 0.2.1b real PR runs; scheduled as the explicit human gate G1 in the wave table)
+  - G1 result: SHA-pinned raw URL renders in a public same-repo PR comment (light and dark, `image/svg+xml`, `nosniff`; observed on one run, https://github.com/tstapler/benchdiff/pull/3#issuecomment-6567806842). Still open: step summary (UNVERIFIED), private-repo and fork-PR runs (untested). See ADR-003.
 - [ ] Does `prefers-color-scheme` inside `<img>` SVG follow OS or GitHub theme? Decides default `chart-theme` (`light` card vs `auto`) — blocks Story 3.1.3 palette finalization (default stays opaque light card until answered) — owner: Tyler (0.2.1b)
+  - G1 result: it followed the GitHub comment theme in the owner's observation (one run, public PR); a transparent media-query-adaptive SVG is viable as the default `chart-theme`. See ADR-003.
 - [ ] Confirm-only: `node:wasi` `create_dir_all` under the preopen. Already mitigated (JS creates `svg/` before invoking wasm, 4.2.1a); not a blocker — owner: implementer
 - [ ] Is the 65,536 comment limit characters or bytes with non-ASCII names? Plan stays bytes-conservative (60,000 existing) — blocks nothing; test in 5.1.3 — owner: Tyler
 - [ ] Per-character width table source (public Arial/Helvetica AFM advances) — blocks Story 3.1.2; implementer must cite the source — owner: implementer
