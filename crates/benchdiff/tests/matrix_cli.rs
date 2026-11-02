@@ -832,3 +832,66 @@ fn cli_should_union_print_dimensions_across_all_variant_files() {
     assert_eq!(imp["benchmarks"], 4);
     assert!(dim("size").is_some(), "dimension only in the 2nd file: {v}");
 }
+
+#[test]
+fn cli_should_pivot_same_input_on_impl_then_size() {
+    let text = impl_file();
+    let file = tmp("pivot", "impl.txt", &text);
+    let header_of = |dim: &str| {
+        let out = run(&["--head", &file, "--compare-by", dim]);
+        assert_eq!(out.status.code(), Some(0), "{dim}: {}", stderr(&out));
+        let md = stdout(&out);
+        md.lines()
+            .find(|l| l.starts_with("| Benchmark"))
+            .unwrap_or_else(|| panic!("{dim}: no matrix header:\n{md}"))
+            .to_string()
+    };
+    let by_impl = header_of("impl");
+    let by_size = header_of("size");
+    assert!(
+        by_impl.contains("quick") && by_impl.contains("heap"),
+        "{by_impl}"
+    );
+    assert!(
+        by_size.contains("10") && by_size.contains("20"),
+        "{by_size}"
+    );
+    assert_ne!(by_impl, by_size);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        text,
+        "input unchanged"
+    );
+}
+
+#[test]
+fn cli_should_write_ranking_svg_when_variants_are_charted_with_svg_dir() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("matrix-cli-ranking-svg");
+    let _ = std::fs::remove_dir_all(&dir);
+    let dir_arg = dir.to_string_lossy().into_owned();
+    let (q, h, m) = (
+        labelled("quick", QUICK),
+        labelled("heap", HEAP),
+        labelled("merge", MERGE),
+    );
+    let out = run(&[
+        "--variant",
+        &q,
+        "--variant",
+        &h,
+        "--variant",
+        &m,
+        "--charts",
+        "ranking",
+        "--svg-dir",
+        &dir_arg,
+    ]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let md = stdout(&out);
+    let header = md.lines().find(|l| l.starts_with("| Benchmark")).unwrap();
+    assert!(
+        header.contains("quick") && header.contains("merge"),
+        "{header}"
+    );
+    assert!(dir.join("ranking.svg").is_file(), "ranking.svg in {dir:?}");
+}

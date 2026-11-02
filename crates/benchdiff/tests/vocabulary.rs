@@ -211,3 +211,83 @@ fn action_yml_should_declare_the_svg_outputs() {
         assert!(outputs.contains(o), "output `{o}` missing");
     }
 }
+
+/// Enum-valued keys whose `--help` line has no `allowed:` list: (key, values, has a default).
+const ENUMS_WITHOUT_ALLOWED_TEXT: &[(&str, &[&str], bool)] = &[
+    ("sort", &["delta", "name", "input", "rank"], true),
+    ("chart-theme", &["light", "dark", "both"], true),
+    ("svg-embed", &["true", "false", "auto"], false),
+    ("publish-images", &["true", "false"], true),
+];
+
+/// `(flag, values)` for every `--help` entry with an `allowed:` list of plain words, e.g.
+/// `(default: holm; allowed: holm, none)`.
+fn help_allowed_enums() -> Vec<(String, Vec<String>)> {
+    let out = Command::new(env!("CARGO_BIN_EXE_benchdiff"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    let help = String::from_utf8(out.stdout).unwrap();
+    let mut flag = String::new();
+    let mut found = vec![];
+    for line in help.lines() {
+        let t = line.trim_start();
+        if let Some(f) = t.strip_prefix("--") {
+            flag = f
+                .split(|c: char| !(c.is_ascii_lowercase() || c == '-'))
+                .next()
+                .unwrap()
+                .to_string();
+        }
+        if let Some(rest) = t.split("allowed: ").nth(1) {
+            let list = rest.trim_end_matches(')');
+            let values: Vec<String> = list.split(", ").map(str::to_string).collect();
+            let plain = values
+                .iter()
+                .all(|v| !v.is_empty() && v.chars().all(|c| c.is_ascii_lowercase() || c == '-'));
+            if plain && values.len() > 1 {
+                found.push((flag.clone(), values));
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn ux_s4_1_action_inputs_should_name_every_allowed_value_and_the_default() {
+    let inputs = inputs();
+    let desc_of = |k: &str| {
+        inputs
+            .iter()
+            .find(|(n, _)| n == k)
+            .unwrap_or_else(|| panic!("no input `{k}`"))
+            .1
+            .to_lowercase()
+    };
+    let derived = help_allowed_enums();
+    assert!(
+        derived.iter().any(|(k, _)| k == "correction")
+            && derived.iter().any(|(k, _)| k == "cell-format"),
+        "expected correction and cell-format in --help allowed: lists: {derived:?}"
+    );
+    let mut cases: Vec<(String, Vec<String>, bool)> =
+        derived.into_iter().map(|(k, v)| (k, v, true)).collect();
+    for (k, v, d) in ENUMS_WITHOUT_ALLOWED_TEXT {
+        cases.push((k.to_string(), v.iter().map(|s| s.to_string()).collect(), *d));
+    }
+    for (key, values, has_default) in cases {
+        let desc = desc_of(&key);
+        for v in &values {
+            assert!(
+                desc.contains(v.as_str()),
+                "input `{key}` description must contain `{v}`: {desc}"
+            );
+        }
+        if has_default {
+            assert!(
+                desc.contains("default"),
+                "input `{key}` description must say `default`: {desc}"
+            );
+        }
+    }
+}

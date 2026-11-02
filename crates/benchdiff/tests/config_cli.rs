@@ -420,3 +420,60 @@ fn config_should_let_a_flag_override_the_file_in_an_nway_run() {
         stdout(&out)
     );
 }
+
+/// Ten samples per side in two groups; head is 6% slower than base in both.
+fn two_group_inputs(test: &str) -> (String, String) {
+    let side = |ns: f64| {
+        let mut text = String::new();
+        for pkg in ["pkgA", "pkgB"] {
+            text += &format!("pkg: {pkg}\n");
+            for i in 0..10 {
+                text += &format!(
+                    "BenchmarkSort-8 \t 1000 \t {:.1} ns/op\n",
+                    ns + f64::from(i) * 0.1
+                );
+            }
+        }
+        text
+    };
+    (
+        config_file(test, "base.txt", &side(1000.0)),
+        config_file(test, "head.txt", &side(1060.0)),
+    )
+}
+
+fn two_way_summary(test: &str, config_json: Option<&str>) -> String {
+    let (base, head) = two_group_inputs(test);
+    let mut args = vec!["--base", &base, "--head", &head];
+    let cfg;
+    if let Some(json) = config_json {
+        cfg = config_file(test, "c.json", json);
+        args.extend(["--config", &cfg]);
+    }
+    let out = run(&args);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    stdout(&out)
+        .lines()
+        .find(|l| l.contains(" regressed"))
+        .unwrap_or_else(|| panic!("no summary line"))
+        .to_string()
+}
+
+#[test]
+fn thresholds_should_clear_a_six_percent_regression_when_two_way_key_raises_it_to_ten() {
+    assert!(two_way_summary("thr2-base", None).contains("2 regressed"));
+    let exact = two_way_summary(
+        "thr2-exact",
+        Some(r#"{"version":1,"thresholds":{"pkgA/Sort":10,"pkgB/Sort":10}}"#),
+    );
+    assert!(exact.contains("0 regressed"), "{exact}");
+}
+
+#[test]
+fn thresholds_should_affect_only_the_named_group_when_two_way_key_is_a_group() {
+    let one = two_way_summary(
+        "thr2-group",
+        Some(r#"{"version":1,"thresholds":{"pkgA":10}}"#),
+    );
+    assert!(one.contains("1 regressed"), "{one}");
+}

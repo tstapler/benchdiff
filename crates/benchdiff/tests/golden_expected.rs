@@ -150,3 +150,79 @@ same_file_case!(
     "hyperfine"
 );
 same_file_case!(importer_jmh, "importer-jmh", "jmh/jmh.json", "jmh");
+
+fn cli(args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_benchdiff"))
+        .current_dir(root())
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn cli_stdout_should_equal_expected_markdown_when_no_new_flags() {
+    let out = cli(&["--head", HEAD, "--base", BASE]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let want = std::fs::read(root().join("testdata/golden/expected/default.md")).unwrap();
+    assert!(
+        out.stdout == want,
+        "stdout differs from testdata/golden/expected/default.md"
+    );
+}
+
+#[test]
+fn cli_should_exit_one_when_fail_on_regression_five_meets_the_golden_regressions() {
+    // The limit is attached with `=`: `--fail-on-regression 5` makes `5` an unknown argument.
+    let out = cli(&["--head", HEAD, "--base", BASE, "--fail-on-regression=5"]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn baseline_pairwise_outputs_should_be_byte_identical_on_a_second_run() {
+    let dir = std::env::temp_dir().join(format!("bd-pairwise-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let root = root();
+    for variant in ["heap", "merge"] {
+        let want =
+            std::fs::read(root.join(format!("testdata/nway/baseline/pairwise-{variant}.md")))
+                .unwrap();
+        let head = format!("testdata/nway/{variant}.txt");
+        let mut runs = vec![];
+        for n in 1..=2 {
+            let md = dir.join(format!("{variant}-{n}.md"));
+            let out = cli(&[
+                "--base",
+                "testdata/nway/quick.txt",
+                "--head",
+                &head,
+                "--markdown",
+                md.to_str().unwrap(),
+            ]);
+            assert!(
+                out.status.success(),
+                "{variant}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            runs.push(std::fs::read(&md).unwrap());
+        }
+        assert!(
+            runs[0] == runs[1],
+            "{variant}: second run differs from the first"
+        );
+        assert!(
+            runs[0] == want,
+            "{variant}: differs from testdata/nway/baseline/pairwise-{variant}.md"
+        );
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}

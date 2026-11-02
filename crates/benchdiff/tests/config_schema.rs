@@ -381,3 +381,76 @@ fn validator_rejects_bad_values() {
         assert!(check(&bad).is_err(), "{bad}");
     }
 }
+
+fn run_example(extra: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_benchdiff"))
+        .current_dir(root())
+        .args(["--config", "examples/benchdiff.config.json"])
+        .args(extra)
+        .output()
+        .unwrap()
+}
+
+/// The example sets `reference: "base"`, which is no variant label of `impl.txt`
+/// (quick, heap, merge), so only an explicit `--reference` flag yields the matrix. The
+/// example's `fail-on-regression: 10` then trips on merge vs quick, hence exit 1, not 0.
+#[test]
+fn starter_example_should_render_matrix_on_nway_impl() {
+    let out = run_example(&["--head", "testdata/nway/impl.txt", "--reference", "quick"]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let md = String::from_utf8(out.stdout).unwrap();
+    let header = md
+        .lines()
+        .find(|l| l.starts_with("| Benchmark"))
+        .unwrap_or_else(|| panic!("{md}"));
+    assert!(
+        header.contains("quick") && header.contains("heap") && header.contains("merge"),
+        "{header}"
+    );
+
+    let out = run_example(&["--head", "testdata/nway/impl.txt", "--print-config"]);
+    assert!(out.status.success());
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    for key in ["compare-by", "reference", "threshold", "cell-format"] {
+        assert_eq!(v["sources"][key], "config", "{key}: {v}");
+    }
+}
+
+/// Defect repro: `benchdiff --config examples/benchdiff.config.json --print-config` omits
+/// `charts`, `chart-rows`, `chart-width`, `chart-theme` and `svg-embed` from both `config` and
+/// `sources`, although the file sets them and the run honours them.
+#[test]
+#[ignore = "print-config omits the chart/svg-embed keys (crates/benchdiff/src/main.rs print_config)"]
+fn starter_example_print_config_should_source_chart_keys_from_config() {
+    let out = run_example(&["--print-config"]);
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    for key in [
+        "charts",
+        "chart-rows",
+        "chart-width",
+        "chart-theme",
+        "svg-embed",
+    ] {
+        assert_eq!(v["sources"][key], "config", "{key}: {v}");
+    }
+}
+
+#[test]
+fn starter_example_should_fall_back_to_two_way_with_a_notice_when_reference_is_not_a_label() {
+    let out = run_example(&["--head", "testdata/nway/impl.txt"]);
+    assert_eq!(out.status.code(), Some(0));
+    let md = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        md.contains("reference 'base' is not one of: quick, heap, merge"),
+        "{md}"
+    );
+    assert!(
+        !md.lines().any(|l| l.starts_with("| Benchmark | quick")),
+        "{md}"
+    );
+}
