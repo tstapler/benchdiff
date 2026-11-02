@@ -25,3 +25,27 @@ Replace the hand-written files with real captures when a repo that produces them
 - `importer-<format>` for `bmf`, `cargo-bench`, `criterion`, `gab-smaller`, `gab-bigger`, `googlebench`, `hyperfine`, `jmh`: the fixture under `testdata/` as both base and head with `--format <format>`.
 
 Regenerate with `UPDATE_GOLDEN=1` once the asserting tests (`test/golden.test.js`, `crates/benchdiff/tests/golden_expected.rs`) land; a diff in `golden/expected/` must be reviewed as an intentional behaviour change.
+
+## Golden SVG review rule
+
+The golden SVGs in `crates/benchdiff-core/tests/snapshots/svg/` are checked byte for byte by `crates/benchdiff-core/tests/svg_snapshots.rs` (rewrite with `UPDATE_SNAPSHOTS=1`). A byte match proves sameness, not that the chart is legible, so a pull request that updates any golden SVG must attach the PNGs from `scripts/svg-to-png.sh` and the reviewer opens them before approving:
+
+```sh
+scripts/svg-to-png.sh                 # all goldens -> target/svg-png/<name>-760.png and <name>-320.png
+scripts/svg-to-png.sh -o out some.svg # specific files or directories
+```
+
+The script needs `resvg`, `rsvg-convert` or `inkscape` and prints a clear message when none is installed. It is dev-only: never a crate dependency and never part of the wasm.
+
+## `svg-worst/` worst-case chart inputs
+
+Inputs for the geometry tests in `crates/benchdiff-core/tests/svg_geometry.rs`, one name or label per line:
+
+| File | Content |
+|---|---|
+| `names-long.txt` | one 500-character benchmark name |
+| `names-cjk.txt` | CJK and Hangul names, including 120-character runs |
+| `names-rtl.txt` | Arabic and Hebrew names, a bidi-override name and a mixed-direction name |
+| `variants-8.txt`, `variants-10.txt` | 8 and 10 maximum-length (40-character) variant labels |
+
+The tests build 30 rows from these names (two-way, and 8 and 10 variants x 30 rows for the N-way charts) and render every chart at widths 480 and 1600 in both themes. They assert every coordinate lies inside the viewBox, every `<text>` (advance-table width plus the 10% margin) lies inside the card, and no two text boxes overlap. A deliberately overflowing fixture in the same file proves the assertions can fail. The rendered worst-case charts are reviewed as PNG in task 5.1.3a.
