@@ -21,12 +21,11 @@ pub fn extract_defaults(name: &str) -> Extracted {
 
     for segment in name.split('/') {
         let (rest, pairs) = strip_bracket_groups(segment);
-        let mut removed = rest.len() != segment.len();
+        let removed = rest.len() != segment.len();
         let mut pairs = pairs;
         let rest = rest.trim();
         if let Some((k, v)) = parse_pair(rest) {
             pairs.push((k, v));
-            removed = true;
             for (k, v) in pairs {
                 dims.entry(k).or_insert(v);
             }
@@ -172,7 +171,8 @@ mod tests {
 
     #[test]
     fn extract_defaults_should_read_bracket_groups_when_jmh_or_multi_pair() {
-        let cases: [(&str, &[(&str, &str)], &str); 6] = [
+        type Case<'a> = (&'a str, &'a [(&'a str, &'a str)], &'a str);
+        let cases: [Case; 6] = [
             (
                 "Bench.sort (size = 1000)",
                 &[("size", "1000")],
