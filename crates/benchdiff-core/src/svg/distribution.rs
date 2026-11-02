@@ -269,7 +269,7 @@ fn matrix_lanes(report: &MatrixReport, row: &MatrixRow, opts: &SvgOptions) -> Ve
         let Cell::Present(p) = cell else { continue };
         // The reference column has no `Compared` data but still has samples to show.
         let values = finite(&p.samples.head);
-        if values.is_empty() || lanes.len() >= opts.max_series {
+        if values.is_empty() || lanes.len() >= opts.max_series.max(1) {
             continue;
         }
         lanes.push(Lane {
@@ -823,6 +823,21 @@ mod tests {
             .filter(|l| l.starts_with("<path") && l.matches('A').count() == 20)
             .count();
         assert_eq!(lanes, 3);
+    }
+
+    #[test]
+    fn distribution_matrix_chart_should_draw_one_lane_when_max_series_is_zero() {
+        let o = SvgOptions {
+            max_series: 0,
+            ..opts(ChartTheme::Light)
+        };
+        let f = distribution_matrix_chart(&matrix(), &o).unwrap();
+        let lanes = f
+            .svg
+            .lines()
+            .filter(|l| l.starts_with("<path") && l.matches('A').count() == 20)
+            .count();
+        assert_eq!(lanes, 1, "same floor as the ranking chart's max(1)");
     }
 
     #[test]

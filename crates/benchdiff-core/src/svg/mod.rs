@@ -712,7 +712,7 @@ fn distribution_matrix_table(report: &MatrixReport, opts: &SvgOptions) -> TextTa
                 Cell::Missing => None,
             })
             .filter(|(_, v)| !v.is_empty())
-            .take(opts.max_series)
+            .take(opts.max_series.max(1))
             .collect()
     };
     let (selected, constants) = distribution::matrix_selection(report, opts);
@@ -756,7 +756,8 @@ fn distribution_matrix_table(report: &MatrixReport, opts: &SvgOptions) -> TextTa
     }
 }
 
-/// Untrusted text as one Markdown table-cell line; escapes what could become markup.
+/// Untrusted text as one Markdown table-cell line; escapes what could become markup, including
+/// GFM bare-URL autolinks (`https://`, `www.`) and `:emoji:` shortcodes.
 fn text_escape(text: &str) -> String {
     let mut out = String::new();
     for ch in text
@@ -769,9 +770,13 @@ fn text_escape(text: &str) -> String {
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
             '&' => out.push_str("&amp;"),
-            '\\' | '`' | '*' | '_' | '[' | ']' | '|' | '@' | '#' | '!' | '~' => {
+            '\\' | '`' | '*' | '_' | '[' | ']' | '|' | '@' | '#' | '!' | '~' | ':' => {
                 out.push('\\');
                 out.push(ch);
+            }
+            // `www.example.com` autolinks without a scheme.
+            '.' if out.len() >= 3 && out[out.len() - 3..].eq_ignore_ascii_case("www") => {
+                out.push_str("\\.");
             }
             _ => out.push(ch),
         }
@@ -1377,6 +1382,30 @@ mod tests {
         let r = preport(vec![prow("a|b<img>`x`", 9.0, Verdict::Regressed)], None);
         let md = render_text_table(&SvgInput::Pair(&r), ChartKind::Delta, &opts_rows(30)).unwrap();
         assert!(md.contains(r"| 1 | a\|b&lt;img&gt;\`x\` |"), "{md}");
+    }
+
+    #[test]
+    fn text_escape_should_break_bare_url_autolinks_and_emoji_shortcodes() {
+        for hostile in [
+            "https://evil.example/x",
+            "HTTP://evil.example",
+            "see www.evil.example",
+            "WWW.evil.example",
+            ":smile: :+1:",
+            "mailto:a@evil.example",
+        ] {
+            let out = text_escape(hostile);
+            assert!(!out.contains("://"), "{out}");
+            assert!(!out.to_lowercase().contains("www."), "{out}");
+            assert!(!out.contains(" :") || out.contains("\\:"), "{out}");
+            assert_eq!(
+                out.matches(':').count(),
+                out.matches("\\:").count(),
+                "{out}"
+            );
+        }
+        assert_eq!(text_escape("www.a.com"), "www\\.a.com");
+        assert_eq!(text_escape("a: b"), "a\\: b");
     }
 
     fn kinds(list: &[ChartKind]) -> SvgOptions {
