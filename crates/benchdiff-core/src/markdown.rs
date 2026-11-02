@@ -140,6 +140,9 @@ fn skip_text(s: &SkippedChart) -> String {
             format!("{kind} chart skipped: no samples in the input (use -count=10 or Criterion)")
         }
         SkipReason::Empty => format!("chart skipped: {kind}: no rows to chart"),
+        SkipReason::NonFinite => {
+            format!("chart skipped: {kind}: a value is too large to draw (not finite)")
+        }
         SkipReason::CapExceeded { shown, total } => {
             format!("chart skipped: {kind}: {total} series exceed the cap of {shown}")
         }
@@ -1180,6 +1183,22 @@ mod tests {
         let md = render_markdown_with(&two_way(), &extras);
         assert!(
             md.contains("⚠️ distribution chart skipped: no samples in the input (use -count=10 or Criterion)\n"),
+            "{md}"
+        );
+    }
+
+    #[test]
+    fn render_markdown_with_should_name_the_non_finite_skip_cause() {
+        let extras = RenderExtras {
+            skipped: vec![SkippedChart {
+                kind: ChartKind::Distribution,
+                reason: SkipReason::NonFinite,
+            }],
+            ..RenderExtras::default()
+        };
+        let md = render_markdown_with(&two_way(), &extras);
+        assert!(
+            md.contains("⚠️ chart skipped: distribution: a value is too large to draw (not finite)\n"),
             "{md}"
         );
     }

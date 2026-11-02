@@ -320,7 +320,7 @@ fn finish(
         Palette::for_theme(theme),
         mode,
     )
-    .map_err(|_| SkipReason::NoSamples)?;
+    .map_err(|_| SkipReason::NonFinite)?;
     let name = match (opts.theme, theme) {
         (ChartTheme::Both, Theme::Light) => "distribution-light",
         (ChartTheme::Both, Theme::Dark) => "distribution-dark",

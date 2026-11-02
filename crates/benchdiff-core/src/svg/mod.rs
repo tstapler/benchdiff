@@ -204,6 +204,8 @@ pub enum SkipReason {
     NoSamples,
     CapExceeded { shown: usize, total: usize },
     Empty,
+    /// A coordinate was not finite, e.g. samples near the `f64` limits overflow the axis span.
+    NonFinite,
     NotApplicable { kind: ChartKind },
 }
 

@@ -75,7 +75,7 @@ pub fn delta_chart_themed(
         opts.width.get() as f64,
         Palette::for_theme(theme),
     )
-    .map_err(|_| SkipReason::Empty)?;
+    .map_err(|_| SkipReason::NonFinite)?;
     let name = match (opts.theme, theme) {
         (ChartTheme::Both, Theme::Light) => "delta-light",
         (ChartTheme::Both, Theme::Dark) => "delta-dark",

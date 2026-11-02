@@ -86,7 +86,7 @@ pub fn ranking_chart_themed(
 ) -> Result<SvgFile, SkipReason> {
     let plan = plan(report, opts)?;
     let pal = Palette::for_theme(theme);
-    let svg = render(&plan, opts.width.get() as f64, pal).map_err(|_| SkipReason::Empty)?;
+    let svg = render(&plan, opts.width.get() as f64, pal).map_err(|_| SkipReason::NonFinite)?;
     let name = match (opts.theme, theme) {
         (ChartTheme::Both, Theme::Light) => "ranking-light",
         (ChartTheme::Both, Theme::Dark) => "ranking-dark",
