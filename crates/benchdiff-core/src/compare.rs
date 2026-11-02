@@ -48,6 +48,29 @@ pub struct Options {
     pub tag: String,
     /// `Report::exceeds_failure_threshold` trips on a regression of at least this many percent.
     pub fail_on_regression_pct: Option<f64>,
+    /// Per-metric noise thresholds (`group/name` or `group` -> percent); see `threshold_for`.
+    pub threshold_overrides: BTreeMap<String, f64>,
+}
+
+impl Options {
+    /// Noise threshold for `m`: exact `group/name` (just `name` when the group is empty),
+    /// then `group`, then `threshold_pct`. The measure is not part of the key.
+    pub fn threshold_for(&self, m: &Metric) -> f64 {
+        let exact = if m.group.is_empty() {
+            m.name.clone()
+        } else {
+            format!("{}/{}", m.group, m.name)
+        };
+        self.threshold_overrides
+            .get(&exact)
+            .or_else(|| {
+                (!m.group.is_empty())
+                    .then(|| self.threshold_overrides.get(&m.group))
+                    .flatten()
+            })
+            .copied()
+            .unwrap_or(self.threshold_pct)
+    }
 }
 
 impl Default for Options {
@@ -63,6 +86,7 @@ impl Default for Options {
             title: "Benchmark comparison".into(),
             tag: "default".into(),
             fail_on_regression_pct: None,
+            threshold_overrides: BTreeMap::new(),
         }
     }
 }
@@ -238,6 +262,7 @@ pub fn compare(base: Option<&MetricSet>, head: &MetricSet, opts: &Options) -> Re
             only_changed: opts.only_changed,
             max_rows: opts.max_rows,
             fail_on_regression_pct: opts.fail_on_regression_pct,
+            threshold_overrides: opts.threshold_overrides.clone(),
             base_env: env_of(base),
             head_env: env_of(Some(head)),
             skipped_head: head.skipped.labels(),
@@ -341,7 +366,9 @@ fn changed_row(base: &Metric, head: &Metric, opts: &Options) -> Row {
 
     let passes_floor = diff != 0.0
         && diff.abs() >= opts.min_abs
-        && row.delta_pct.is_none_or(|p| p.abs() >= opts.threshold_pct);
+        && row
+            .delta_pct
+            .is_none_or(|p| p.abs() >= opts.threshold_for(head));
     row.verdict = if !(passes_floor && ev.significant) {
         Verdict::Unchanged
     } else if (diff < 0.0) == (head.better == Better::Lower) {
@@ -769,5 +796,71 @@ mod tests {
         let r = compare(Some(&mk(100.0, 8.0)), &mk(100.0, 16.0), &Options::default());
         assert_eq!(r.count(Verdict::Regressed), 1);
         assert_eq!(r.count(Verdict::Unchanged), 1);
+    }
+
+    fn gm(group: &str, name: &str) -> Metric {
+        Metric::new(group, name, "", "ms", 100.0, Better::Lower)
+    }
+
+    fn overrides(pairs: &[(&str, f64)]) -> Options {
+        Options {
+            threshold_overrides: pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+            ..Options::default()
+        }
+    }
+
+    #[test]
+    fn threshold_for_should_prefer_group_name_override_over_default_when_net_parse() {
+        let o = overrides(&[("net/Parse", 20.0)]);
+        assert_eq!(o.threshold_for(&gm("net", "Parse")), 20.0);
+        assert_eq!(o.threshold_for(&gm("net", "Dial")), 5.0);
+    }
+
+    #[test]
+    fn threshold_for_should_prefer_exact_over_group_over_default() {
+        let o = overrides(&[("net", 8.0), ("net/Parse", 20.0)]);
+        assert_eq!(o.threshold_for(&gm("net", "Parse")), 20.0);
+        assert_eq!(o.threshold_for(&gm("net", "Dial")), 8.0);
+        assert_eq!(o.threshold_for(&gm("db", "Query")), 5.0);
+    }
+
+    #[test]
+    fn threshold_for_should_use_bare_name_when_group_is_empty() {
+        let o = overrides(&[("Parse", 20.0), ("", 9.0)]);
+        assert_eq!(o.threshold_for(&gm("", "Parse")), 20.0);
+        assert_eq!(o.threshold_for(&gm("", "Other")), 5.0);
+    }
+
+    #[test]
+    fn compare_should_apply_group_threshold_when_only_group_key_matches() {
+        let o = overrides(&[("net", 8.0), ("net/Parse", 20.0)]);
+        let mk = |g: &str, n: &str, v: f64| Metric::new(g, n, "", "ms", v, Better::Lower);
+        let base = MetricSet {
+            env: Default::default(),
+            skipped: Default::default(),
+            metrics: vec![
+                mk("net", "Parse", 100.0),
+                mk("net", "Dial", 100.0),
+                mk("net", "Dial2", 100.0),
+                mk("db", "Query", 100.0),
+            ],
+        };
+        let head = MetricSet {
+            env: Default::default(),
+            skipped: Default::default(),
+            metrics: vec![
+                mk("net", "Parse", 112.0),
+                mk("net", "Dial", 106.0),
+                mk("net", "Dial2", 112.0),
+                mk("db", "Query", 106.0),
+            ],
+        };
+        let r = compare(Some(&base), &head, &o);
+        let v = |n: &str| r.rows.iter().find(|r| r.name == n).unwrap().verdict;
+        assert_eq!(v("Parse"), Verdict::Unchanged);
+        assert_eq!(v("Dial"), Verdict::Unchanged);
+        assert_eq!(v("Dial2"), Verdict::Regressed);
+        assert_eq!(v("Query"), Verdict::Regressed);
+        assert_eq!(r.summary.threshold_overrides, o.threshold_overrides);
     }
 }

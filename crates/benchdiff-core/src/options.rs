@@ -2,6 +2,7 @@
 //! An unset field means "not given", so a flag equal to the default still overrides a file.
 
 use crate::compare::{Options, Sort};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct OptionsOverlay {
@@ -15,6 +16,7 @@ pub struct OptionsOverlay {
     pub title: Option<String>,
     pub tag: Option<String>,
     pub fail_on_regression_pct: Option<f64>,
+    pub threshold_overrides: Option<BTreeMap<String, f64>>,
 }
 
 impl OptionsOverlay {
@@ -50,6 +52,9 @@ impl OptionsOverlay {
         if let Some(v) = self.fail_on_regression_pct {
             opts.fail_on_regression_pct = Some(v);
         }
+        if let Some(v) = &self.threshold_overrides {
+            opts.threshold_overrides = v.clone();
+        }
     }
 
     /// Fields set in `later` replace those set here.
@@ -67,7 +72,8 @@ impl OptionsOverlay {
             max_rows,
             title,
             tag,
-            fail_on_regression_pct
+            fail_on_regression_pct,
+            threshold_overrides
         );
         self
     }
@@ -121,5 +127,19 @@ mod tests {
         assert_eq!(opts.threshold_pct, 5.0);
         assert!(matches!(opts.sort, Sort::Name));
         assert_eq!(opts.max_rows, Some(2));
+    }
+
+    #[test]
+    fn overlay_should_replace_threshold_overrides_when_set() {
+        let ov = |k: &str, v: f64| OptionsOverlay {
+            threshold_overrides: Some([(k.to_string(), v)].into()),
+            ..Default::default()
+        };
+        let opts = applied(&ov("net", 8.0).merge(ov("net/Parse", 20.0)));
+        assert_eq!(opts.threshold_overrides.len(), 1);
+        assert_eq!(opts.threshold_overrides["net/Parse"], 20.0);
+        assert!(applied(&OptionsOverlay::default())
+            .threshold_overrides
+            .is_empty());
     }
 }
