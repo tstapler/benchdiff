@@ -11,6 +11,7 @@ name: Release benchmarks
 #         bench-command: go test -bench . -benchmem -count=10 ./... | tee bench.txt
 #         results: bench.txt
 #         format: go
+#         charts: delta   # optional: also attach the SVG charts as release assets
 #         benchdiff-ref: <full commit SHA of tstapler/benchdiff>
 #
 # Pin both the `uses:` ref and `benchdiff-ref` to a commit SHA. `setup` and `bench-command` run
@@ -45,6 +46,14 @@ on:
       runs-on:
         type: string
         default: ubuntu-latest
+      charts:
+        description: "Charts to render and attach to the release as SVG assets: a comma-separated list of delta, ranking, distribution. Empty (default) = no charts."
+        type: string
+        default: ''
+      config:
+        description: Path to a benchdiff.config.json settings file (see the action's `config` input). Empty = none.
+        type: string
+        default: ''
       benchdiff-ref:
         description: Ref of tstapler/benchdiff to run; pin a full commit SHA.
         type: string
@@ -112,12 +121,19 @@ jobs:
           title: Benchmarks ${{ steps.previous.outputs.previous && format('{0} → {1}', steps.previous.outputs.previous, github.event.release.tag_name) || github.event.release.tag_name }}
           tag: release
           comment: 'false'
+          charts: ${{ inputs.charts }}
+          config: ${{ inputs.config }}
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_JSON: ${{ steps.diff.outputs.head-json-path }}
           REPORT_MD: ${{ steps.diff.outputs.report-path }}
+          SVG_PATHS: ${{ steps.diff.outputs.svg-paths }}
         run: |
           cp "$HEAD_JSON" "$ASSET"
           cp "$REPORT_MD" benchmark-diff.md
-          gh release upload "$TAG" "$ASSET" benchmark-diff.md --clobber
+          assets=("$ASSET" benchmark-diff.md)
+          while IFS= read -r svg; do
+            [ -n "$svg" ] && assets+=("$svg")
+          done <<< "$SVG_PATHS"
+          gh release upload "$TAG" "${assets[@]}" --clobber
