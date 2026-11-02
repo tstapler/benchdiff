@@ -1,7 +1,7 @@
 <!-- benchdiff:default -->
 ### Benchmark comparison: 3 variants (reference: quick)
 
-**merge** has the best geomean (0.82x vs reference quick, over 3/4 common ns/op rows; variants are not tested against each other); slower than reference in 0 of 3 rows · 1 incomplete
+**merge** has the best geomean (0.82x vs reference quick, over 3/4 common ns/op rows; variants are not tested against each other); slower than reference in 0 of 3 rows; heap slower in 2 rows · 1 incomplete
 
 reference: quick (first listed; set 'reference' to change)
 

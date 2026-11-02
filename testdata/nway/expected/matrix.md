@@ -1,7 +1,7 @@
 <!-- benchdiff:default -->
 ### Benchmark comparison: 3 variants (reference: quick)
 
-**heap** has the best geomean (0.80x vs reference quick, over 6/6 common ns/op rows; variants are not tested against each other); slower than reference in 0 of 6 rows
+**heap** has the best geomean (0.80x vs reference quick, over 6/6 common ns/op rows; variants are not tested against each other); slower than reference in 0 of 6 rows; merge slower in 1 row
 
 reference: quick (set by 'reference')
 

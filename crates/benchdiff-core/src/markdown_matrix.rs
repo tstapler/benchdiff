@@ -198,11 +198,56 @@ fn headline(report: &MatrixReport) -> Option<String> {
             ),
         }
     };
+    let skip = h.best.filter(|_| h.comparable);
+    if let Some(clause) = other_slower_clause(report, skip) {
+        line.push_str("; ");
+        line.push_str(&clause);
+    }
     let incomplete = incomplete_rows(report);
     if incomplete > 0 {
         let _ = write!(line, " · {incomplete} incomplete");
     }
     Some(line)
+}
+
+/// Most variants named in the "slower" clause before the rest are counted.
+const MAX_NAMED_SLOWER: usize = 3;
+
+/// `merge slower in 1 row, tail slower in 3 rows`: the non-reference variants other than
+/// `headline` with at least one cell slower than the reference, from the same post-Holm
+/// verdicts the table shows (any measure: a slower row anywhere should not hide behind the
+/// best variant).
+fn other_slower_clause(report: &MatrixReport, headline: Option<usize>) -> Option<String> {
+    let r = ref_col(report);
+    let counts: Vec<(usize, usize)> = (0..report.columns.len())
+        .filter(|c| Some(*c) != r && Some(*c) != headline)
+        .map(|c| {
+            let n = report
+                .rows
+                .iter()
+                .filter(|row| is_regressed(&row.cells[c]))
+                .count();
+            (c, n)
+        })
+        .filter(|(_, n)| *n > 0)
+        .collect();
+    if counts.is_empty() {
+        return None;
+    }
+    let mut parts: Vec<String> = counts
+        .iter()
+        .take(MAX_NAMED_SLOWER)
+        .map(|(c, n)| {
+            let rows = if *n == 1 { "row" } else { "rows" };
+            format!("{} slower in {n} {rows}", esc(report.columns[*c].as_str()))
+        })
+        .collect();
+    let rest = counts.len().saturating_sub(MAX_NAMED_SLOWER);
+    if rest > 0 {
+        let noun = if rest == 1 { "variant" } else { "variants" };
+        parts.push(format!("and {rest} more {noun}"));
+    }
+    Some(parts.join(", "))
 }
 
 /// Benchmarks where some non-reference variant did not run.
@@ -952,6 +997,131 @@ mod tests {
         assert!(
             md.contains("**quick** (the reference) has the best geomean; no variant is better overall (over 15/15 common ns/op rows)"),
             "{md}"
+        );
+    }
+
+    fn headline_of(v: &[Variant]) -> String {
+        let md = render(v, &Options::default(), &mopts());
+        md.lines()
+            .find(|l| l.starts_with("**"))
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn headline_should_name_another_variant_slower_than_the_reference_in_at_least_one_row() {
+        // heap is 1.28x the reference on every row, merge wins: the best variant hides heap.
+        let line = headline_of(&fifteen(0));
+        assert!(
+            line.ends_with("slower than reference in 0 of 15 rows; heap slower in 15 rows"),
+            "{line}"
+        );
+        // One slower row reads as singular.
+        let mut v = fifteen(0);
+        let rows = names(15);
+        let items: Vec<(&str, f64)> = rows
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.as_str(), if i == 0 { 300.0 } else { 100.0 }))
+            .collect();
+        v[1] = variant("heap", &items);
+        let line = headline_of(&v);
+        assert!(line.ends_with("; heap slower in 1 row"), "{line}");
+    }
+
+    #[test]
+    fn headline_should_add_no_clause_when_no_other_variant_is_slower() {
+        let mut v = fifteen(0);
+        let rows = names(15);
+        let items: Vec<(&str, f64)> = rows.iter().map(|n| (n.as_str(), 100.0)).collect();
+        v[1] = variant("heap", &items);
+        let line = headline_of(&v);
+        assert!(
+            line.ends_with("slower than reference in 0 of 15 rows"),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn headline_should_list_several_slower_variants_and_cap_the_names_at_three() {
+        let rows = names(15);
+        let col = |label: &str, slow: usize| {
+            let items: Vec<(&str, f64)> = rows
+                .iter()
+                .enumerate()
+                .map(|(i, n)| (n.as_str(), if i < slow { 300.0 } else { 100.0 }))
+                .collect();
+            variant(label, &items)
+        };
+        let flat: Vec<(&str, f64)> = rows.iter().map(|n| (n.as_str(), 50.0)).collect();
+        let v = vec![
+            col("quick", 0),
+            variant("best", &flat),
+            col("merge", 1),
+            col("tail", 3),
+        ];
+        let line = headline_of(&v);
+        assert!(
+            line.ends_with("; merge slower in 1 row, tail slower in 3 rows"),
+            "{line}"
+        );
+        let v = vec![
+            col("quick", 0),
+            variant("best", &flat),
+            col("a", 1),
+            col("b", 2),
+            col("c", 3),
+            col("d", 4),
+            col("e", 5),
+        ];
+        let line = headline_of(&v);
+        assert!(
+            line.ends_with(
+                "; a slower in 1 row, b slower in 2 rows, c slower in 3 rows, and 2 more variants"
+            ),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn headline_should_name_every_slower_variant_when_not_comparable() {
+        let mut v = fifteen(0);
+        v[2] = variant(
+            "merge",
+            &names(4)
+                .iter()
+                .map(|n| (n.as_str(), 90.0))
+                .collect::<Vec<_>>(),
+        );
+        let line = headline_of(&v);
+        assert!(
+            line.contains("(no overall winner); heap slower in 15 rows"),
+            "{line}"
+        );
+        assert!(line.contains(" · 11 incomplete"), "{line}");
+    }
+
+    #[test]
+    fn headline_should_name_slower_variants_when_the_reference_has_the_best_geomean() {
+        let mut v = fifteen(0);
+        v[1] = variant(
+            "heap",
+            &names(15)
+                .iter()
+                .map(|n| (n.as_str(), 150.0))
+                .collect::<Vec<_>>(),
+        );
+        v[2] = variant(
+            "merge",
+            &names(15)
+                .iter()
+                .map(|n| (n.as_str(), 120.0))
+                .collect::<Vec<_>>(),
+        );
+        let line = headline_of(&v);
+        assert!(
+            line.ends_with("; heap slower in 15 rows, merge slower in 15 rows"),
+            "{line}"
         );
     }
 
