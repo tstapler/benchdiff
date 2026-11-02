@@ -4,7 +4,7 @@
 //! writer's attribute-based primitives (literal-hex `fill`/`stroke`), not its class ones.
 
 use super::style::{Palette, Theme};
-use super::text::{text_width, truncate_to_width};
+use super::text::{shorten_middle, text_width, truncate_to_width};
 use super::writer::{Anchor, NonFiniteError, PathBuilder, SvgWriter};
 use super::{select_rows, ChartTheme, RowRef, Selected, SkipReason, SvgFile, SvgInput, SvgOptions};
 use crate::compare::{Report, Row, Verdict};
@@ -117,21 +117,6 @@ fn bars_of<'a>(selected: &Selected<'a>) -> Vec<Bar<'a>> {
 fn counts(bars: &[Bar]) -> (usize, usize, usize) {
     let n = |c| bars.iter().filter(|b| b.cap == c).count();
     (n(Cap::Up), n(Cap::Down), n(Cap::Hollow))
-}
-
-/// Keeps both ends of `s` within `max` chars, joining them with an ellipsis.
-fn shorten_middle(s: &str, max: usize) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    if chars.len() <= max {
-        return s.to_string();
-    }
-    let keep = max.saturating_sub(1);
-    let head = keep.div_ceil(2);
-    let tail = keep - head;
-    let mut out: String = chars[..head].iter().collect();
-    out.push('…');
-    out.extend(&chars[chars.len() - tail..]);
-    out
 }
 
 /// At most 125 characters: verdict counts and the top change; the name is cut, never the number.

@@ -5,7 +5,7 @@
 //! Jitter depends only on the sample index, so identical input gives identical bytes.
 
 use super::style::{Palette, Theme};
-use super::text::truncate_to_width;
+use super::text::{cut, truncate_to_width, NAME_MAX_CHARS};
 use super::writer::{Anchor, NonFiniteError, PathBuilder, SvgWriter};
 use super::{
     select_rows_where, ChartRows, ChartTheme, RowRef, Selected, SkipReason, SvgFile, SvgInput,
@@ -334,17 +334,6 @@ fn finish(
     })
 }
 
-fn median(values: &[f64]) -> f64 {
-    let mut v = values.to_vec();
-    v.sort_by(f64::total_cmp);
-    let n = v.len();
-    if n % 2 == 1 {
-        v[n / 2]
-    } else {
-        (v[n / 2 - 1] + v[n / 2]) / 2.0
-    }
-}
-
 fn bounds(values: &[f64]) -> (f64, f64) {
     let min = values.iter().copied().fold(f64::INFINITY, f64::min);
     let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
@@ -378,19 +367,8 @@ fn with_unit(v: f64, unit: &str) -> String {
     }
 }
 
-/// Longest benchmark or variant name embedded in a `<title>` or `<desc>`; keeps the SVG bounded.
-const NAME_MAX_CHARS: usize = 80;
 /// Longest unit string embedded in value labels.
 const UNIT_MAX_CHARS: usize = 16;
-
-fn cut(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
-    out.push('…');
-    out
-}
 
 /// At most 125 characters; the benchmark name is cut, never the counts.
 fn alt_text(blocks: &[&Block], mode: Mode, constant: usize) -> String {
@@ -415,7 +393,7 @@ fn lane_summary(lane: &Lane, unit: &str) -> String {
     format!(
         "{}: median {} ({}-{}, n={})",
         cut(&lane.name, NAME_MAX_CHARS),
-        with_unit(median(&lane.values), unit),
+        with_unit(crate::stats::median(&lane.values), unit),
         fmt_val(min),
         fmt_val(max),
         lane.values.len()
@@ -444,10 +422,7 @@ fn jitter(i: usize) -> f64 {
 }
 
 fn dot(p: &mut PathBuilder, cx: f64, cy: f64) {
-    p.move_to(cx - DOT_R, cy)
-        .arc(DOT_R, DOT_R, true, false, cx + DOT_R, cy)
-        .arc(DOT_R, DOT_R, true, false, cx - DOT_R, cy)
-        .close();
+    p.circle(cx, cy, DOT_R);
 }
 
 fn render(
@@ -538,7 +513,7 @@ fn render(
             }
             let fill = if lane.hollow { "none" } else { color };
             d.path_styled(&dots, fill, stroke, 1.0);
-            let mx = x_of(median(&lane.values));
+            let mx = x_of(crate::stats::median(&lane.values));
             d.line_stroke(mx, mid - TICK_HALF, mx, mid + TICK_HALF, pal.ink, 2.0);
             d.close_group();
         }

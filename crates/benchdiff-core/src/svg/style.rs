@@ -104,37 +104,17 @@ pub fn shape_for_series(i: usize) -> Shape {
 }
 
 impl Shape {
-    /// Closed path `d` for a marker centred at (`cx`, `cy`) with radius `r`.
-    pub fn path(self, cx: f64, cy: f64, r: f64) -> Result<String, NonFiniteError> {
-        let poly = |pts: &[(f64, f64)]| -> Result<String, NonFiniteError> {
-            let mut d = String::new();
-            for (k, (x, y)) in pts.iter().enumerate() {
-                d.push(if k == 0 { 'M' } else { 'L' });
-                d.push_str(&fmt_coord(cx + x)?);
-                d.push(' ');
-                d.push_str(&fmt_coord(cy + y)?);
-            }
-            d.push('Z');
-            Ok(d)
-        };
-        match self {
-            Shape::Circle => {
-                let (x0, x1, y, rr) = (
-                    fmt_coord(cx - r)?,
-                    fmt_coord(cx + r)?,
-                    fmt_coord(cy)?,
-                    fmt_coord(r)?,
-                );
-                Ok(format!(
-                    "M{x0} {y}A{rr} {rr} 0 1 0 {x1} {y}A{rr} {rr} 0 1 0 {x0} {y}Z"
-                ))
-            }
-            Shape::Square => poly(&[(-r, -r), (r, -r), (r, r), (-r, r)]),
-            Shape::Diamond => poly(&[(0.0, -r), (r, 0.0), (0.0, r), (-r, 0.0)]),
-            Shape::Triangle => poly(&[(0.0, -r), (r, r), (-r, r)]),
+    /// Offsets from the centre of the polygon outline for radius `r`; `None` for the circle,
+    /// which is an arc rather than a polygon.
+    pub(crate) fn vertices(self, r: f64) -> Option<Vec<(f64, f64)>> {
+        Some(match self {
+            Shape::Circle => return None,
+            Shape::Square => vec![(-r, -r), (r, -r), (r, r), (-r, r)],
+            Shape::Diamond => vec![(0.0, -r), (r, 0.0), (0.0, r), (-r, 0.0)],
+            Shape::Triangle => vec![(0.0, -r), (r, r), (-r, r)],
             Shape::Cross => {
                 let t = r / 3.0;
-                poly(&[
+                vec![
                     (-t, -r),
                     (t, -r),
                     (t, -t),
@@ -147,25 +127,50 @@ impl Shape {
                     (-r, t),
                     (-r, -t),
                     (-t, -t),
-                ])
+                ]
             }
             Shape::Star => {
                 let inner = r * 0.4;
-                let pts: Vec<(f64, f64)> = (0..10)
+                (0..10)
                     .map(|k| {
                         let rad = if k % 2 == 0 { r } else { inner };
                         let a = -PI / 2.0 + f64::from(k) * PI / 5.0;
                         (rad * a.cos(), rad * a.sin())
                     })
-                    .collect();
-                poly(&pts)
+                    .collect()
             }
+        })
+    }
+
+    /// Closed path `d` for a marker centred at (`cx`, `cy`) with radius `r`.
+    pub fn path(self, cx: f64, cy: f64, r: f64) -> Result<String, NonFiniteError> {
+        let Some(pts) = self.vertices(r) else {
+            let (x0, x1, y, rr) = (
+                fmt_coord(cx - r)?,
+                fmt_coord(cx + r)?,
+                fmt_coord(cy)?,
+                fmt_coord(r)?,
+            );
+            return Ok(format!(
+                "M{x0} {y}A{rr} {rr} 0 1 0 {x1} {y}A{rr} {rr} 0 1 0 {x0} {y}Z"
+            ));
+        };
+        let mut d = String::new();
+        for (k, (x, y)) in pts.iter().enumerate() {
+            d.push(if k == 0 { 'M' } else { 'L' });
+            d.push_str(&fmt_coord(cx + x)?);
+            d.push(' ');
+            d.push_str(&fmt_coord(cy + y)?);
         }
+        d.push('Z');
+        Ok(d)
     }
 }
 
 fn parse_hex(hex: &str) -> Option<[f64; 3]> {
-    let h = hex.strip_prefix('#').filter(|h| h.len() == 6 && h.is_ascii())?;
+    let h = hex
+        .strip_prefix('#')
+        .filter(|h| h.len() == 6 && h.is_ascii())?;
     let ch = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).ok().map(f64::from);
     Some([ch(0)?, ch(2)?, ch(4)?])
 }

@@ -131,6 +131,14 @@ impl PathBuilder {
         self.d.push('Z');
         self
     }
+
+    /// Closed circle of radius `r` as two half-circle arcs.
+    pub(crate) fn circle(&mut self, cx: f64, cy: f64, r: f64) -> &mut Self {
+        self.move_to(cx - r, cy)
+            .arc(r, r, true, false, cx + r, cy)
+            .arc(r, r, true, false, cx - r, cy)
+            .close()
+    }
 }
 
 /// Accumulates an SVG document. A non-finite number poisons the writer and

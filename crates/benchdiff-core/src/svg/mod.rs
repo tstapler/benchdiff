@@ -642,14 +642,18 @@ fn finite_samples(values: &[f64]) -> Vec<f64> {
 
 /// `median unit (min-max, n=N)` over non-empty finite samples.
 fn distribution_cell(values: &[f64], unit: &str) -> String {
-    let mut v = values.to_vec();
-    v.sort_by(f64::total_cmp);
-    let n = v.len();
-    let median = if n % 2 == 1 {
-        v[n / 2]
-    } else {
-        (v[n / 2 - 1] + v[n / 2]) / 2.0
-    };
+    let n = values.len();
+    let median = crate::stats::median(values);
+    let lowest = values
+        .iter()
+        .copied()
+        .min_by(f64::total_cmp)
+        .unwrap_or(f64::NAN);
+    let highest = values
+        .iter()
+        .copied()
+        .max_by(f64::total_cmp)
+        .unwrap_or(f64::NAN);
     let fmt = |x: f64| crate::markdown::fmt_num(x);
     let unit = if unit.is_empty() {
         String::new()
@@ -659,8 +663,8 @@ fn distribution_cell(values: &[f64], unit: &str) -> String {
     format!(
         "{}{unit} ({}-{}, n={n})",
         fmt(median),
-        fmt(v[0]),
-        fmt(v[n - 1])
+        fmt(lowest),
+        fmt(highest)
     )
 }
 

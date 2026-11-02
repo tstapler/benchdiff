@@ -66,6 +66,34 @@ pub fn truncate_to_width(text: &str, font_px: f64, max_px: f64) -> String {
     format!("{head}{ELLIPSIS}")
 }
 
+/// Longest benchmark or variant name embedded in a `<title>` or `<desc>`; keeps the SVG bounded.
+pub const NAME_MAX_CHARS: usize = 80;
+
+/// `s` cut to `max` chars, the last being `…` when anything was dropped.
+pub fn cut(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+    out.push(ELLIPSIS);
+    out
+}
+
+/// Keeps both ends of `s` within `max` chars, joining them with an ellipsis.
+pub fn shorten_middle(s: &str, max: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= max {
+        return s.to_string();
+    }
+    let keep = max.saturating_sub(1);
+    let head = keep.div_ceil(2);
+    let tail = keep - head;
+    let mut out: String = chars[..head].iter().collect();
+    out.push(ELLIPSIS);
+    out.extend(&chars[chars.len() - tail..]);
+    out
+}
+
 /// Longest prefix of `chars` such that `prefix + … + suffix` fits; `None` if even the
 /// empty prefix does not fit.
 fn longest_prefix(chars: &[char], suffix: &str, font_px: f64, max_px: f64) -> Option<String> {

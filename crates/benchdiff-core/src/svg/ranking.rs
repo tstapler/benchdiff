@@ -6,7 +6,7 @@
 //! colour is never the only cue; a Missing cell is a hollow marker with `—`, never a bar.
 
 use super::style::{shape_for_series, Palette, Shape, Theme, SERIES_STROKE_WIDTH};
-use super::text::{text_width, truncate_to_width};
+use super::text::{shorten_middle, text_width, truncate_to_width};
 use super::writer::{Anchor, NonFiniteError, PathBuilder, SvgWriter};
 use super::{select_rows_where, ChartTheme, RowRef, SkipReason, SvgFile, SvgInput, SvgOptions};
 use crate::matrix::{Cell, Comparison, MatrixReport, MatrixRow};
@@ -212,21 +212,6 @@ fn oriented(ratio: f64, better: Better) -> f64 {
     }
 }
 
-/// Keeps both ends of `s` within `max` chars, joining them with an ellipsis.
-fn shorten_middle(s: &str, max: usize) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    if chars.len() <= max {
-        return s.to_string();
-    }
-    let keep = max.saturating_sub(1);
-    let head = keep.div_ceil(2);
-    let tail = keep - head;
-    let mut out: String = chars[..head].iter().collect();
-    out.push('…');
-    out.extend(&chars[chars.len() - tail..]);
-    out
-}
-
 /// Per drawn series: geometric mean of the oriented ratios over the benchmarks it has.
 fn geomeans(plan: &Plan) -> Vec<Option<f64>> {
     (0..plan.series.len())
@@ -355,61 +340,22 @@ fn desc_text(plan: &Plan) -> String {
     out
 }
 
-/// Marker outline for `shape` centred at (`cx`, `cy`); same geometry as `Shape::path`, built
-/// through `PathBuilder` because the writer takes no raw path data.
+/// Marker outline for `shape` centred at (`cx`, `cy`); the vertices come from `Shape::vertices`,
+/// walked through `PathBuilder` because the writer takes no raw path data.
 fn marker(shape: Shape, cx: f64, cy: f64, r: f64) -> PathBuilder {
     let mut p = PathBuilder::new();
-    if shape == Shape::Circle {
-        p.move_to(cx - r, cy)
-            .arc(r, r, true, false, cx + r, cy)
-            .arc(r, r, true, false, cx - r, cy)
-            .close();
+    let Some(pts) = shape.vertices(r) else {
+        p.circle(cx, cy, r);
         return p;
-    }
-    let mut poly = |pts: &[(f64, f64)]| {
-        for (k, (x, y)) in pts.iter().enumerate() {
-            if k == 0 {
-                p.move_to(cx + x, cy + y);
-            } else {
-                p.line_to(cx + x, cy + y);
-            }
-        }
-        p.close();
     };
-    match shape {
-        Shape::Circle => {}
-        Shape::Square => poly(&[(-r, -r), (r, -r), (r, r), (-r, r)]),
-        Shape::Diamond => poly(&[(0.0, -r), (r, 0.0), (0.0, r), (-r, 0.0)]),
-        Shape::Triangle => poly(&[(0.0, -r), (r, r), (-r, r)]),
-        Shape::Cross => {
-            let t = r / 3.0;
-            poly(&[
-                (-t, -r),
-                (t, -r),
-                (t, -t),
-                (r, -t),
-                (r, t),
-                (t, t),
-                (t, r),
-                (-t, r),
-                (-t, t),
-                (-r, t),
-                (-r, -t),
-                (-t, -t),
-            ]);
-        }
-        Shape::Star => {
-            let pts: Vec<(f64, f64)> = (0..10)
-                .map(|k| {
-                    let rad = if k % 2 == 0 { r } else { r * 0.4 };
-                    let a =
-                        -std::f64::consts::FRAC_PI_2 + f64::from(k) * std::f64::consts::PI / 5.0;
-                    (rad * a.cos(), rad * a.sin())
-                })
-                .collect();
-            poly(&pts);
+    for (k, (x, y)) in pts.iter().enumerate() {
+        if k == 0 {
+            p.move_to(cx + x, cy + y);
+        } else {
+            p.line_to(cx + x, cy + y);
         }
     }
+    p.close();
     p
 }
 
