@@ -7,14 +7,17 @@
 use super::style::{Palette, Theme};
 use super::text::truncate_to_width;
 use super::writer::{Anchor, NonFiniteError, PathBuilder, SvgWriter};
-use super::{ChartTheme, SkipReason, SvgFile, SvgOptions};
+use super::{
+    select_rows_where, ChartTheme, RowRef, Selected, SkipReason, SvgFile, SvgInput, SvgOptions,
+};
 use crate::compare::{Report, Samples};
-use crate::matrix::{Cell, Comparison, MatrixReport};
+use crate::matrix::{Cell, MatrixReport, MatrixRow};
 
 const PAD: f64 = 16.0;
 const GUTTER: f64 = 140.0;
 const HEADER_H: f64 = 56.0;
 const FOOTER_H: f64 = 52.0;
+const MORE_LINE_H: f64 = 18.0;
 const TITLE_H: f64 = 20.0;
 const LANE_H: f64 = 22.0;
 const AXIS_H: f64 = 18.0;
@@ -38,6 +41,9 @@ struct Lane {
 }
 
 struct Block {
+    /// The benchmark's own label, for alt and description text.
+    name: String,
+    /// `N. name`, the chart position plus the label.
     label: String,
     unit: String,
     lanes: Vec<Lane>,
@@ -52,9 +58,10 @@ enum Mode {
 /// Renders the two-way distribution chart for the theme in `opts` (`Both` renders the light
 /// file, `distribution-light`; the dispatcher calls `distribution_chart_themed` for the dark twin).
 ///
-/// Shows the `opts.rows` benchmarks with the largest |delta| that have samples on both sides
-/// (provisional until `select_rows` in 3.2.4a). `Err(NoSamples)` when none does, e.g. the
-/// report was built without `keep_samples`.
+/// Shows the benchmarks `select_rows` picks (largest |delta| first, capped at
+/// `min(chart-rows, max-rows)`) that have samples on both sides, with a `+ N more not shown`
+/// footer and `skipped = CapExceeded` when rows were cut. `Err(NoSamples)` when none has
+/// samples, e.g. the report was built without `keep_samples`.
 #[allow(dead_code)] // wired by the dispatcher in 3.3.1b
 pub fn distribution_chart(report: &Report, opts: &SvgOptions) -> Result<SvgFile, SkipReason> {
     distribution_chart_themed(report, opts, theme_of(opts))
@@ -67,41 +74,43 @@ pub fn distribution_chart_themed(
     opts: &SvgOptions,
     theme: Theme,
 ) -> Result<SvgFile, SkipReason> {
-    let mut ranked: Vec<(f64, Block)> = report
+    let both_sided = |row: &RowRef| match row {
+        RowRef::Pair(r) => {
+            !finite(&r.samples.base).is_empty() && !finite(&r.samples.head).is_empty()
+        }
+        RowRef::Matrix(_) => false,
+    };
+    let selected = select_rows_where(&SvgInput::Pair(report), opts, &both_sided);
+    let blocks = selected
         .rows
         .iter()
-        .filter_map(|row| {
-            let Samples { base, head } = &row.samples;
-            let (base, head) = (finite(base), finite(head));
-            if base.is_empty() || head.is_empty() {
+        .filter_map(|sel| {
+            let RowRef::Pair(row) = sel.row else {
                 return None;
-            }
-            let rank = row
-                .delta_pct
-                .filter(|p| p.is_finite())
-                .map_or(0.0, f64::abs);
-            let block = Block {
-                label: row.label(),
+            };
+            let Samples { base, head } = &row.samples;
+            Some(Block {
+                name: row.label(),
+                label: sel.label.clone(),
                 unit: row.unit.clone(),
                 lanes: vec![
                     Lane {
                         name: "base".into(),
                         series: 0,
                         hollow: true,
-                        values: base,
+                        values: finite(base),
                     },
                     Lane {
                         name: "head".into(),
                         series: 1,
                         hollow: false,
-                        values: head,
+                        values: finite(head),
                     },
                 ],
-            };
-            Some((rank, block))
+            })
         })
         .collect();
-    finish(&mut ranked, opts, theme, Mode::Pair)
+    finish(blocks, &selected, opts, theme, Mode::Pair)
 }
 
 /// N-way distribution chart: one lane per variant that has samples, for the `opts.rows`
@@ -121,44 +130,42 @@ pub fn distribution_matrix_chart_themed(
     opts: &SvgOptions,
     theme: Theme,
 ) -> Result<SvgFile, SkipReason> {
-    let mut ranked: Vec<(f64, Block)> = report
+    let lanes_of = |row: &MatrixRow| -> Vec<Lane> {
+        let mut lanes = vec![];
+        for (i, (col, cell)) in report.columns.iter().zip(&row.cells).enumerate() {
+            let Cell::Present(p) = cell else { continue };
+            // The reference column has no `Compared` data but still has samples to show.
+            let values = finite(&p.samples.head);
+            if values.is_empty() || lanes.len() >= opts.max_series {
+                continue;
+            }
+            lanes.push(Lane {
+                name: col.as_str().to_string(),
+                series: i,
+                hollow: false,
+                values,
+            });
+        }
+        lanes
+    };
+    let has_lanes = |row: &RowRef| matches!(row, RowRef::Matrix(r) if !lanes_of(r).is_empty());
+    let selected = select_rows_where(&SvgInput::Matrix(report), opts, &has_lanes);
+    let blocks = selected
         .rows
         .iter()
-        .filter_map(|row| {
-            let mut rank = 0.0_f64;
-            let mut lanes = vec![];
-            for (i, (col, cell)) in report.columns.iter().zip(&row.cells).enumerate() {
-                let Cell::Present(p) = cell else { continue };
-                if let Comparison::Compared { delta: Some(d), .. } = &p.vs_reference {
-                    if d.is_finite() {
-                        rank = rank.max(d.abs());
-                    }
-                }
-                // The reference column has no `Compared` data but still has samples to show.
-                let values = finite(&p.samples.head);
-                if values.is_empty() || lanes.len() >= opts.max_series {
-                    continue;
-                }
-                lanes.push(Lane {
-                    name: col.as_str().to_string(),
-                    series: i,
-                    hollow: false,
-                    values,
-                });
-            }
-            (!lanes.is_empty()).then(|| {
-                (
-                    rank,
-                    Block {
-                        label: row.label(),
-                        unit: row.unit.clone(),
-                        lanes,
-                    },
-                )
+        .filter_map(|sel| {
+            let RowRef::Matrix(row) = sel.row else {
+                return None;
+            };
+            Some(Block {
+                name: row.label(),
+                label: sel.label.clone(),
+                unit: row.unit.clone(),
+                lanes: lanes_of(row),
             })
         })
         .collect();
-    finish(&mut ranked, opts, theme, Mode::Matrix)
+    finish(blocks, &selected, opts, theme, Mode::Matrix)
 }
 
 fn theme_of(opts: &SvgOptions) -> Theme {
@@ -173,20 +180,20 @@ fn finite(values: &[f64]) -> Vec<f64> {
 }
 
 fn finish(
-    ranked: &mut Vec<(f64, Block)>,
+    blocks: Vec<Block>,
+    selected: &Selected,
     opts: &SvgOptions,
     theme: Theme,
     mode: Mode,
 ) -> Result<SvgFile, SkipReason> {
-    if ranked.is_empty() {
+    if blocks.is_empty() {
         return Err(SkipReason::NoSamples);
     }
-    // Stable: ties keep input order.
-    ranked.sort_by(|a, b| b.0.total_cmp(&a.0));
-    ranked.truncate(opts.rows.get());
-    let blocks: Vec<&Block> = ranked.iter().map(|(_, b)| b).collect();
+    let blocks: Vec<&Block> = blocks.iter().collect();
+    let more = selected.footer();
     let svg = render(
         &blocks,
+        more.as_deref(),
         opts.width.get() as f64,
         Palette::for_theme(theme),
         mode,
@@ -201,7 +208,7 @@ fn finish(
         name: name.to_string(),
         svg,
         alt: alt_text(&blocks, mode),
-        skipped: None,
+        skipped: selected.skip_reason(),
     })
 }
 
@@ -268,7 +275,7 @@ fn alt_text(blocks: &[&Block], mode: Mode) -> String {
     let plural = if n == 1 { "benchmark" } else { "benchmarks" };
     let prefix = format!("{what}, {n} {plural}; first: ");
     let room = ALT_MAX_CHARS.saturating_sub(prefix.chars().count()).max(1);
-    format!("{prefix}{}", cut(&blocks[0].label, room))
+    format!("{prefix}{}", cut(&blocks[0].name, room))
 }
 
 fn lane_summary(lane: &Lane, unit: &str) -> String {
@@ -289,7 +296,7 @@ fn desc_text(blocks: &[&Block]) -> String {
         .take(DESC_TOP)
         .map(|b| {
             let lanes: Vec<String> = b.lanes.iter().map(|l| lane_summary(l, &b.unit)).collect();
-            format!("{} ({})", b.label, lanes.join("; "))
+            format!("{} ({})", b.name, lanes.join("; "))
         })
         .collect();
     format!(
@@ -312,6 +319,7 @@ fn dot(p: &mut PathBuilder, cx: f64, cy: f64) {
 
 fn render(
     blocks: &[&Block],
+    more: Option<&str>,
     width: f64,
     pal: Palette,
     mode: Mode,
@@ -320,7 +328,8 @@ fn render(
     let plot_r = width - PAD;
     let block_h = |b: &Block| TITLE_H + b.lanes.len() as f64 * LANE_H + AXIS_H + BLOCK_GAP;
     let body_h: f64 = blocks.iter().map(|b| block_h(b)).sum();
-    let height = HEADER_H + body_h + FOOTER_H;
+    let footer_h = FOOTER_H + if more.is_some() { MORE_LINE_H } else { 0.0 };
+    let height = HEADER_H + body_h + footer_h;
 
     let mut d = SvgWriter::new_accessible(
         width,
@@ -346,7 +355,7 @@ fn render(
     );
 
     let mut top = HEADER_H;
-    for (bi, block) in blocks.iter().enumerate() {
+    for block in blocks.iter() {
         let all: Vec<f64> = block
             .lanes
             .iter()
@@ -361,11 +370,7 @@ fn render(
                 (plot_l + plot_r) / 2.0
             }
         };
-        let label = truncate_to_width(
-            &format!("{}. {}", bi + 1, block.label),
-            FONT_PX,
-            width - 2.0 * PAD,
-        );
+        let label = truncate_to_width(&block.label, FONT_PX, width - 2.0 * PAD);
         d.text_styled(PAD, top + 14.0, Anchor::Start, FONT_PX, pal.ink, &label);
 
         for (li, lane) in block.lanes.iter().enumerate() {
@@ -378,8 +383,7 @@ fn render(
                 pal.series_stroke(lane.series).unwrap_or(color)
             };
             d.open_titled_group(&format!(
-                "{}. {} {}",
-                bi + 1,
+                "{} {}",
                 block.label,
                 lane_summary(lane, &block.unit)
             ));
@@ -454,6 +458,9 @@ fn render(
         pal.secondary,
         "Largest change first. Lanes in a benchmark share one axis.",
     );
+    if let Some(more) = more {
+        d.text_styled(PAD, fy + 36.0, Anchor::Start, FONT_PX, pal.secondary, more);
+    }
     d.finish()
 }
 
@@ -727,5 +734,47 @@ mod tests {
         assert_snapshot("distribution-dark.svg", &dark.svg);
         let n = distribution_matrix_chart(&matrix(), &opts(ChartTheme::Light)).unwrap();
         assert_snapshot("distribution-matrix-light.svg", &n.svg);
+    }
+
+    fn many_with_samples(n: usize) -> Report {
+        report(
+            (0..n)
+                .map(|i| {
+                    row(
+                        &format!("b{i}"),
+                        Some(1.0 + i as f64),
+                        ten(100.0),
+                        ten(101.0 + i as f64),
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn distribution_chart_should_cap_rows_and_print_n_more_not_shown_when_47_rows_cap_30() {
+        let f = distribution_chart(&many_with_samples(47), &SvgOptions::default()).unwrap();
+        // per benchmark: its label plus one title per lane
+        assert_eq!(f.svg.matches(". b").count(), 30 * 3);
+        assert!(f.svg.contains(">+ 17 more not shown</text>"));
+        assert!(f.svg.contains("1. b46") && !f.svg.contains("b16"));
+        assert_eq!(
+            f.skipped,
+            Some(SkipReason::CapExceeded {
+                shown: 30,
+                total: 47
+            })
+        );
+    }
+
+    #[test]
+    fn distribution_chart_should_bound_rows_when_500_rows_and_honour_max_rows() {
+        let f = distribution_chart(&many_with_samples(500), &SvgOptions::default()).unwrap();
+        assert!(f.svg.contains("+ 470 more not shown") && !f.svg.contains("b469"));
+        let mut r = many_with_samples(47);
+        r.summary.max_rows = Some(20);
+        let f = distribution_chart(&r, &SvgOptions::default()).unwrap();
+        assert!(f.svg.contains("+ 27 more not shown"));
+        assert!(f.svg.contains("1. b19") && !f.svg.contains("b20"));
     }
 }

@@ -1,11 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="192" viewBox="0 0 760 192" role="img" aria-labelledby="t d" font-family="Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="164" viewBox="0 0 760 164" role="img" aria-labelledby="t d" font-family="Helvetica, Arial, sans-serif">
 <title id="t">Benchmark change, head vs base: 1 regressed, 1 improved; top: BenchmarkParse/size=1000 +450.0%</title>
-<desc id="d">1 regressed, 1 improved, 1 unchanged. Largest changes: BenchmarkParse/size=1000 +450.0%; BenchmarkSort -80.0%; BenchmarkHash +0.3%. Bars clip at 100%; value labels show the true change.</desc>
-<rect x="0" y="0" width="760" height="192" rx="8" fill="#fcfcfb"/>
+<desc id="d">1 regressed, 1 improved, 0 unchanged. Largest changes: BenchmarkParse/size=1000 +450.0%; BenchmarkSort -80.0%. Bars clip at 100%; value labels show the true change.</desc>
+<rect x="0" y="0" width="760" height="164" rx="8" fill="#fcfcfb"/>
 <text x="16" y="24" text-anchor="start" font-size="13" fill="#0b0b0b">Benchmark change, head vs base</text>
-<text x="16" y="42" text-anchor="start" font-size="12" fill="#52514e">1 regressed · 1 improved · 1 unchanged</text>
+<text x="16" y="42" text-anchor="start" font-size="12" fill="#52514e">1 regressed · 1 improved · 0 unchanged</text>
 <text x="482" y="52" text-anchor="middle" font-size="11" fill="#52514e">0%</text>
-<line x1="482" y1="56" x2="482" y2="140" stroke="#52514e" stroke-width="1"/>
+<line x1="482" y1="56" x2="482" y2="112" stroke="#52514e" stroke-width="1"/>
 <g>
 <title>1. BenchmarkParse/size=1000: +450.0%</title>
 <text x="16" y="74" text-anchor="start" font-size="12" fill="#0b0b0b">1. BenchmarkParse/size=1000</text>
@@ -21,18 +21,11 @@
 <path d="M331.6 104L337.6 93.2L325.6 93.2Z" fill="#0ca30c" stroke="#0ca30c" stroke-width="1.5"/>
 <text x="319.6" y="102" text-anchor="end" font-size="12" fill="#0b0b0b">-80.0%</text>
 </g>
-<g>
-<title>3. BenchmarkHash: +0.3%</title>
-<text x="16" y="130" text-anchor="start" font-size="12" fill="#0b0b0b">3. BenchmarkHash</text>
-<rect x="482" y="118" width="0.53" height="16" rx="0" fill="#8a8a86"/>
-<path d="M484.53 126A6 6 0 1 0 496.53 126A6 6 0 1 0 484.53 126Z" fill="none" stroke="#8a8a86" stroke-width="1.5"/>
-<text x="502.53" y="130" text-anchor="start" font-size="12" fill="#0b0b0b">+0.3%</text>
-</g>
-<path d="M22 152L28 162.8L16 162.8Z" fill="#d03b3b" stroke="#d03b3b" stroke-width="1.5"/>
-<text x="34" y="162" text-anchor="start" font-size="12" fill="#52514e">regressed</text>
-<path d="M114.69 164L120.69 153.2L108.69 153.2Z" fill="#0ca30c" stroke="#0ca30c" stroke-width="1.5"/>
-<text x="126.69" y="162" text-anchor="start" font-size="12" fill="#52514e">improved</text>
-<path d="M196.97 158A6 6 0 1 0 208.97 158A6 6 0 1 0 196.97 158Z" fill="none" stroke="#8a8a86" stroke-width="1.5"/>
-<text x="214.97" y="162" text-anchor="start" font-size="12" fill="#52514e">no significant change</text>
-<text x="16" y="180" text-anchor="start" font-size="12" fill="#52514e">Worst change first. Bars clip at 100%; labels show the true change.</text>
+<path d="M22 124L28 134.8L16 134.8Z" fill="#d03b3b" stroke="#d03b3b" stroke-width="1.5"/>
+<text x="34" y="134" text-anchor="start" font-size="12" fill="#52514e">regressed</text>
+<path d="M114.69 136L120.69 125.2L108.69 125.2Z" fill="#0ca30c" stroke="#0ca30c" stroke-width="1.5"/>
+<text x="126.69" y="134" text-anchor="start" font-size="12" fill="#52514e">improved</text>
+<path d="M196.97 130A6 6 0 1 0 208.97 130A6 6 0 1 0 196.97 130Z" fill="none" stroke="#8a8a86" stroke-width="1.5"/>
+<text x="214.97" y="134" text-anchor="start" font-size="12" fill="#52514e">no significant change</text>
+<text x="16" y="152" text-anchor="start" font-size="12" fill="#52514e">Largest change first. Bars clip at 100%; labels show the true change.</text>
 </svg>

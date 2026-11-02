@@ -6,7 +6,7 @@
 use super::style::{Palette, Theme};
 use super::text::{text_width, truncate_to_width};
 use super::writer::{Anchor, NonFiniteError, PathBuilder, SvgWriter};
-use super::{ChartTheme, SkipReason, SvgFile, SvgOptions};
+use super::{select_rows, ChartTheme, RowRef, Selected, SkipReason, SvgFile, SvgInput, SvgOptions};
 use crate::compare::{Report, Row, Verdict};
 use crate::markdown::fmt_pct;
 
@@ -16,6 +16,7 @@ const GUTTER: f64 = 220.0;
 const PAD: f64 = 16.0;
 const HEADER_H: f64 = 56.0;
 const FOOTER_H: f64 = 52.0;
+const MORE_LINE_H: f64 = 18.0;
 /// Room kept free at each end of the plot for the cap marker and value label.
 const END_ROOM: f64 = 84.0;
 const CLIP_PCT: f64 = 100.0;
@@ -33,6 +34,8 @@ enum Cap {
 
 struct Bar<'a> {
     row: &'a Row,
+    /// `N. name`, the chart position plus the row label.
+    label: String,
     pct: f64,
     /// +1 draws right of the 0% line, -1 left.
     side: f64,
@@ -42,8 +45,9 @@ struct Bar<'a> {
 /// Renders the delta chart for the theme in `opts` (`Both` renders the light file, named
 /// `delta-light`; the dispatcher calls `delta_chart_themed` for the dark twin).
 ///
-/// Draws every comparable row it is given (the cap and `+ N more not shown` footer arrive
-/// with the row selection in 3.2.4a). `Err(Empty)` when no row has a finite percentage.
+/// Draws the rows `select_rows` picks (largest |delta| first, capped at `min(chart-rows, max-rows)`),
+/// with a `+ N more not shown` footer and `skipped = CapExceeded` when rows were cut.
+/// `Err(Empty)` when no row has a finite percentage.
 pub fn delta_chart(report: &Report, opts: &SvgOptions) -> Result<SvgFile, SkipReason> {
     let theme = match opts.theme {
         ChartTheme::Dark => Theme::Dark,
@@ -59,12 +63,19 @@ pub fn delta_chart_themed(
     opts: &SvgOptions,
     theme: Theme,
 ) -> Result<SvgFile, SkipReason> {
-    let bars = ordered_bars(report);
+    let selected = select_rows(&SvgInput::Pair(report), opts);
+    let bars = bars_of(&selected);
     if bars.is_empty() {
         return Err(SkipReason::Empty);
     }
-    let svg = render(&bars, opts.width.get() as f64, Palette::for_theme(theme))
-        .map_err(|_| SkipReason::Empty)?;
+    let more = selected.footer();
+    let svg = render(
+        &bars,
+        more.as_deref(),
+        opts.width.get() as f64,
+        Palette::for_theme(theme),
+    )
+    .map_err(|_| SkipReason::Empty)?;
     let name = match (opts.theme, theme) {
         (ChartTheme::Both, Theme::Light) => "delta-light",
         (ChartTheme::Both, Theme::Dark) => "delta-dark",
@@ -74,43 +85,33 @@ pub fn delta_chart_themed(
         name: name.to_string(),
         svg,
         alt: alt_text(&bars),
-        skipped: None,
+        skipped: selected.skip_reason(),
     })
 }
 
-/// Comparable rows only (a finite percentage and a verdict that compares), worst first:
-/// regressed, then improved, then unchanged; larger |delta| first; ties keep input order.
-fn ordered_bars(report: &Report) -> Vec<Bar<'_>> {
-    let mut bars: Vec<Bar> = report
+fn bars_of<'a>(selected: &Selected<'a>) -> Vec<Bar<'a>> {
+    selected
         .rows
         .iter()
-        .filter_map(|row| {
+        .filter_map(|sel| {
+            let RowRef::Pair(row) = sel.row else {
+                return None;
+            };
             let pct = row.delta_pct.filter(|p| p.is_finite())?;
             let (side, cap) = match row.verdict {
                 Verdict::Regressed => (1.0, Cap::Up),
                 Verdict::Improved => (-1.0, Cap::Down),
-                Verdict::Unchanged => (if pct < 0.0 { -1.0 } else { 1.0 }, Cap::Hollow),
-                _ => return None,
+                _ => (if pct < 0.0 { -1.0 } else { 1.0 }, Cap::Hollow),
             };
             Some(Bar {
                 row,
+                label: sel.label.clone(),
                 pct,
                 side,
                 cap,
             })
         })
-        .collect();
-    let class = |c: Cap| match c {
-        Cap::Up => 0,
-        Cap::Down => 1,
-        Cap::Hollow => 2,
-    };
-    bars.sort_by(|a, b| {
-        class(a.cap)
-            .cmp(&class(b.cap))
-            .then(b.pct.abs().total_cmp(&a.pct.abs()))
-    });
-    bars
+        .collect()
 }
 
 fn counts(bars: &[Bar]) -> (usize, usize, usize) {
@@ -192,13 +193,19 @@ fn draw_cap(w: &mut SvgWriter, cap: Cap, cx: f64, cy: f64, color: &str) {
     }
 }
 
-fn render(bars: &[Bar], width: f64, pal: Palette) -> Result<String, NonFiniteError> {
+fn render(
+    bars: &[Bar],
+    more: Option<&str>,
+    width: f64,
+    pal: Palette,
+) -> Result<String, NonFiniteError> {
     let plot_l = GUTTER;
     let plot_r = width - PAD;
     let cx = (plot_l + plot_r) / 2.0;
     let per_pct = ((plot_r - plot_l) / 2.0 - END_ROOM).max(8.0) / CLIP_PCT;
     let rows_h = bars.len() as f64 * ROW_H;
-    let height = HEADER_H + rows_h + FOOTER_H;
+    let footer_h = FOOTER_H + if more.is_some() { MORE_LINE_H } else { 0.0 };
+    let height = HEADER_H + rows_h + footer_h;
 
     let mut d = SvgWriter::new_accessible(
         width,
@@ -246,8 +253,8 @@ fn render(bars: &[Bar], width: f64, pal: Palette) -> Result<String, NonFiniteErr
         };
         let len = bar.pct.abs().min(CLIP_PCT) * per_pct;
         let end = cx + bar.side * len;
-        let label = format!("{}. {}", i + 1, bar.row.label());
-        let shown = truncate_to_width(&label, FONT_PX, GUTTER - PAD - 8.0);
+        let label = &bar.label;
+        let shown = truncate_to_width(label, FONT_PX, GUTTER - PAD - 8.0);
 
         d.open_titled_group(&format!("{label}: {}", fmt_pct(bar.pct)));
         d.text_styled(PAD, mid + 4.0, Anchor::Start, FONT_PX, pal.ink, &shown);
@@ -309,8 +316,11 @@ fn render(bars: &[Bar], width: f64, pal: Palette) -> Result<String, NonFiniteErr
         Anchor::Start,
         FONT_PX,
         pal.secondary,
-        &format!("Worst change first. Bars clip at {CLIP_PCT:.0}%; labels show the true change."),
+        &format!("Largest change first. Bars clip at {CLIP_PCT:.0}%; labels show the true change."),
     );
+    if let Some(more) = more {
+        d.text_styled(PAD, fy + 36.0, Anchor::Start, FONT_PX, pal.secondary, more);
+    }
     d.finish()
 }
 
@@ -396,20 +406,19 @@ mod tests {
         let svg = &f.svg;
         assert_eq!(f.name, "delta");
         assert!(svg.contains("viewBox=\"0 0 760 "), "{svg}");
-        // header 56 + 3 rows * 28 + footer 52
-        assert!(svg.contains("height=\"192\""));
-        for want in ["+30.0%", "-12.5%", "+0.4%"] {
+        // header 56 + 2 rows * 28 + footer 52; the unchanged row is not in the changed population
+        assert!(svg.contains("height=\"164\""));
+        for want in ["+30.0%", "-12.5%"] {
             assert!(svg.contains(&format!(">{want}</text>")), "{want}");
         }
-        // worst first: A, then B, then C
+        assert!(!svg.contains("+0.4%") && !svg.contains("3. C"));
+        // largest change first: A, then B
         let a = svg.find("1. A").unwrap();
         let b = svg.find("2. B").unwrap();
-        let c = svg.find("3. C").unwrap();
-        assert!(a < b && b < c);
-        // cap markers: triangle up (regressed), down (improved), hollow circle (unchanged)
+        assert!(a < b);
+        // cap markers: triangle up (regressed), down (improved)
         assert!(svg.contains("fill=\"#d03b3b\" stroke=\"#d03b3b\""));
         assert!(svg.contains("fill=\"#0ca30c\" stroke=\"#0ca30c\""));
-        assert!(svg.contains("fill=\"none\" stroke=\"#8a8a86\""));
         // regressed bar right of the 0% line, improved left
         let cx = (220.0 + 744.0) / 2.0;
         let rect_x = |color: &str| -> f64 {
@@ -422,6 +431,47 @@ mod tests {
         assert!((rect_x("#d03b3b") - cx).abs() < 0.01);
         assert!(rect_x("#0ca30c") < cx);
         assert!(svg.contains(">0%</text>"));
+    }
+
+    fn many(n: usize) -> Report {
+        report(
+            (0..n)
+                .map(|i| row(&format!("b{i}"), Some(1.0 + i as f64), Verdict::Regressed))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn delta_chart_should_cap_rows_and_print_n_more_not_shown_when_47_rows_cap_30() {
+        let f = light(&many(47));
+        assert_eq!(f.svg.matches("<g>").count(), 30);
+        assert!(f.svg.contains(">+ 17 more not shown</text>"), "{}", f.svg);
+        assert!(f.svg.contains("1. b46") && !f.svg.contains("b16"));
+        assert!(f.svg.contains(">Largest change first."));
+        assert_eq!(
+            f.skipped,
+            Some(SkipReason::CapExceeded {
+                shown: 30,
+                total: 47
+            })
+        );
+        let uncapped = light(&many(3));
+        assert_eq!(uncapped.skipped, None);
+        assert!(!uncapped.svg.contains("more not shown"));
+    }
+
+    #[test]
+    fn delta_chart_should_bound_rows_when_500_rows_and_honour_max_rows() {
+        let f = light(&many(500));
+        assert_eq!(f.svg.matches("<g>").count(), 30);
+        assert!(f.svg.contains("+ 470 more not shown"));
+        let mut r = many(47);
+        r.summary.max_rows = Some(20);
+        let f = light(&r);
+        assert_eq!(f.svg.matches("<g>").count(), 20);
+        assert!(f.svg.contains("+ 27 more not shown"));
+        // only rows the table shows (the first 20 in input order)
+        assert!(f.svg.contains("1. b19") && !f.svg.contains("b20"));
     }
 
     #[test]
@@ -455,7 +505,7 @@ mod tests {
     }
 
     #[test]
-    fn delta_chart_should_sort_worst_first_with_stable_ties() {
+    fn delta_chart_should_sort_largest_abs_change_first_with_stable_ties() {
         let r = report(vec![
             row("U", Some(2.0), Verdict::Unchanged),
             row("I9", Some(-9.0), Verdict::Improved),
@@ -465,11 +515,12 @@ mod tests {
             row("I20", Some(-20.0), Verdict::Improved),
         ]);
         let svg = light(&r).svg;
-        let order: Vec<usize> = ["R50", "R5a", "R5b", "I20", "I9", "U"]
+        let order: Vec<usize> = ["R50", "I20", "I9", "R5a", "R5b"]
             .iter()
             .map(|n| svg.find(&format!(". {n}</text>")).unwrap())
             .collect();
         assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
+        assert!(!svg.contains(". U</text>"));
     }
 
     #[test]
@@ -506,7 +557,7 @@ mod tests {
     fn ux_s2_4_every_bar_should_have_shape_marker_and_value_label() {
         let f = light(&three());
         let groups: Vec<&str> = f.svg.split("<g>\n").skip(1).collect();
-        assert_eq!(groups.len(), 3);
+        assert_eq!(groups.len(), 2);
         for g in groups {
             let g = g.split("</g>").next().unwrap();
             assert!(g.contains("<path d=\"M"), "marker missing: {g}");
@@ -540,14 +591,19 @@ mod tests {
             plain.alt,
             "Benchmark change, head vs base: 1 regressed, 1 improved; top: A +30.0%"
         );
-        assert!(plain.svg.contains("A +30.0%; B -12.5%; C +0.4%"));
+        assert!(plain.svg.contains("A +30.0%; B -12.5%."));
     }
 
     #[test]
     fn delta_chart_should_draw_all_unchanged_rows_in_gray_with_verdict_text() {
-        let r = report(vec![row("Hash", Some(0.3), Verdict::Unchanged)]);
+        let r = report(vec![
+            row("Hash", Some(0.3), Verdict::Unchanged),
+            row("Sort", Some(-0.2), Verdict::Unchanged),
+        ]);
         let f = light(&r);
-        assert!(f.svg.contains("0 regressed · 0 improved · 1 unchanged"));
+        assert!(f.svg.contains("0 regressed · 0 improved · 2 unchanged"));
+        assert!(f.svg.contains("fill=\"none\" stroke=\"#8a8a86\""));
+        assert_snapshot("delta-unchanged-light.svg", &f.svg);
         assert!(f.alt.contains("no significant changes"));
         assert!(!f.svg.contains("#d03b3b\"/>"));
     }
@@ -557,7 +613,7 @@ mod tests {
         let a = light(&three()).svg;
         assert_eq!(a, light(&three()).svg);
         assert!(a.contains(
-            "<rect x=\"0\" y=\"0\" width=\"760\" height=\"192\" rx=\"8\" fill=\"#fcfcfb\"/>"
+            "<rect x=\"0\" y=\"0\" width=\"760\" height=\"164\" rx=\"8\" fill=\"#fcfcfb\"/>"
         ));
         for bad in [
             "<style",

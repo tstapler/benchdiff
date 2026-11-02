@@ -8,7 +8,7 @@
 use super::style::{shape_for_series, Palette, Shape, Theme, SERIES_STROKE_WIDTH};
 use super::text::{text_width, truncate_to_width};
 use super::writer::{Anchor, NonFiniteError, PathBuilder, SvgWriter};
-use super::{ChartTheme, SkipReason, SvgFile, SvgOptions};
+use super::{select_rows_where, ChartTheme, RowRef, SkipReason, SvgFile, SvgInput, SvgOptions};
 use crate::matrix::{Cell, Comparison, MatrixReport, MatrixRow};
 use crate::model::Better;
 
@@ -42,6 +42,8 @@ enum Slot {
 
 struct Cluster<'a> {
     row: &'a MatrixRow,
+    /// `N. name`, the chart position plus the row label.
+    label: String,
     /// One per drawn series, in series order.
     slots: Vec<Slot>,
 }
@@ -54,12 +56,15 @@ struct Plan<'a> {
     clusters: Vec<Cluster<'a>>,
     /// Labels of series beyond `max_series`.
     hidden: Vec<&'a str>,
+    /// `+ N more not shown` when the row cap cut rows.
+    more: Option<String>,
+    skipped: Option<SkipReason>,
 }
 
 /// Renders the ranking chart for the theme in `opts` (`Both` renders the light file, named
 /// `ranking-light`; the dispatcher calls `ranking_chart_themed` for the dark twin).
 ///
-/// Draws every row the reference has (row caps arrive with 3.2.4a) and at most
+/// Draws the rows `select_rows` picks (largest |delta| first, capped at `min(chart-rows, max-rows)`) and at most
 /// `opts.max_series` variants. `Err(NothingToCompare)` without a variant to compare,
 /// `Err(Empty)` when no row has a usable reference value.
 #[allow(dead_code)] // wired up by render_svgs (3.3.1b)
@@ -91,7 +96,7 @@ pub fn ranking_chart_themed(
         name: name.to_string(),
         svg,
         alt: alt_text(&plan),
-        skipped: None,
+        skipped: plan.skipped.clone(),
     })
 }
 
@@ -120,10 +125,19 @@ fn plan<'a>(report: &'a MatrixReport, opts: &SvgOptions) -> Result<Plan<'a>, Ski
         .map(|&c| report.columns[c].as_str())
         .collect();
 
-    let clusters: Vec<Cluster> = report
+    // Rows without a usable reference value are not charted (the text block counts them).
+    let has_ref = |row: &RowRef| {
+        matches!(row, RowRef::Matrix(r)
+            if matches!(r.cells.get(ref_col), Some(Cell::Present(p)) if p.value.is_finite() && p.value > 0.0))
+    };
+    let selected = select_rows_where(&SvgInput::Matrix(report), opts, &has_ref);
+    let clusters: Vec<Cluster> = selected
         .rows
         .iter()
-        .filter_map(|row| {
+        .filter_map(|sel| {
+            let RowRef::Matrix(row) = sel.row else {
+                return None;
+            };
             let ref_value = match row.cells.get(ref_col)? {
                 Cell::Present(p) if p.value.is_finite() && p.value > 0.0 => p.value,
                 _ => return None,
@@ -132,7 +146,11 @@ fn plan<'a>(report: &'a MatrixReport, opts: &SvgOptions) -> Result<Plan<'a>, Ski
                 .iter()
                 .map(|&c| slot(row.cells.get(c), ref_value))
                 .collect();
-            Some(Cluster { row, slots })
+            Some(Cluster {
+                row,
+                label: sel.label.clone(),
+                slots,
+            })
         })
         .collect();
     if clusters.is_empty() {
@@ -144,6 +162,8 @@ fn plan<'a>(report: &'a MatrixReport, opts: &SvgOptions) -> Result<Plan<'a>, Ski
         series,
         clusters,
         hidden,
+        more: selected.footer(),
+        skipped: selected.skip_reason(),
     })
 }
 
@@ -456,6 +476,10 @@ fn render(plan: &Plan, width: f64, pal: Palette) -> Result<String, NonFiniteErro
         let names = truncate_to_width(&plan.hidden.join(", "), FONT_PX, width - 2.0 * PAD - 150.0);
         notes.push(format!("+ {} more not shown: {names}", plan.hidden.len()));
     }
+    notes.push("Largest change first.".to_string());
+    if let Some(more) = &plan.more {
+        notes.push(more.clone());
+    }
     let rows_h = plan.clusters.len() as f64 * cluster_h;
     let footer_h =
         16.0 + legend_lines as f64 * LEGEND_LINE_H + notes.len() as f64 * LEGEND_LINE_H + 10.0;
@@ -521,7 +545,7 @@ fn render(plan: &Plan, width: f64, pal: Palette) -> Result<String, NonFiniteErro
 
     for (i, c) in plan.clusters.iter().enumerate() {
         let top = HEADER_H + i as f64 * cluster_h + ROW_GAP / 2.0;
-        let label = c.row.label();
+        let label = &c.label;
         let parts: Vec<String> = c
             .slots
             .iter()
@@ -536,7 +560,7 @@ fn render(plan: &Plan, width: f64, pal: Palette) -> Result<String, NonFiniteErro
             })
             .collect();
         d.open_titled_group(&format!("{label}: {}", parts.join(", ")));
-        let shown = truncate_to_width(&label, FONT_PX, GUTTER - PAD - 8.0);
+        let shown = truncate_to_width(label, FONT_PX, GUTTER - PAD - 8.0);
         d.text_styled(
             PAD,
             top + LANE_H / 2.0 + 4.0,
@@ -675,10 +699,10 @@ mod tests {
         })
     }
 
-    fn compared(verdict: Verdict) -> Comparison {
+    fn compared(verdict: Verdict, delta: Option<f64>) -> Comparison {
         Comparison::Compared {
             verdict,
-            delta: None,
+            delta,
             method: Some(Method::Threshold),
             p_value: None,
             p_adjusted: None,
@@ -693,7 +717,10 @@ mod tests {
             .map(|(i, v)| match v {
                 None => Cell::Missing,
                 Some(v) if i == 0 => present(*v, Comparison::Reference),
-                Some(v) => present(*v, compared(Verdict::Unchanged)),
+                Some(v) => {
+                    let delta = values[0].map(|r| (v / r - 1.0) * 100.0);
+                    present(*v, compared(Verdict::Unchanged, delta))
+                }
             })
             .collect();
         MatrixRow {
@@ -835,7 +862,7 @@ mod tests {
         let group = f
             .svg
             .split("<g>\n")
-            .find(|g| g.contains("<title>Parse:"))
+            .find(|g| g.contains(". Parse:"))
             .unwrap();
         let group = group.split("</g>").next().unwrap();
         assert!(group.contains("merge not run"));
@@ -965,7 +992,7 @@ mod tests {
         assert!(f.svg.contains("<title id=\"t\">") && f.svg.contains("<desc id=\"d\">"));
         assert_eq!(
             f.alt,
-            "Ratio vs quick: merge has the best geomean (0.85x); largest gap: heap 0.50x on Parse"
+            "Ratio vs quick: merge has the best geomean (0.85x); largest gap: heap 2.00x on Encode"
         );
         let long = "N".repeat(300);
         let r = report(
@@ -1095,5 +1122,56 @@ mod tests {
             vec![row("BenchmarkParse/size=1000", Better::Lower, &vals)],
         );
         assert_snapshot("ranking-many-light.svg", &light(&r).svg);
+    }
+
+    fn n_rows(n: usize) -> MatrixReport {
+        let rows = (0..n)
+            .map(|i| {
+                row(
+                    &format!("b{i}"),
+                    Better::Lower,
+                    &[Some(100.0), Some(101.0 + i as f64)],
+                )
+            })
+            .collect();
+        report(&["quick", "heap"], rows)
+    }
+
+    #[test]
+    fn ranking_chart_should_order_by_largest_delta_with_numbered_labels() {
+        let f = light(&three());
+        let order: Vec<usize> = ["1. Encode", "2. Sort/size=1000", "3. Parse"]
+            .iter()
+            .map(|n| f.svg.find(&format!(">{n}</text>")).unwrap())
+            .collect();
+        assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
+        assert!(f.svg.contains("Largest change first."));
+        assert_eq!(f.skipped, None);
+    }
+
+    #[test]
+    fn ranking_chart_should_cap_rows_and_print_n_more_not_shown_when_47_rows_cap_30() {
+        let f = light(&n_rows(47));
+        assert_eq!(f.svg.matches("<g>").count(), 30);
+        assert!(f.svg.contains(">+ 17 more not shown</text>"));
+        assert!(f.svg.contains("1. b46") && !f.svg.contains("b16"));
+        assert_eq!(
+            f.skipped,
+            Some(SkipReason::CapExceeded {
+                shown: 30,
+                total: 47
+            })
+        );
+    }
+
+    #[test]
+    fn ranking_chart_should_bound_rows_when_500_rows_and_honour_max_rows() {
+        assert_eq!(light(&n_rows(500)).svg.matches("<g>").count(), 30);
+        let mut r = n_rows(47);
+        r.summary.max_rows = Some(20);
+        let f = light(&r);
+        assert_eq!(f.svg.matches("<g>").count(), 20);
+        assert!(f.svg.contains("+ 27 more not shown"));
+        assert!(f.svg.contains("1. b19") && !f.svg.contains("b20"));
     }
 }
