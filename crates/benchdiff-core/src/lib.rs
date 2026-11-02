@@ -4,10 +4,18 @@
 //! runs natively and as a `wasm32-wasip1` module inside the GitHub Action.
 
 mod compare;
+pub mod config;
+pub mod dimensioned;
+pub mod dimensions;
 pub mod import;
 mod markdown;
+pub mod markdown_matrix;
+pub mod matrix;
 mod model;
+pub mod notice;
+pub mod options;
 mod stats;
+pub mod svg;
 mod units;
 
 pub use compare::{compare, Method, Options, Report, Row, Sort, Summary, Verdict};
