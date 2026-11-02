@@ -21,6 +21,9 @@ pub enum Better {
     Higher,
 }
 
+/// Dimension name -> value extracted from a benchmark name; sorted for stable output.
+pub type Dims = BTreeMap<String, String>;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Metric {
     #[serde(default)]
@@ -41,6 +44,9 @@ pub struct Metric {
     /// Repeated measurements; enable the significance test when both sides have enough.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub samples: Vec<f64>,
+    /// Dimensions pulled out of the name; not part of the identity key.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub dims: Dims,
 }
 
 impl Metric {
@@ -63,7 +69,13 @@ impl Metric {
             lower: None,
             upper: None,
             samples: Vec::new(),
+            dims: Dims::new(),
         }
+    }
+
+    pub fn with_dims(mut self, dims: Dims) -> Self {
+        self.dims = dims;
+        self
     }
 
     pub(crate) fn key(&self) -> (&str, &str, &str) {
@@ -228,6 +240,45 @@ impl MetricSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn dims(pairs: &[(&str, &str)]) -> Dims {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn serialize_should_omit_empty_dims_and_round_trip_bytes() {
+        let text = r#"{"group":"","name":"x","unit":"","value":1.0,"better":"lower"}"#;
+        let m: Metric = serde_json::from_str(text).unwrap();
+        assert!(m.dims.is_empty());
+        let out = serde_json::to_string(&m).unwrap();
+        assert!(!out.contains("dims"), "{out}");
+        assert_eq!(out, text);
+    }
+
+    #[test]
+    fn serialize_should_emit_sorted_dims_and_keep_identity_key() {
+        let m = Metric::new("g", "n", "", "ns", 1.0, Better::Lower)
+            .with_dims(dims(&[("size", "1000"), ("impl", "quick")]));
+        let out = serde_json::to_string(&m).unwrap();
+        assert!(
+            out.contains(r#""dims":{"impl":"quick","size":"1000"}"#),
+            "{out}"
+        );
+        let back: Metric = serde_json::from_str(&out).unwrap();
+        assert_eq!(back, m);
+        let stripped = Metric::new("g", "n", "", "ns", 1.0, Better::Lower);
+        assert_eq!(back.key(), stripped.key());
+    }
+
+    #[test]
+    fn new_should_leave_dims_empty() {
+        assert!(Metric::new("", "x", "", "", 1.0, Better::Lower)
+            .dims
+            .is_empty());
+    }
 
     #[test]
     fn parse_should_default_group_unit_and_direction() {
