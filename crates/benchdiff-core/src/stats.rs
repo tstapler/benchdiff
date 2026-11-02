@@ -22,6 +22,16 @@ pub fn holm_adjust(raw: &[f64]) -> Vec<f64> {
     out
 }
 
+/// Geometric mean via the mean of logs. `None` when `values` is empty or any value is not a
+/// finite positive number; callers exclude and count those first.
+pub fn geomean(values: &[f64]) -> Option<f64> {
+    if values.is_empty() || values.iter().any(|v| !v.is_finite() || *v <= 0.0) {
+        return None;
+    }
+    let mean_ln = values.iter().map(|v| v.ln()).sum::<f64>() / values.len() as f64;
+    Some(mean_ln.exp())
+}
+
 pub fn median(values: &[f64]) -> f64 {
     let mut v = values.to_vec();
     v.sort_by(f64::total_cmp);
@@ -138,6 +148,19 @@ fn erfc(x: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn geomean_should_match_hand_computed_vectors_and_reject_non_positive_input() {
+        // sqrt(2 * 8) = 4; cbrt(1 * 10 * 100) = 10; ratios 0.5 and 2.0 cancel to 1.
+        assert!((geomean(&[2.0, 8.0]).unwrap() - 4.0).abs() < 1e-12);
+        assert!((geomean(&[1.0, 10.0, 100.0]).unwrap() - 10.0).abs() < 1e-12);
+        assert!((geomean(&[0.5, 2.0]).unwrap() - 1.0).abs() < 1e-12);
+        assert_eq!(geomean(&[]), None);
+        assert_eq!(geomean(&[1.0, 0.0]), None);
+        assert_eq!(geomean(&[1.0, -2.0]), None);
+        assert_eq!(geomean(&[1.0, f64::NAN]), None);
+        assert_eq!(geomean(&[1.0, f64::INFINITY]), None);
+    }
 
     #[test]
     fn median_should_average_the_middle_pair_for_even_counts() {

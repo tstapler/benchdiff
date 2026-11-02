@@ -484,6 +484,9 @@ pub struct MatrixReport {
     pub rows: Vec<MatrixRow>,
     /// Labels of rows the reference lacks (or skipped); these rows carry no deltas.
     pub reference_absent: Vec<String>,
+    /// Geomean families in first-seen row order, each with at least 3 rows. Computed after the
+    /// Holm pass; empty when the reference is unresolved.
+    pub geomean: Vec<GeomeanFamily>,
     /// Notices raised here (class `Degradation`); rendering and ordering belong to the renderer.
     #[serde(skip)]
     pub notices: Vec<Notice>,
@@ -555,6 +558,187 @@ fn apply_holm(row: &mut MatrixRow, alpha: f64) {
             }
         }
     }
+}
+
+/// Fewest benchmarks a geomean family needs to be shown, and for the headline to compare.
+const GEOMEAN_MIN_ROWS: usize = 3;
+
+/// One column's geomean of oriented ratios vs the reference: below 1.0 is better than the
+/// reference, whatever the metric's `better`. `value` is `None` when no ratio was usable.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct VariantGeomean {
+    pub column: usize,
+    pub label: String,
+    pub value: Option<f64>,
+    /// Ratios that entered the mean; the rest were missing, invalid, incomparable, zero,
+    /// negative or non-finite.
+    pub n_used: usize,
+    pub n_total: usize,
+}
+
+/// The headline view over rows where the reference and every variant are present and valid.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct HeadlineGeomean {
+    pub common_n: usize,
+    pub total: usize,
+    /// False when the common set is under 3 rows or under half the rows; then no winner is named.
+    pub comparable: bool,
+    /// The variant covering the fewest benchmarks, with its coverage; `None` with one column.
+    pub least_covered: Option<(String, usize)>,
+    /// One per column over the common rows (the reference is exactly 1.0).
+    pub values: Vec<VariantGeomean>,
+    /// Column with the lowest oriented geomean (ties: input order); `None` unless comparable.
+    pub best: Option<usize>,
+}
+
+/// Geomeans for one `(measure, unit)` family; families are never mixed.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct GeomeanFamily {
+    pub measure: String,
+    pub unit: String,
+    /// Rows of the family where the reference is present.
+    pub total: usize,
+    /// Per-variant view over each column's rows shared with the reference, one per column.
+    pub per_variant: Vec<VariantGeomean>,
+    pub headline: HeadlineGeomean,
+}
+
+impl MatrixReport {
+    /// The family the headline sentence uses: the first with a time unit, else the largest.
+    pub fn primary_geomean(&self) -> Option<&GeomeanFamily> {
+        let time = |f: &&GeomeanFamily| matches!(f.unit.as_str(), "ns" | "us" | "ms" | "s");
+        self.geomean.iter().find(time).or_else(|| {
+            // `max_by_key` keeps the last of equal maxima; reverse so the first wins.
+            self.geomean.iter().rev().max_by_key(|f| f.total)
+        })
+    }
+}
+
+/// Oriented ratio of a cell against the reference, `None` when unusable. Lower is better.
+fn oriented_ratio(row: &MatrixRow, ref_col: usize, col: usize) -> Option<f64> {
+    let Cell::Present(reference) = &row.cells[ref_col] else {
+        return None;
+    };
+    if col == ref_col {
+        return (reference.value.is_finite() && reference.value > 0.0).then_some(1.0);
+    }
+    let Cell::Present(PresentCell {
+        vs_reference: Comparison::Compared {
+            delta: Some(delta), ..
+        },
+        ..
+    }) = &row.cells[col]
+    else {
+        return None;
+    };
+    if !(reference.value.is_finite() && reference.value > 0.0) {
+        return None;
+    }
+    // delta is (variant - base) / |base| in percent, so with a positive base this is variant / base.
+    let ratio = 1.0 + delta / 100.0;
+    if !ratio.is_finite() || ratio <= 0.0 {
+        return None;
+    }
+    Some(if row.better == Better::Lower {
+        ratio
+    } else {
+        1.0 / ratio
+    })
+}
+
+fn variant_geomean(
+    rows: &[&MatrixRow],
+    columns: &[VariantLabel],
+    ref_col: usize,
+    col: usize,
+) -> VariantGeomean {
+    let ratios: Vec<f64> = rows
+        .iter()
+        .filter_map(|r| oriented_ratio(r, ref_col, col))
+        .collect();
+    VariantGeomean {
+        column: col,
+        label: columns[col].to_string(),
+        value: stats::geomean(&ratios),
+        n_used: ratios.len(),
+        n_total: rows.len(),
+    }
+}
+
+fn usable(cell: &Cell) -> bool {
+    matches!(cell, Cell::Present(p) if !matches!(p.vs_reference, Comparison::Invalid(_)))
+}
+
+/// Runs after the Holm pass; verdicts do not feed the ratios, but this keeps one aggregate stage.
+fn compute_geomeans(
+    rows: &[MatrixRow],
+    columns: &[VariantLabel],
+    ref_col: usize,
+) -> Vec<GeomeanFamily> {
+    let mut order: Vec<(String, String)> = Vec::new();
+    let mut families: HashMap<(String, String), Vec<&MatrixRow>> = HashMap::new();
+    for row in rows {
+        if !matches!(row.cells[ref_col], Cell::Present(_)) {
+            continue;
+        }
+        let key = (row.measure.clone(), row.unit.clone());
+        families
+            .entry(key.clone())
+            .or_insert_with(|| {
+                order.push(key);
+                Vec::new()
+            })
+            .push(row);
+    }
+    let mut out = Vec::new();
+    for key in order {
+        let members = &families[&key];
+        let total = members.len();
+        if total < GEOMEAN_MIN_ROWS {
+            continue;
+        }
+        let per_variant = (0..columns.len())
+            .map(|c| variant_geomean(members, columns, ref_col, c))
+            .collect();
+        let common: Vec<&MatrixRow> = members
+            .iter()
+            .filter(|r| r.cells.iter().all(usable))
+            .copied()
+            .collect();
+        let comparable = common.len() >= GEOMEAN_MIN_ROWS && common.len() * 2 >= total;
+        let least_covered = (0..columns.len())
+            .filter(|c| *c != ref_col)
+            .map(|c| (c, members.iter().filter(|r| usable(&r.cells[c])).count()))
+            .min_by_key(|(_, n)| *n)
+            .map(|(c, n)| (columns[c].to_string(), n));
+        let values: Vec<VariantGeomean> = (0..columns.len())
+            .map(|c| variant_geomean(&common, columns, ref_col, c))
+            .collect();
+        let best = comparable
+            .then(|| {
+                values
+                    .iter()
+                    .filter_map(|v| v.value.map(|g| (v.column, g)))
+                    .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
+                    .map(|(c, _)| c)
+            })
+            .flatten();
+        out.push(GeomeanFamily {
+            measure: key.0,
+            unit: key.1,
+            total,
+            per_variant,
+            headline: HeadlineGeomean {
+                common_n: common.len(),
+                total,
+                comparable,
+                least_covered,
+                values,
+                best,
+            },
+        });
+    }
+    out
 }
 
 fn comparison_verdict(c: &Comparison) -> Option<Verdict> {
@@ -672,6 +856,7 @@ fn empty_report(
         columns,
         rows: Vec::new(),
         reference_absent: Vec::new(),
+        geomean: Vec::new(),
         notices,
     }
 }
@@ -754,12 +939,14 @@ pub fn compare_matrix(variants: &[Variant], opts: &Options, mopts: &MatrixOption
         // Before sorting and before any aggregate, so all of them see post-Holm verdicts.
         rows.iter_mut().for_each(|r| apply_holm(r, opts.alpha));
     }
+    let geomean = compute_geomeans(&rows, &columns, ref_col);
     sort_matrix_rows(&mut rows, mopts.sort, ref_col);
     MatrixReport {
         summary,
         columns,
         rows,
         reference_absent,
+        geomean,
         notices: Vec::new(),
     }
 }
@@ -1878,5 +2065,253 @@ mod tests {
         assert_eq!(r.rows.len(), 300);
         assert_eq!(r.count(Verdict::Regressed), 0);
         assert!(!matrix_failed(&r, Some(5.0)));
+    }
+
+    // ---- Geomean ----
+
+    /// One variant; each item is (name, measure, unit, value, better).
+    fn gvariant(label: &str, items: &[(&str, &str, &str, f64, Better)]) -> Variant {
+        Variant {
+            label: VariantLabel::parse(label).unwrap(),
+            set: MetricSet {
+                metrics: items
+                    .iter()
+                    .map(|(n, m, u, v, b)| Metric::new("", n, m, u, *v, *b))
+                    .collect(),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn ns(name: &str, value: f64) -> (String, f64) {
+        (name.to_string(), value)
+    }
+
+    fn lower_variant(label: &str, rows: &[(String, f64)]) -> Variant {
+        let items: Vec<(&str, &str, &str, f64, Better)> = rows
+            .iter()
+            .map(|(n, v)| (n.as_str(), "", "ns", *v, Better::Lower))
+            .collect();
+        gvariant(label, &items)
+    }
+
+    fn only_family(r: &MatrixReport) -> &GeomeanFamily {
+        assert_eq!(r.geomean.len(), 1);
+        &r.geomean[0]
+    }
+
+    #[test]
+    fn geomean_should_be_orientation_aware_and_exclude_zero_with_n_used_of_total() {
+        // Ratios 0.5 and 2.0 vs reference, better=lower: geomean 1.00x, n=2/2 (hand: sqrt(0.5*2)=1).
+        let base: Vec<_> = (1..=3).map(|i| ns(&format!("B{i}"), 100.0)).collect();
+        let head = vec![ns("B1", 50.0), ns("B2", 200.0), ns("B3", 100.0)];
+        let r = compare_matrix(
+            &[lower_variant("a", &base), lower_variant("b", &head)],
+            &Options::default(),
+            &mopts(),
+        );
+        let g = &only_family(&r).per_variant[1];
+        assert!((g.value.unwrap() - 1.0).abs() < 1e-12);
+        assert_eq!((g.n_used, g.n_total), (3, 3));
+
+        // better=higher with ratio 2.0 contributes 0.5; hand: cbrt(0.5 * 0.5 * 2) = 0.5^(1/3).
+        let hi = |label: &str, v: [f64; 3]| {
+            gvariant(
+                label,
+                &[
+                    ("B1", "", "ops/s", v[0], Better::Higher),
+                    ("B2", "", "ops/s", v[1], Better::Higher),
+                    ("B3", "", "ops/s", v[2], Better::Higher),
+                ],
+            )
+        };
+        let r = compare_matrix(
+            &[hi("a", [100.0; 3]), hi("b", [200.0, 200.0, 50.0])],
+            &Options::default(),
+            &mopts(),
+        );
+        let g = &only_family(&r).per_variant[1];
+        assert!((g.value.unwrap() - 0.5f64.powf(1.0 / 3.0)).abs() < 1e-12);
+
+        // A zero reference value in 1 of 15 rows: n=14/15, no NaN or inf anywhere.
+        let mut base: Vec<_> = (0..15).map(|i| ns(&format!("B{i}"), 100.0)).collect();
+        base[7].1 = 0.0;
+        let head: Vec<_> = (0..15).map(|i| ns(&format!("B{i}"), 150.0)).collect();
+        let r = compare_matrix(
+            &[lower_variant("a", &base), lower_variant("b", &head)],
+            &Options::default(),
+            &mopts(),
+        );
+        let f = only_family(&r);
+        assert_eq!(
+            (f.per_variant[1].n_used, f.per_variant[1].n_total),
+            (14, 15)
+        );
+        assert!((f.per_variant[1].value.unwrap() - 1.5).abs() < 1e-12);
+        assert!(f
+            .headline
+            .values
+            .iter()
+            .all(|v| v.value.is_none_or(f64::is_finite)));
+        assert_eq!(f.per_variant[0].n_used, 14);
+    }
+
+    #[test]
+    fn geomean_should_not_mix_measures_and_hide_family_under_three_rows() {
+        let mk = |factor: f64| {
+            let mut items: Vec<(String, &str, &str, f64, Better)> = Vec::new();
+            for i in 0..10 {
+                items.push((format!("T{i}"), "time", "ns", 100.0 * factor, Better::Lower));
+            }
+            for i in 0..5 {
+                items.push((
+                    format!("A{i}"),
+                    "alloc",
+                    "B/op",
+                    64.0 * factor,
+                    Better::Lower,
+                ));
+            }
+            for i in 0..2 {
+                items.push((format!("S{i}"), "tiny", "ms", 1.0, Better::Lower));
+            }
+            items
+        };
+        let to_variant = |label: &str, f: f64| {
+            let items = mk(f);
+            let refs: Vec<(&str, &str, &str, f64, Better)> = items
+                .iter()
+                .map(|(n, m, u, v, b)| (n.as_str(), *m, *u, *v, *b))
+                .collect();
+            gvariant(label, &refs)
+        };
+        let r = compare_matrix(
+            &[to_variant("a", 1.0), to_variant("b", 2.0)],
+            &Options::default(),
+            &mopts(),
+        );
+        assert_eq!(r.geomean.len(), 2, "the 2-row family is hidden");
+        let time = &r.geomean[0];
+        let alloc = &r.geomean[1];
+        assert_eq!(
+            (time.unit.as_str(), time.per_variant[1].n_used, time.total),
+            ("ns", 10, 10)
+        );
+        assert_eq!(
+            (
+                alloc.unit.as_str(),
+                alloc.per_variant[1].n_used,
+                alloc.total
+            ),
+            ("B/op", 5, 5)
+        );
+        assert!((time.per_variant[1].value.unwrap() - 2.0).abs() < 1e-12);
+        assert!((alloc.per_variant[1].value.unwrap() - 2.0).abs() < 1e-12);
+        assert_eq!(r.primary_geomean().unwrap().unit, "ns");
+    }
+
+    #[test]
+    fn primary_geomean_should_fall_back_to_the_largest_family_without_a_time_unit() {
+        let mk = |label: &str, f: f64| {
+            let mut items: Vec<(String, &str, f64)> = Vec::new();
+            for i in 0..3 {
+                items.push((format!("A{i}"), "B/op", 10.0 * f));
+            }
+            for i in 0..4 {
+                items.push((format!("C{i}"), "allocs/op", 2.0 * f));
+            }
+            let refs: Vec<(&str, &str, &str, f64, Better)> = items
+                .iter()
+                .map(|(n, u, v)| (n.as_str(), *u, *u, *v, Better::Lower))
+                .collect();
+            gvariant(label, &refs)
+        };
+        let r = compare_matrix(&[mk("a", 1.0), mk("b", 1.0)], &Options::default(), &mopts());
+        assert_eq!(r.primary_geomean().unwrap().unit, "allocs/op");
+    }
+
+    #[test]
+    fn geomean_headline_should_use_common_row_set_with_per_variant_n_used_of_total_when_variant_misses_rows(
+    ) {
+        // merge lacks its 6 slowest of 15 benchmarks.
+        let names: Vec<String> = (0..15).map(|i| format!("B{i:02}")).collect();
+        let quick: Vec<_> = names.iter().map(|n| ns(n, 100.0)).collect();
+        let heap: Vec<_> = names.iter().map(|n| ns(n, 200.0)).collect();
+        let merge: Vec<_> = names[..9].iter().map(|n| ns(n, 50.0)).collect();
+        let r = compare_matrix(
+            &[
+                lower_variant("quick", &quick),
+                lower_variant("heap", &heap),
+                lower_variant("merge", &merge),
+            ],
+            &Options::default(),
+            &mopts(),
+        );
+        let f = only_family(&r);
+        assert_eq!(
+            (f.per_variant[1].n_used, f.per_variant[1].n_total),
+            (15, 15)
+        );
+        assert_eq!((f.per_variant[2].n_used, f.per_variant[2].n_total), (9, 15));
+        let h = &f.headline;
+        assert_eq!((h.common_n, h.total, h.comparable), (9, 15, true));
+        assert!(h.values.iter().all(|v| (v.n_used, v.n_total) == (9, 9)));
+        assert!((h.values[0].value.unwrap() - 1.0).abs() < 1e-12);
+        assert!((h.values[1].value.unwrap() - 2.0).abs() < 1e-12);
+        assert!((h.values[2].value.unwrap() - 0.5).abs() < 1e-12);
+        assert_eq!(h.best, Some(2));
+        assert_eq!(h.least_covered, Some(("merge".to_string(), 9)));
+    }
+
+    #[test]
+    fn geomean_headline_should_be_not_comparable_when_common_set_is_under_three_or_under_half() {
+        let names: Vec<String> = (0..15).map(|i| format!("B{i:02}")).collect();
+        let quick: Vec<_> = names.iter().map(|n| ns(n, 100.0)).collect();
+        let heap: Vec<_> = names.iter().map(|n| ns(n, 200.0)).collect();
+        let merge: Vec<_> = names[..4].iter().map(|n| ns(n, 50.0)).collect();
+        let r = compare_matrix(
+            &[
+                lower_variant("quick", &quick),
+                lower_variant("heap", &heap),
+                lower_variant("merge", &merge),
+            ],
+            &Options::default(),
+            &mopts(),
+        );
+        let h = &only_family(&r).headline;
+        assert_eq!((h.common_n, h.total, h.comparable), (4, 15, false));
+        assert_eq!(h.least_covered, Some(("merge".to_string(), 4)));
+        assert_eq!(h.best, None);
+
+        // Under 3 rows even though that is more than half of 4.
+        let q4: Vec<_> = names[..4].iter().map(|n| ns(n, 100.0)).collect();
+        let m2: Vec<_> = names[..2].iter().map(|n| ns(n, 50.0)).collect();
+        let r = compare_matrix(
+            &[lower_variant("quick", &q4), lower_variant("merge", &m2)],
+            &Options::default(),
+            &mopts(),
+        );
+        let h = &only_family(&r).headline;
+        assert_eq!((h.common_n, h.total, h.comparable), (2, 4, false));
+    }
+
+    #[test]
+    fn geomean_should_skip_rows_without_reference_and_exclude_invalid_cells_from_common_set() {
+        let names: Vec<String> = (0..5).map(|i| format!("B{i}")).collect();
+        let quick: Vec<_> = names[..4].iter().map(|n| ns(n, 100.0)).collect();
+        let heap: Vec<_> = names.iter().map(|n| ns(n, 200.0)).collect();
+        let mut heap_v = lower_variant("heap", &heap);
+        // B1 is present in the reference but unusable in heap.
+        heap_v.set.metrics.remove(1);
+        heap_v = with_skipped(heap_v, "B1");
+        let r = compare_matrix(
+            &[lower_variant("quick", &quick), heap_v],
+            &Options::default(),
+            &mopts(),
+        );
+        let f = only_family(&r);
+        assert_eq!(f.total, 4, "the reference-absent row B4 is excluded");
+        assert_eq!((f.per_variant[1].n_used, f.per_variant[1].n_total), (3, 4));
+        assert_eq!(f.headline.common_n, 3);
     }
 }
