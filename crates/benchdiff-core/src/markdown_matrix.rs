@@ -5,7 +5,9 @@
 //! "slower/faster than reference" and "has the best geomean", never "regression" or "fastest".
 
 use crate::compare::{Method, Options, Verdict};
-use crate::markdown::{code, flatten, fmt_num, marker};
+use crate::markdown::{
+    chart_notices, code, flatten, fmt_num, marker, render_chart_blocks, RenderExtras,
+};
 use crate::matrix::{matrix_failures, FailedCell, FailureKind};
 use crate::matrix::{
     Cell, CellFormat, Comparison, Correction, GeomeanFamily, MatrixReport, MatrixRow,
@@ -22,6 +24,11 @@ const WORDS_FROM: f64 = 2.0;
 
 /// Renders `report` as sticky-comment Markdown.
 pub fn render_matrix_markdown(report: &MatrixReport) -> String {
+    render_matrix_markdown_with(report, &RenderExtras::default())
+}
+
+/// Like [`render_matrix_markdown`], plus chart placeholders, text blocks and chart notices.
+pub fn render_matrix_markdown_with(report: &MatrixReport, extras: &RenderExtras) -> String {
     let s = &report.summary;
     let mut out = String::new();
     let _ = writeln!(out, "{}", marker(&s.tag));
@@ -36,8 +43,10 @@ pub fn render_matrix_markdown(report: &MatrixReport) -> String {
     if let Some(line) = gate_line(s, failures.as_deref()) {
         let _ = writeln!(out, "{line}\n");
     }
-    let notices = collect_notices(report);
+    let mut notices = collect_notices(report);
+    notices.extend(chart_notices(extras));
     out.push_str(&render_notices(&notices));
+    out.push_str(&render_chart_blocks(extras));
 
     let cols = display_columns(report);
     let sel = select_rows(report);
@@ -1513,5 +1522,47 @@ mod tests {
         }
         let want = std::fs::read_to_string(path).expect("snapshot file");
         assert_eq!(got, want);
+    }
+
+    #[test]
+    fn render_matrix_markdown_with_should_equal_plain_render_when_extras_default() {
+        let v = fifteen(2);
+        let report = compare_matrix(&v, &Options::default(), &mopts());
+        assert_eq!(
+            render_matrix_markdown_with(&report, &RenderExtras::default()),
+            render_matrix_markdown(&report)
+        );
+    }
+
+    #[test]
+    fn render_matrix_markdown_with_should_place_image_after_notices_and_before_table() {
+        use crate::markdown::ChartEmbed;
+        use crate::svg::ChartKind;
+        let v = fifteen(2);
+        let report = compare_matrix(&v, &Options::default(), &mopts());
+        let extras = RenderExtras {
+            charts: vec![ChartEmbed {
+                kind: ChartKind::Ranking,
+                file: "ranking.svg".into(),
+                alt: "Ratio vs quick".into(),
+                text: Some("| # |\n|---|".into()),
+            }],
+            embed: true,
+            notices: vec![Notice {
+                class: NoticeClass::Chart,
+                text: "capped".into(),
+            }],
+            ..RenderExtras::default()
+        };
+        let md = render_matrix_markdown_with(&report, &extras);
+        let note = md.find("⚠️ capped").unwrap();
+        let img = md
+            .find("![Ratio vs quick](benchdiff-svg:ranking.svg)")
+            .unwrap();
+        let det = md
+            .find("<details><summary>Chart data (text)</summary>")
+            .unwrap();
+        let table = md.find("| Benchmark").unwrap();
+        assert!(note < img && img < det && det < table, "{md}");
     }
 }

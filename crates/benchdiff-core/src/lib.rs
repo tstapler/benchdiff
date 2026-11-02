@@ -20,7 +20,11 @@ mod units;
 
 pub use compare::{compare, Method, Options, Report, Row, Sort, Summary, Verdict};
 pub use import::{detect, parse, Format};
-pub use markdown::{marker, render_markdown};
+pub use markdown::{
+    marker, render_markdown, render_markdown_with, ChartEmbed, RenderExtras, SkippedChart,
+    PLACEHOLDER_SCHEME,
+};
+pub use markdown_matrix::render_matrix_markdown_with;
 pub use matrix::{
     compare_matrix, matrix_failed, matrix_failures, Cell, Comparison, FailedCell, FailureKind,
     MatrixOptions, MatrixReport, MatrixRow, MatrixSummary, Variant, VariantLabel,

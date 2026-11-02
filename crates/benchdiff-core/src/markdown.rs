@@ -3,6 +3,8 @@
 //! (no clock), so native and wasm builds agree byte for byte.
 
 use crate::compare::{Method, Report, Row, Summary, Verdict};
+use crate::notice::{Notice, NoticeClass};
+use crate::svg::{ChartKind, SkipReason};
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -52,7 +54,152 @@ fn plural(n: usize, noun: &str) -> String {
     format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
 }
 
+/// Scheme of the image tokens core emits (`benchdiff-svg:NAME.svg`); `lib/images.js` mirrors it.
+pub const PLACEHOLDER_SCHEME: &str = "benchdiff-svg:";
+
+/// One chart to reference from the Markdown: the file `render_svgs` produced, its alt text and
+/// the already-rendered body of its `Chart data (text)` block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChartEmbed {
+    pub kind: ChartKind,
+    /// SVG file name, e.g. `delta.svg`; the placeholder is `PLACEHOLDER_SCHEME` + this.
+    pub file: String,
+    pub alt: String,
+    /// `svg::render_text_table` output; `None` emits the image without a text block.
+    pub text: Option<String>,
+}
+
+/// A chart that produced no file, with the reason shown in the report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkippedChart {
+    pub kind: ChartKind,
+    pub reason: SkipReason,
+}
+
+/// What the Markdown renderers add on top of a report: chart placeholders, text blocks and
+/// chart notices. `default()` adds nothing, so output is byte-identical to the plain render.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderExtras {
+    pub charts: Vec<ChartEmbed>,
+    pub skipped: Vec<SkippedChart>,
+    /// Extra notices (class `Chart`), e.g. a capped chart.
+    pub notices: Vec<Notice>,
+    /// `svg-embed`: when false no image and no text block are emitted.
+    pub embed: bool,
+    /// When false the images are not hosted: no placeholder, a note line, text block opened.
+    pub publish_images: bool,
+    /// Where the SVG files were written, named in the not-embedded note.
+    pub svg_dir: Option<String>,
+}
+
+impl Default for RenderExtras {
+    fn default() -> Self {
+        RenderExtras {
+            charts: Vec::new(),
+            skipped: Vec::new(),
+            notices: Vec::new(),
+            embed: false,
+            publish_images: true,
+            svg_dir: None,
+        }
+    }
+}
+
+fn skip_text(s: &SkippedChart) -> String {
+    let kind = s.kind.name();
+    match &s.reason {
+        SkipReason::NothingToCompare => "chart skipped: nothing to compare".to_string(),
+        SkipReason::NotApplicable { kind: k } => match k {
+            ChartKind::Delta => "chart skipped: delta is two-way; use ranking".to_string(),
+            ChartKind::Ranking => {
+                "chart skipped: ranking needs an N-way run (compare-by or variants)".to_string()
+            }
+            ChartKind::Distribution => format!("chart skipped: {} is not applicable", k.name()),
+        },
+        SkipReason::NoSamples => format!("chart skipped: {kind}: no samples (run with samples)"),
+        SkipReason::Empty => format!("chart skipped: {kind}: no rows to chart"),
+        SkipReason::CapExceeded { shown, total } => {
+            format!("chart skipped: {kind}: {total} series exceed the cap of {shown}")
+        }
+    }
+}
+
+/// Chart-class notices: the skipped charts, then the caller's own.
+pub(crate) fn chart_notices(extras: &RenderExtras) -> Vec<Notice> {
+    extras
+        .skipped
+        .iter()
+        .map(|s| Notice {
+            class: NoticeClass::Chart,
+            text: skip_text(s),
+        })
+        .chain(extras.notices.iter().cloned())
+        .collect()
+}
+
+fn alt_escape(alt: &str) -> String {
+    let mut out = String::new();
+    for ch in flatten(alt).chars() {
+        match ch {
+            '\\' | '[' | ']' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '&' => out.push_str("&amp;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// The image placeholders and `Chart data (text)` blocks, directly under the verdict block.
+/// Empty unless `extras.embed` and there is a chart.
+pub(crate) fn render_chart_blocks(extras: &RenderExtras) -> String {
+    let mut out = String::new();
+    if !extras.embed || extras.charts.is_empty() {
+        return out;
+    }
+    if !extras.publish_images {
+        out.push_str("charts not embedded: publish-images is false");
+        if let Some(dir) = &extras.svg_dir {
+            let _ = write!(out, "; SVGs written to {}", flatten(dir));
+        }
+        out.push_str("\n\n");
+    }
+    let several = extras.charts.len() > 1;
+    for c in &extras.charts {
+        if extras.publish_images {
+            let _ = writeln!(
+                out,
+                "![{}]({PLACEHOLDER_SCHEME}{})\n",
+                alt_escape(&c.alt),
+                c.file
+            );
+        }
+        if let Some(text) = &c.text {
+            let open = if extras.publish_images { "" } else { " open" };
+            let title = if several {
+                format!("Chart data (text): {}", c.kind.name())
+            } else {
+                "Chart data (text)".to_string()
+            };
+            let _ = writeln!(
+                out,
+                "<details{open}><summary>{title}</summary>\n\n{}\n\n</details>\n",
+                text.trim_end()
+            );
+        }
+    }
+    out
+}
+
 pub fn render_markdown(report: &Report) -> String {
+    render_markdown_with(report, &RenderExtras::default())
+}
+
+pub fn render_markdown_with(report: &Report, extras: &RenderExtras) -> String {
     let s = &report.summary;
     let mut out = String::new();
     let _ = writeln!(out, "{}", marker(&s.tag));
@@ -60,6 +207,10 @@ pub fn render_markdown(report: &Report) -> String {
     let _ = writeln!(out, "{}\n", summary_line(report));
     render_skipped(&mut out, "head", &s.skipped_head, s.skipped_head_total);
     render_skipped(&mut out, "base", &s.skipped_base, s.skipped_base_total);
+    out.push_str(&crate::markdown_matrix::render_notices(&chart_notices(
+        extras,
+    )));
+    out.push_str(&render_chart_blocks(extras));
 
     let (changed, quiet): (Vec<&Row>, Vec<&Row>) =
         report.rows.iter().partition(|r| is_interesting(r));
@@ -779,5 +930,151 @@ mod tests {
         let json = crate::render_json(&report);
         assert!(json.contains("\"threshold_overrides\""), "{json}");
         assert!(json.contains("\"config_sources\""), "{json}");
+    }
+
+    fn chart(text: Option<&str>) -> ChartEmbed {
+        ChartEmbed {
+            kind: ChartKind::Delta,
+            file: "delta.svg".into(),
+            alt: "Benchmark [change] <b>".into(),
+            text: text.map(String::from),
+        }
+    }
+
+    fn two_way() -> Report {
+        let base = set(&[("net", "Parse", 100.0)]);
+        let head = set(&[("net", "Parse", 150.0)]);
+        compare(Some(&base), &head, &Options::default())
+    }
+
+    fn embedded(charts: Vec<ChartEmbed>) -> RenderExtras {
+        RenderExtras {
+            charts,
+            embed: true,
+            ..RenderExtras::default()
+        }
+    }
+
+    #[test]
+    fn render_markdown_with_should_equal_render_markdown_when_extras_default() {
+        let r = two_way();
+        assert_eq!(
+            render_markdown_with(&r, &RenderExtras::default()),
+            render_markdown(&r)
+        );
+        // Charts present but embedding off adds nothing either.
+        let off = RenderExtras {
+            charts: vec![chart(Some("t"))],
+            ..RenderExtras::default()
+        };
+        assert_eq!(render_markdown_with(&r, &off), render_markdown(&r));
+    }
+
+    #[test]
+    fn render_markdown_with_should_emit_chart_data_text_details_after_image_when_embedded_and_none_when_no_chart(
+    ) {
+        let r = two_way();
+        let md = render_markdown_with(&r, &embedded(vec![chart(Some("| # |\n|---|\n| 1 |"))]));
+        let img = md
+            .find("![Benchmark \\[change\\] &lt;b&gt;](benchdiff-svg:delta.svg)")
+            .unwrap_or_else(|| panic!("{md}"));
+        let det = md
+            .find("<details><summary>Chart data (text)</summary>")
+            .unwrap();
+        let table = md.find("### ").unwrap();
+        assert!(table < img && img < det, "{md}");
+        assert!(md[det..].contains("| 1 |\n\n</details>"), "{md}");
+        assert!(!md.contains("<details open>"));
+        // Directly under the summary line, before any row table.
+        assert!(img < md.find("| Benchmark").unwrap_or(usize::MAX), "{md}");
+        let none = render_markdown_with(&r, &embedded(vec![]));
+        assert!(!none.contains("Chart data"), "{none}");
+        assert!(!none.contains(PLACEHOLDER_SCHEME), "{none}");
+    }
+
+    #[test]
+    fn render_markdown_with_should_title_each_block_by_kind_when_several_charts() {
+        let mut second = chart(Some("b"));
+        second.kind = ChartKind::Distribution;
+        second.file = "distribution.svg".into();
+        let md = render_markdown_with(&two_way(), &embedded(vec![chart(Some("a")), second]));
+        assert!(
+            md.contains("<summary>Chart data (text): delta</summary>"),
+            "{md}"
+        );
+        assert!(
+            md.contains("<summary>Chart data (text): distribution</summary>"),
+            "{md}"
+        );
+        assert!(md.contains("(benchdiff-svg:distribution.svg)"), "{md}");
+    }
+
+    #[test]
+    fn render_markdown_with_should_emit_no_placeholder_and_note_line_when_publish_images_false() {
+        let extras = RenderExtras {
+            publish_images: false,
+            svg_dir: Some("out/svg".into()),
+            ..embedded(vec![chart(Some("rows"))])
+        };
+        let md = render_markdown_with(&two_way(), &extras);
+        assert!(!md.contains(PLACEHOLDER_SCHEME), "{md}");
+        assert!(
+            md.contains("charts not embedded: publish-images is false; SVGs written to out/svg\n\n<details open><summary>Chart data (text)</summary>"),
+            "{md}"
+        );
+        assert_eq!(md.matches("charts not embedded").count(), 1);
+    }
+
+    #[test]
+    fn render_markdown_with_should_list_skipped_charts_with_reason_when_extras_contain_skips() {
+        let extras = RenderExtras {
+            skipped: vec![
+                SkippedChart {
+                    kind: ChartKind::Delta,
+                    reason: SkipReason::NothingToCompare,
+                },
+                SkippedChart {
+                    kind: ChartKind::Ranking,
+                    reason: SkipReason::NotApplicable {
+                        kind: ChartKind::Ranking,
+                    },
+                },
+            ],
+            ..RenderExtras::default()
+        };
+        let md = render_markdown_with(&two_way(), &extras);
+        assert!(
+            md.contains("⚠️ chart skipped: nothing to compare\n\n"),
+            "{md}"
+        );
+        assert!(
+            md.contains("⚠️ chart skipped: ranking needs an N-way run"),
+            "{md}"
+        );
+        assert!(!md.contains(PLACEHOLDER_SCHEME));
+    }
+
+    #[test]
+    fn render_markdown_with_should_cap_chart_notices_at_five_lines_when_many() {
+        let notices = (0..7)
+            .map(|i| Notice {
+                class: NoticeClass::Chart,
+                text: format!("capped {i}"),
+            })
+            .collect();
+        let md = render_markdown_with(
+            &two_way(),
+            &RenderExtras {
+                notices,
+                ..RenderExtras::default()
+            },
+        );
+        assert_eq!(md.matches("⚠️ capped").count(), 5, "{md}");
+        assert!(md.contains("⚠️ 2 more notices (see Method)"), "{md}");
+    }
+
+    #[test]
+    fn placeholder_scheme_should_end_with_colon() {
+        assert_eq!(PLACEHOLDER_SCHEME, "benchdiff-svg:");
     }
 }
