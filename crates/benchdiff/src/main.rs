@@ -3,7 +3,8 @@
 //! files in a preopened directory), so it sticks to `std::fs` and `std::env::args`.
 
 use benchdiff_core::{
-    compare, parse, render_json, render_markdown, Format, MetricSet, Options, Sort,
+    compare, options::OptionsOverlay, parse, render_json, render_markdown, Format, MetricSet,
+    Options, Sort,
 };
 use std::process::ExitCode;
 
@@ -45,7 +46,15 @@ struct Args {
     markdown: Option<String>,
     json: Option<String>,
     head_json: Option<String>,
-    opts: Options,
+    flags: OptionsOverlay,
+}
+
+impl Args {
+    fn options(&self) -> Options {
+        let mut opts = Options::default();
+        self.flags.apply(&mut opts);
+        opts
+    }
 }
 
 fn main() -> ExitCode {
@@ -76,7 +85,7 @@ fn run() -> Result<bool, String> {
         Some(load(&args.base, args.base_format.unwrap_or(args.format))?)
     };
 
-    let report = compare(base.as_ref(), &head, &args.opts);
+    let report = compare(base.as_ref(), &head, &args.options());
     let markdown = render_markdown(&report);
     match &args.markdown {
         Some(path) => write(path, &markdown)?,
@@ -115,7 +124,7 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
         markdown: None,
         json: None,
         head_json: None,
-        opts: Options::default(),
+        flags: OptionsOverlay::default(),
     };
     let mut raw = raw.peekable();
     while let Some(arg) = raw.next() {
@@ -148,36 +157,38 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
             "--base" => a.base.push(value("--base")?),
             "--format" => a.format = Format::from_name(&value("--format")?)?,
             "--base-format" => a.base_format = Some(Format::from_name(&value("--base-format")?)?),
-            "--threshold" => a.opts.threshold_pct = number("--threshold", value("--threshold")?)?,
-            "--min-abs" => a.opts.min_abs = number("--min-abs", value("--min-abs")?)?,
+            "--threshold" => {
+                a.flags.threshold_pct = Some(number("--threshold", value("--threshold")?)?)
+            }
+            "--min-abs" => a.flags.min_abs = Some(number("--min-abs", value("--min-abs")?)?),
             "--alpha" => {
                 let alpha = number("--alpha", value("--alpha")?)?;
                 if alpha == 0.0 || alpha > 1.0 {
                     return Err(format!("--alpha: {alpha} must be in (0, 1]"));
                 }
-                a.opts.alpha = alpha;
+                a.flags.alpha = Some(alpha);
             }
             "--no-stats" => {
                 reject_inline("--no-stats")?;
-                a.opts.use_stats = false;
+                a.flags.use_stats = Some(false);
             }
             "--only-changed" => {
                 reject_inline("--only-changed")?;
-                a.opts.only_changed = true;
+                a.flags.only_changed = Some(true);
             }
-            "--sort" => a.opts.sort = Sort::from_name(&value("--sort")?)?,
+            "--sort" => a.flags.sort = Some(Sort::from_name(&value("--sort")?)?),
             "--max-rows" => {
                 let n = value("--max-rows")?;
-                a.opts.max_rows = Some(
+                a.flags.max_rows = Some(
                     n.trim()
                         .parse()
                         .map_err(|_| format!("--max-rows: {n:?} is not a whole number"))?,
                 );
             }
-            "--title" => a.opts.title = value("--title")?,
-            "--tag" => a.opts.tag = value("--tag")?,
+            "--title" => a.flags.title = Some(value("--title")?),
+            "--tag" => a.flags.tag = Some(value("--tag")?),
             "--fail-on-regression" => {
-                a.opts.fail_on_regression_pct = Some(match inline {
+                a.flags.fail_on_regression_pct = Some(match inline {
                     Some(v) => number("--fail-on-regression", v)?,
                     None => 0.0,
                 })
@@ -208,7 +219,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            (a.head.len(), a.base.len(), a.opts.threshold_pct),
+            (a.head.len(), a.base.len(), a.options().threshold_pct),
             (2, 1, 2.5)
         );
     }
@@ -218,11 +229,11 @@ mod tests {
         let a = args(&["--head", "a", "--fail-on-regression"])
             .unwrap()
             .unwrap();
-        assert_eq!(a.opts.fail_on_regression_pct, Some(0.0));
+        assert_eq!(a.options().fail_on_regression_pct, Some(0.0));
         let a = args(&["--head", "a", "--fail-on-regression=10"])
             .unwrap()
             .unwrap();
-        assert_eq!(a.opts.fail_on_regression_pct, Some(10.0));
+        assert_eq!(a.options().fail_on_regression_pct, Some(10.0));
     }
 
     #[test]
@@ -264,7 +275,7 @@ mod tests {
             assert!(args(&["--head", "a", "--alpha", bad]).is_err(), "{bad}");
         }
         let a = args(&["--head", "a", "--alpha", "1"]).unwrap().unwrap();
-        assert_eq!(a.opts.alpha, 1.0);
+        assert_eq!(a.options().alpha, 1.0);
     }
 
     #[test]
