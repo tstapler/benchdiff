@@ -1198,7 +1198,9 @@ mod tests {
         };
         let md = render_markdown_with(&two_way(), &extras);
         assert!(
-            md.contains("⚠️ chart skipped: distribution: a value is too large to draw (not finite)\n"),
+            md.contains(
+                "⚠️ chart skipped: distribution: a value is too large to draw (not finite)\n"
+            ),
             "{md}"
         );
     }
