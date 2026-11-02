@@ -3,7 +3,8 @@
 
 use crate::compare::Sort;
 use crate::import::Format;
-use crate::options::OptionsOverlay;
+use crate::options::{OptionsOverlay, SvgOptionsOverlay};
+use crate::svg::{ChartKind, ChartRows, ChartTheme, ChartWidth, EmbedSetting};
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -23,6 +24,13 @@ pub const KEYS: &[&str] = &[
     "tag",
     "format",
     "base-format",
+    "charts",
+    "chart-rows",
+    "chart-width",
+    "chart-theme",
+    "svg-dir",
+    "svg-embed",
+    "publish-images",
 ];
 
 const SUPPORTED_VERSION: u64 = 1;
@@ -50,6 +58,13 @@ pub struct Config {
     pub tag: Option<String>,
     pub format: Option<Format>,
     pub base_format: Option<Format>,
+    pub charts: Option<Vec<ChartKind>>,
+    pub chart_rows: Option<ChartRows>,
+    pub chart_width: Option<ChartWidth>,
+    pub chart_theme: Option<ChartTheme>,
+    pub svg_dir: Option<String>,
+    pub svg_embed: Option<EmbedSetting>,
+    pub publish_images: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -70,6 +85,13 @@ struct Raw {
     tag: Option<String>,
     format: Option<String>,
     base_format: Option<String>,
+    charts: Option<Value>,
+    chart_rows: Option<Value>,
+    chart_width: Option<Value>,
+    chart_theme: Option<Value>,
+    svg_dir: Option<Value>,
+    svg_embed: Option<Value>,
+    publish_images: Option<Value>,
 }
 
 /// Parses and validates `text`; `file_name` only appears in error text.
@@ -147,7 +169,81 @@ fn parse_json(text: &str, file: &str) -> Result<Config, String> {
         tag: raw.tag,
         format: parse_input_format(file, "format", raw.format.as_deref())?,
         base_format: parse_input_format(file, "base-format", raw.base_format.as_deref())?,
+        charts: raw
+            .charts
+            .as_ref()
+            .map(|v| {
+                ChartKind::parse_list(string_value(file, "charts", v)?)
+                    .map_err(|e| format!("{file}: charts: {e}"))
+            })
+            .transpose()?,
+        chart_rows: raw
+            .chart_rows
+            .as_ref()
+            .map(|v| {
+                ChartRows::new(whole_number(file, "chart-rows", v)? as usize)
+                    .map_err(|e| format!("{file}: chart-rows: {e}"))
+            })
+            .transpose()?,
+        chart_width: raw
+            .chart_width
+            .as_ref()
+            .map(|v| {
+                let n = whole_number(file, "chart-width", v)?;
+                // Saturate so an oversized value still reports as out of range.
+                ChartWidth::new(u32::try_from(n).unwrap_or(u32::MAX))
+                    .map_err(|e| format!("{file}: chart-width: {e}"))
+            })
+            .transpose()?,
+        chart_theme: raw
+            .chart_theme
+            .as_ref()
+            .map(|v| {
+                ChartTheme::from_name(string_value(file, "chart-theme", v)?)
+                    .map_err(|e| format!("{file}: chart-theme: {e}"))
+            })
+            .transpose()?,
+        svg_dir: raw
+            .svg_dir
+            .as_ref()
+            .map(|v| string_value(file, "svg-dir", v).map(str::to_string))
+            .transpose()?,
+        svg_embed: raw
+            .svg_embed
+            .as_ref()
+            .map(|v| match v {
+                Value::Bool(true) => Ok(EmbedSetting::True),
+                Value::Bool(false) => Ok(EmbedSetting::False),
+                Value::String(s) => {
+                    EmbedSetting::from_name(s).map_err(|e| format!("{file}: svg-embed: {e}"))
+                }
+                other => Err(format!(
+                    "{file}: svg-embed: {other} is not valid; use {}",
+                    EmbedSetting::NAMES
+                )),
+            })
+            .transpose()?,
+        publish_images: raw
+            .publish_images
+            .as_ref()
+            .map(|v| match v {
+                Value::Bool(b) => Ok(*b),
+                other => Err(format!(
+                    "{file}: publish-images: {other} is not valid; use true, false"
+                )),
+            })
+            .transpose()?,
     })
+}
+
+fn string_value<'a>(file: &str, key: &str, v: &'a Value) -> Result<&'a str, String> {
+    v.as_str()
+        .ok_or_else(|| format!("{file}: {key}: expected a string, got {v}"))
+}
+
+fn whole_number(file: &str, key: &str, v: &Value) -> Result<u64, String> {
+    v.as_u64()
+        .ok_or_else(|| format!("{file}: {key}: {v} is not valid; use a whole number"))
 }
 
 type Split = (Option<f64>, Option<BTreeMap<String, f64>>);
@@ -243,6 +339,20 @@ fn edit_distance(a: &str, b: &str) -> usize {
 }
 
 impl Config {
+    /// The chart settings; call before [`Config::into_overlay`], which consumes the config.
+    pub fn svg_overlay(&self) -> SvgOptionsOverlay {
+        SvgOptionsOverlay {
+            kinds: self.charts.clone(),
+            rows: self.chart_rows,
+            width: self.chart_width,
+            theme: self.chart_theme,
+            embed: self.svg_embed,
+            publish_images: self.publish_images,
+            svg_dir: self.svg_dir.clone(),
+            ..Default::default()
+        }
+    }
+
     /// The settings `Options` carries; `format`/`base-format` are read from the fields directly.
     pub fn into_overlay(self) -> OptionsOverlay {
         OptionsOverlay {
@@ -411,5 +521,66 @@ mod tests {
         assert_eq!(o.fail_on_regression_pct, Some(9.0));
         assert_eq!(o.title.as_deref(), Some("T"));
         assert_eq!(o.tag.as_deref(), Some("g"));
+    }
+    #[test]
+    fn parse_config_should_map_chart_keys_into_svg_overlay() {
+        let c = parse(
+            r#"{"version":1,"charts":"delta,ranking","chart-rows":10,"chart-width":900,
+                "chart-theme":"both","svg-dir":"out","svg-embed":"auto","publish-images":false}"#,
+        )
+        .unwrap();
+        let o = c.svg_overlay();
+        assert_eq!(o.kinds, Some(vec![ChartKind::Delta, ChartKind::Ranking]));
+        assert_eq!(o.rows.map(ChartRows::get), Some(10));
+        assert_eq!(o.width.map(ChartWidth::get), Some(900));
+        assert_eq!(o.theme, Some(ChartTheme::Both));
+        assert_eq!(o.svg_dir.as_deref(), Some("out"));
+        assert_eq!(o.embed, Some(EmbedSetting::Auto));
+        assert_eq!(o.publish_images, Some(false));
+        let b = parse(r#"{"version":1,"svg-embed":false}"#).unwrap();
+        assert_eq!(b.svg_embed, Some(EmbedSetting::False));
+    }
+
+    #[test]
+    fn parse_config_should_list_valid_values_when_chart_value_invalid() {
+        let e = parse(r#"{"version":1,"charts":"bars"}"#).unwrap_err();
+        assert!(
+            e.contains(r#"charts: "bars" is not valid; use none, delta, ranking, distribution (comma-separated)"#),
+            "{e}"
+        );
+        let e = parse(r#"{"version":1,"publish-images":"yes"}"#).unwrap_err();
+        assert!(
+            e.contains(r#"publish-images: "yes" is not valid; use true, false"#),
+            "{e}"
+        );
+        let e = parse(r#"{"version":1,"chart-theme":"neon"}"#).unwrap_err();
+        assert!(e.contains(r#"use light, dark, both"#), "{e}");
+        let e = parse(r#"{"version":1,"svg-embed":"yes"}"#).unwrap_err();
+        assert!(e.contains("use true, false, auto"), "{e}");
+    }
+
+    #[test]
+    fn parse_config_should_reject_out_of_range_chart_rows_and_width() {
+        let e = parse(r#"{"version":1,"chart-rows":0}"#).unwrap_err();
+        assert!(
+            e.contains("chart-rows: 0 is not valid; use 1 to 200"),
+            "{e}"
+        );
+        let e = parse(r#"{"version":1,"chart-width":100}"#).unwrap_err();
+        assert!(
+            e.contains("chart-width: 100 is not valid; use 480 to 1600"),
+            "{e}"
+        );
+        let e = parse(r#"{"version":1,"chart-rows":-3}"#).unwrap_err();
+        assert!(e.contains("chart-rows"), "{e}");
+    }
+
+    #[test]
+    fn parse_config_should_suggest_chart_rows_when_chart_row_typo() {
+        let e = parse(r#"{"version":1,"chart-row":10}"#).unwrap_err();
+        assert!(
+            e.contains("unknown key 'chart-row'; did you mean 'chart-rows'?"),
+            "{e}"
+        );
     }
 }

@@ -3,9 +3,11 @@
 //! files in a preopened directory), so it sticks to `std::fs` and `std::env::args`.
 
 use benchdiff_core::config::{parse_config, ConfigFormat};
+use benchdiff_core::svg::{ChartKind, ChartRows, ChartTheme, ChartWidth, EmbedSetting, SvgOptions};
 use benchdiff_core::{
-    compare, options::OptionsOverlay, parse, render_json, render_markdown, Format, MetricSet,
-    Options, Sort,
+    compare,
+    options::{OptionsOverlay, SvgOptionsOverlay},
+    parse, render_json, render_markdown, Format, MetricSet, Options, Sort,
 };
 use serde_json::{json, Value};
 use std::process::ExitCode;
@@ -37,6 +39,16 @@ OPTIONS:
     --markdown FILE        write the Markdown report here [stdout]
     --json FILE            also write the machine-readable report
     --head-json FILE       also write the merged head results as canonical benchdiff JSON
+    --charts LIST          SVG charts: none, or delta,ranking,distribution (comma-separated) [none]
+    --chart-rows N         rows per chart, 1 to 200 [30]; the effective cap is
+                           min(chart-rows, max-rows) when max-rows is set
+    --chart-width PX       chart width in pixels, 480 to 1600 [760]
+    --chart-theme NAME     light, dark or both [light]
+    --svg-dir DIR          write the SVG files here [off]
+    --svg-embed[=MODE]     embed charts in the report as benchdiff-svg: placeholders:
+                           true, false or auto (on iff --charts is set) [false]
+    --publish-images[=BOOL]
+                           host embedded charts as images: true or false [true]
     -h, --help
 
 FORMATS: ";
@@ -53,6 +65,7 @@ struct Args {
     json: Option<String>,
     head_json: Option<String>,
     flags: OptionsOverlay,
+    svg_flags: SvgOptionsOverlay,
 }
 
 /// Defaults, then the config file, then flags; `sources` names the layer of each non-default key.
@@ -62,6 +75,11 @@ struct Effective {
     base_format: Option<Format>,
     sources: Vec<(String, String, &'static str)>,
     file_overrides_set: bool,
+    /// Consumed by the `--svg-dir` write (3.3.1b).
+    #[allow(dead_code)]
+    svg: SvgOptions,
+    #[allow(dead_code)]
+    svg_dir: Option<String>,
 }
 
 impl Args {
@@ -79,6 +97,7 @@ impl Args {
         let mut base_format = None;
         let mut file_values = vec![];
         let mut file_overrides_set = false;
+        let mut svg_overlay = SvgOptionsOverlay::default();
         if let Some(path) = &self.config {
             let text = std::fs::read_to_string(path).map_err(|e| match e.kind() {
                 std::io::ErrorKind::NotFound => format!("config file not found: {path}"),
@@ -87,12 +106,16 @@ impl Args {
             let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
             let config = parse_config(&text, name, ConfigFormat::Json)?;
             (format, base_format) = (config.format, config.base_format);
+            svg_overlay = config.svg_overlay();
             let overlay = config.into_overlay();
             file_overrides_set = overlay.threshold_overrides.is_some();
             file_values = layer_values(&overlay, format, base_format);
             overlay.apply(&mut options);
         }
         self.flags.apply(&mut options);
+        let svg_overlay = svg_overlay.merge(self.svg_flags.clone());
+        let mut svg = SvgOptions::default();
+        svg_overlay.apply(&mut svg);
         let flag_values = layer_values(&self.flags, self.format, self.base_format);
 
         let mut sources = vec![];
@@ -115,6 +138,8 @@ impl Args {
             base_format: self.base_format.or(base_format),
             sources,
             file_overrides_set,
+            svg,
+            svg_dir: svg_overlay.svg_dir,
         })
     }
 }
@@ -296,6 +321,18 @@ fn write(path: &str, text: &str) -> Result<(), String> {
     std::fs::write(path, text).map_err(|e| format!("{path}: {e}"))
 }
 
+/// A flag whose value is optional: `--flag=V` always takes V; `--flag V` takes V only when it
+/// is one of `words`; a bare `--flag` means `true`.
+fn optional_value(
+    raw: &mut std::iter::Peekable<impl Iterator<Item = String>>,
+    inline: Option<String>,
+    words: &[&str],
+) -> String {
+    inline
+        .or_else(|| raw.next_if(|n| words.contains(&n.as_str())))
+        .unwrap_or_else(|| "true".into())
+}
+
 fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String> {
     let mut a = Args {
         head: vec![],
@@ -308,6 +345,7 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
         json: None,
         head_json: None,
         flags: OptionsOverlay::default(),
+        svg_flags: SvgOptionsOverlay::default(),
     };
     let mut raw = raw.peekable();
     while let Some(arg) = raw.next() {
@@ -380,6 +418,54 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
                     Some(v) => number("--fail-on-regression", v)?,
                     None => 0.0,
                 })
+            }
+            "--charts" => {
+                let v = value("--charts")?;
+                a.svg_flags.kinds =
+                    Some(ChartKind::parse_list(&v).map_err(|e| format!("--charts: {e}"))?);
+            }
+            "--chart-rows" => {
+                let v = value("--chart-rows")?;
+                let n = v
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("--chart-rows: {v:?} is not a whole number"))?;
+                a.svg_flags.rows =
+                    Some(ChartRows::new(n).map_err(|e| format!("--chart-rows: {e}"))?);
+            }
+            "--chart-width" => {
+                let v = value("--chart-width")?;
+                let n = v
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("--chart-width: {v:?} is not a whole number"))?;
+                a.svg_flags.width =
+                    Some(ChartWidth::new(n).map_err(|e| format!("--chart-width: {e}"))?);
+            }
+            "--chart-theme" => {
+                a.svg_flags.theme = Some(
+                    ChartTheme::from_name(&value("--chart-theme")?)
+                        .map_err(|e| format!("--chart-theme: {e}"))?,
+                );
+            }
+            "--svg-dir" => a.svg_flags.svg_dir = Some(value("--svg-dir")?),
+            "--svg-embed" => {
+                let v = optional_value(&mut raw, inline, &["true", "false", "auto"]);
+                a.svg_flags.embed =
+                    Some(EmbedSetting::from_name(&v).map_err(|e| format!("--svg-embed: {e}"))?);
+            }
+            "--publish-images" => {
+                a.svg_flags.publish_images = Some(
+                    match optional_value(&mut raw, inline, &["true", "false"]).as_str() {
+                        "true" => true,
+                        "false" => false,
+                        other => {
+                            return Err(format!(
+                                "--publish-images: {other:?} is not valid; use true, false"
+                            ))
+                        }
+                    },
+                );
             }
             "--markdown" => a.markdown = Some(value("--markdown")?),
             "--json" => a.json = Some(value("--json")?),
@@ -477,5 +563,18 @@ mod tests {
     #[test]
     fn help_short_circuits() {
         assert!(args(&["--help"]).unwrap().is_none());
+    }
+    #[test]
+    fn svg_embed_auto_resolves_on_only_when_charts_are_requested() {
+        let embed = |extra: &[&str]| {
+            let mut l = vec!["--head", "a", "--svg-embed", "auto"];
+            l.extend(extra);
+            args(&l).unwrap().unwrap().effective().unwrap().svg.embed
+        };
+        assert_eq!(
+            embed(&["--charts", "delta"]),
+            benchdiff_core::svg::EmbedMode::On
+        );
+        assert_eq!(embed(&[]), benchdiff_core::svg::EmbedMode::Off);
     }
 }
