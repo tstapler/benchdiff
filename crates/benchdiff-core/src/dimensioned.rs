@@ -4,6 +4,7 @@ use std::collections::HashSet;
 
 use serde::Serialize;
 
+use crate::dimensions::GROUP_AXIS;
 use crate::model::{Dims, Metric, MetricSet, Skipped};
 
 /// Maximum number of distinct values listed per dimension.
@@ -134,7 +135,7 @@ impl Dimensioned {
                 tally(&mut out[i], &mut seen[i], value);
             }
         }
-        let mut group = blank("group");
+        let mut group = blank(GROUP_AXIS);
         let mut group_seen = HashSet::new();
         for (metric, _) in &self.entries {
             tally(&mut group, &mut group_seen, &metric.group);
@@ -148,7 +149,7 @@ impl Dimensioned {
         let summary = self.dimension_summary();
         let detected: Vec<String> = summary
             .iter()
-            .filter(|d| d.name != "group")
+            .filter(|d| d.name != GROUP_AXIS)
             .map(|d| {
                 let noun = if d.value_count == 1 {
                     "value"

@@ -63,7 +63,7 @@ pub fn extract_defaults(name: &str) -> Extracted {
     }
 }
 
-/// Longest accepted rule pattern, in bytes (ADR-004 item 4).
+/// Longest accepted rule pattern, in characters (ADR-004 item 4).
 const MAX_PATTERN_LEN: usize = 256;
 /// Compiled-program size cap handed to `regex-lite`.
 const REGEX_SIZE_LIMIT: usize = 64 * 1024;

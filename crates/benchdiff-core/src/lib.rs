@@ -104,6 +104,10 @@ impl CellCounts {
     }
 }
 
+fn json_or_null<T: serde::Serialize>(v: &T) -> serde_json::Value {
+    serde_json::to_value(v).unwrap_or(serde_json::Value::Null)
+}
+
 /// The two-way JSON shape for an N-way run, plus an additive `matrix` key (schema stays 1).
 ///
 /// Top-level `counts` are cells versus the reference after the Holm pass; `failed` is
@@ -126,7 +130,9 @@ pub fn render_json_with_matrix(report: &MatrixReport, gate: Option<f64>) -> Stri
         let reference_present = matches!(row.cells.get(ref_col), Some(Cell::Present(_)));
         for (col, cell) in row.cells.iter().enumerate().filter(|(c, _)| *c != ref_col) {
             total.add(cell, reference_present);
-            per_variant[col].add(cell, reference_present);
+            if let Some(counts) = per_variant.get_mut(col) {
+                counts.add(cell, reference_present);
+            }
         }
     }
     let skipped: usize = report.summary.skipped.iter().map(|s| s.total).sum();
@@ -138,27 +144,36 @@ pub fn render_json_with_matrix(report: &MatrixReport, gate: Option<f64>) -> Stri
         .map(|(c, label)| {
             let mut v = per_variant[c].to_json(0);
             v["label"] = label.as_str().into();
-            v.as_object_mut().expect("object").remove("skipped");
+            if let Some(object) = v.as_object_mut() {
+                object.remove("skipped");
+            }
             v
         })
         .collect();
+    // Not `json!`: that macro unwraps serialisation, and a panic aborts the wasm module.
+    let matrix: serde_json::Map<String, serde_json::Value> = [
+        ("summary", json_or_null(&report.summary)),
+        ("reference", json_or_null(&report.summary.reference)),
+        ("columns", json_or_null(&report.columns)),
+        ("rows", json_or_null(&report.rows)),
+        ("reference_absent", json_or_null(&report.reference_absent)),
+        ("geomean", json_or_null(&report.geomean)),
+        ("counts", serde_json::Value::Array(breakdown)),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect();
     let value = serde_json::json!({
         "schema": 1,
         "counts": total.to_json(skipped),
         "failed": matrix_failed(report, gate),
         "has_base": true,
         "rows": [],
-        "matrix": {
-            "summary": report.summary,
-            "reference": report.summary.reference,
-            "columns": report.columns,
-            "rows": report.rows,
-            "reference_absent": report.reference_absent,
-            "geomean": report.geomean,
-            "counts": breakdown,
-        },
+        "matrix": matrix,
     });
-    serde_json::to_string_pretty(&value).expect("matrix report serializes")
+    serde_json::to_string_pretty(&value).unwrap_or_else(|e| {
+        format!("{{\"schema\":1,\"error\":\"matrix report not serializable: {e}\"}}")
+    })
 }
 
 #[cfg(test)]
@@ -178,6 +193,38 @@ mod tests {
         assert_eq!(v["counts"]["regressed"], 1);
         assert_eq!(v["failed"], true);
         assert_eq!(v["rows"][0]["verdict"], "regressed");
+    }
+
+    #[test]
+    fn render_json_with_matrix_should_not_panic_when_a_row_has_more_cells_than_columns() {
+        let variant = |label: &str, v: f64| Variant {
+            label: VariantLabel::parse(label).unwrap(),
+            set: MetricSet {
+                metrics: vec![crate::model::Metric::new(
+                    "",
+                    "x",
+                    "",
+                    "ns",
+                    v,
+                    crate::model::Better::Lower,
+                )],
+                ..Default::default()
+            },
+        };
+        let mopts = MatrixOptions {
+            compare_by: "impl".into(),
+            ..MatrixOptions::default()
+        };
+        let mut report = compare_matrix(
+            &[variant("a", 1.0), variant("b", 2.0)],
+            &Options::default(),
+            &mopts,
+        );
+        report.rows[0].cells.push(Cell::Missing);
+        let v: serde_json::Value =
+            serde_json::from_str(&render_json_with_matrix(&report, None)).unwrap();
+        assert_eq!(v["schema"], 1);
+        assert_eq!(v["matrix"]["counts"].as_array().unwrap().len(), 1);
     }
 
     const GO_BASE: &str = "BenchmarkA-8 100 5 ns/op\nBenchmarkB-8 100 6 ns/op\n";
