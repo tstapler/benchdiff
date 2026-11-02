@@ -132,6 +132,22 @@ impl PathBuilder {
         self
     }
 
+    /// Same circle as `circle` with relative arcs (about a third shorter); the large-chart path.
+    pub(crate) fn compact_circle(&mut self, cx: f64, cy: f64, r: f64) -> &mut Self {
+        match (
+            fmt_coord(cx - r),
+            fmt_coord(cy),
+            fmt_coord(r),
+            fmt_coord(2.0 * r),
+        ) {
+            (Ok(x), Ok(y), Ok(r), Ok(dia)) => self.d.push_str(&format!(
+                "M{x} {y}a{r} {r} 0 1 0 {dia} 0a{r} {r} 0 1 0-{dia} 0z"
+            )),
+            (a, b, c, d) => self.error = a.err().or(b.err()).or(c.err()).or(d.err()),
+        }
+        self
+    }
+
     /// Closed circle of radius `r` as two half-circle arcs.
     pub(crate) fn circle(&mut self, cx: f64, cy: f64, r: f64) -> &mut Self {
         self.move_to(cx - r, cy)
@@ -236,6 +252,20 @@ impl SvgWriter {
         );
         self.buf.push_str(&format!(
             "<line x1=\"{x1}\" y1=\"{y1}\" x2=\"{x2}\" y2=\"{y2}\" stroke=\"{}\" stroke-width=\"{sw}\"/>\n",
+            xml_escape(stroke)
+        ));
+    }
+
+    /// Vertical stroke as a `<path>` (about 30% shorter than `<line>`); the large-chart path.
+    pub(crate) fn vline_path(&mut self, x: f64, y1: f64, y2: f64, stroke: &str, stroke_width: f64) {
+        let (x, y1, dy, sw) = (
+            self.num(x),
+            self.num(y1),
+            self.num(y2 - y1),
+            self.num(stroke_width),
+        );
+        self.buf.push_str(&format!(
+            "<path d=\"M{x} {y1}v{dy}\" stroke=\"{}\" stroke-width=\"{sw}\"/>\n",
             xml_escape(stroke)
         ));
     }

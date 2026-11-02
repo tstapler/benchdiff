@@ -71,7 +71,11 @@ fn nway_should_complete_and_report_caps_when_ten_variants_hundreds_of_rows() {
 }
 
 fn ten_variants_30_rows_svgs() -> benchdiff_core::RenderedSvgs {
-    let set = parse(Format::Go, &text(10, 30)).unwrap();
+    ten_variants_svgs(30, 30)
+}
+
+fn ten_variants_svgs(benchmarks: usize, chart_rows: usize) -> benchdiff_core::RenderedSvgs {
+    let set = parse(Format::Go, &text(10, benchmarks)).unwrap();
     let (d, _) = dimensions::apply(set, &[], false).unwrap();
     let projection = project_by_axis(&d, "impl", None).unwrap();
     let options = Options {
@@ -79,10 +83,11 @@ fn ten_variants_30_rows_svgs() -> benchdiff_core::RenderedSvgs {
         ..Options::default()
     };
     let report = compare_matrix(&projection.variants, &options, &MatrixOptions::default());
-    assert_eq!(report.rows.len(), 30);
+    assert_eq!(report.rows.len(), benchmarks);
     render_svgs(
         SvgInput::Matrix(&report),
         &SvgOptions {
+            rows: benchdiff_core::ChartRows::new(chart_rows).unwrap(),
             kinds: vec![
                 ChartKind::Delta,
                 ChartKind::Ranking,
@@ -93,17 +98,39 @@ fn ten_variants_30_rows_svgs() -> benchdiff_core::RenderedSvgs {
     )
 }
 
-/// Defect repro: 10 variants x 30 rows x 5 samples renders `distribution` at ~141 KB (> 100 KB
-/// target of NF-2 / plan task "10 variants x 30 rows -> < 100 KB"); the per-lane dot cap (500)
-/// does not bound a 10-lane x 30-row chart.
+/// NF-2: 10 variants x 30 rows x 5 samples stays under 100 KB. It was ~141 KB while only the
+/// per-lane dot cap (500) bounded the chart; the chart-wide dot budget now thins it.
 #[test]
-#[ignore = "distribution SVG is ~141223 bytes for 10 variants x 30 rows (NF-2 target < 102400)"]
 fn render_svgs_should_stay_under_100kb_when_ten_variants_30_rows() {
     let svgs = ten_variants_30_rows_svgs();
     assert!(!svgs.files.is_empty(), "skipped: {:?}", svgs.skipped);
     for f in &svgs.files {
         assert!(f.svg.len() < 102_400, "{}: {} bytes", f.name, f.svg.len());
     }
+}
+
+/// Documented ceiling: the distribution chart costs about 360 bytes per lane (measured 580 KB for
+/// 1,600 lanes) plus a fixed dot budget, so the largest chart (chart-rows max 200, 8 lanes per
+/// row) stays under 650 KB.
+const WORST_CASE_DISTRIBUTION_BYTES: usize = 650_000;
+
+#[test]
+fn render_svgs_should_stay_under_ceiling_when_ten_variants_at_max_chart_rows() {
+    let svgs = ten_variants_svgs(250, benchdiff_core::ChartRows::MAX);
+    let dist = svgs
+        .files
+        .iter()
+        .find(|f| f.name == "distribution")
+        .unwrap();
+    assert!(
+        dist.svg.len() < WORST_CASE_DISTRIBUTION_BYTES,
+        "{} bytes",
+        dist.svg.len()
+    );
+    assert!(
+        dist.svg.contains("Large chart:"),
+        "the footer says dots were thinned"
+    );
 }
 
 #[test]

@@ -34,6 +34,13 @@ const DESC_TOP: usize = 5;
 /// Most dots drawn in one lane; longer lanes draw every `stride`th sample (median and range
 /// still use all of them), which keeps the SVG bounded.
 const MAX_DOTS_PER_LANE: usize = 500;
+/// A chart that would draw more dots than this switches to large-chart mode: dots use the
+/// shorter relative-arc encoding and every lane is thinned to an equal share of
+/// `CHART_DOT_BUDGET` (at least one dot). Keeps 10 variants x 30 rows under 100 KB (NF-2);
+/// smaller charts are byte-for-byte unchanged.
+const LARGE_CHART_DOTS: usize = 1000;
+/// Dots a large chart draws in total, before the one-dot-per-lane floor.
+const CHART_DOT_BUDGET: usize = 500;
 
 struct Lane {
     name: String,
@@ -42,12 +49,18 @@ struct Lane {
     hollow: bool,
     /// Finite samples only, in input order (jitter follows this order).
     values: Vec<f64>,
+    /// Most dots this lane may draw; lowered chart-wide in large-chart mode.
+    max_dots: usize,
 }
 
 impl Lane {
-    /// Draw every `stride`th sample; 1 when the lane fits under the dot cap.
+    /// Draw every `stride`th sample; 1 when the lane fits under its dot cap.
     fn stride(&self) -> usize {
-        self.values.len().div_ceil(MAX_DOTS_PER_LANE).max(1)
+        self.values.len().div_ceil(self.max_dots).max(1)
+    }
+
+    fn dots_drawn(&self) -> usize {
+        self.values.len().div_ceil(self.stride())
     }
 }
 
@@ -102,12 +115,14 @@ pub fn distribution_chart_themed(
                         series: 0,
                         hollow: true,
                         values: finite(base),
+                        max_dots: MAX_DOTS_PER_LANE,
                     },
                     Lane {
                         name: "head".into(),
                         series: 1,
                         hollow: false,
                         values: finite(head),
+                        max_dots: MAX_DOTS_PER_LANE,
                     },
                 ],
             })
@@ -287,6 +302,7 @@ fn matrix_lanes(report: &MatrixReport, row: &MatrixRow, opts: &SvgOptions) -> Ve
             series: i,
             hollow: false,
             values,
+            max_dots: MAX_DOTS_PER_LANE,
         });
     }
     lanes
@@ -304,7 +320,7 @@ fn finite(values: &[f64]) -> Vec<f64> {
 }
 
 fn finish(
-    blocks: Vec<Block>,
+    mut blocks: Vec<Block>,
     selected: &Selected,
     constants: &ConstantRows,
     opts: &SvgOptions,
@@ -318,17 +334,21 @@ fn finish(
             SkipReason::NoSamples
         });
     }
+    let large = apply_dot_budget(&mut blocks);
     let blocks: Vec<&Block> = blocks.iter().collect();
     let more = selected.footer();
     let const_line = constants.line();
     let svg = render(
         &blocks,
-        more.as_deref(),
-        const_line.as_deref(),
-        constants.count,
+        &Notes {
+            more: more.as_deref(),
+            const_line: const_line.as_deref(),
+            constant: constants.count,
+        },
         opts.width.get() as f64,
         Palette::for_theme(theme),
         mode,
+        large,
     )
     .map_err(|_| SkipReason::NonFinite)?;
     let name = match (opts.theme, theme) {
@@ -342,6 +362,25 @@ fn finish(
         alt: alt_text(&blocks, mode, constants.count),
         skipped: selected.skip_reason(),
     })
+}
+
+/// Large-chart mode: when the chart would draw more than `CHART_DOT_BUDGET` dots, give every
+/// lane an equal share (at least one dot). Returns whether the mode is on.
+fn apply_dot_budget(blocks: &mut [Block]) -> bool {
+    let lanes = blocks.iter().map(|b| b.lanes.len()).sum::<usize>();
+    let drawn: usize = blocks
+        .iter()
+        .flat_map(|b| &b.lanes)
+        .map(Lane::dots_drawn)
+        .sum();
+    if drawn <= LARGE_CHART_DOTS {
+        return false;
+    }
+    let share = (CHART_DOT_BUDGET / lanes.max(1)).max(1);
+    for lane in blocks.iter_mut().flat_map(|b| &mut b.lanes) {
+        lane.max_dots = lane.max_dots.min(share);
+    }
+    true
 }
 
 fn bounds(values: &[f64]) -> (f64, f64) {
@@ -398,9 +437,11 @@ fn alt_text(blocks: &[&Block], mode: Mode, constant: usize) -> String {
     format!("{prefix}{}", cut(&blocks[0].name, room))
 }
 
-fn lane_summary(lane: &Lane, unit: &str) -> String {
+/// `note_thin` adds the "every Nth dot" suffix; large charts say it once in the footer instead.
+fn lane_summary(lane: &Lane, unit: &str, note_thin: bool) -> String {
     let (min, max) = bounds(&lane.values);
     let thinned = match lane.stride() {
+        _ if !note_thin => String::new(),
         1 => String::new(),
         stride => format!(", every {stride}th dot drawn"),
     };
@@ -419,7 +460,11 @@ fn desc_text(blocks: &[&Block], const_line: Option<&str>) -> String {
         .iter()
         .take(DESC_TOP)
         .map(|b| {
-            let lanes: Vec<String> = b.lanes.iter().map(|l| lane_summary(l, &b.unit)).collect();
+            let lanes: Vec<String> = b
+                .lanes
+                .iter()
+                .map(|l| lane_summary(l, &b.unit, true))
+                .collect();
             format!("{} ({})", cut(&b.name, NAME_MAX_CHARS), lanes.join("; "))
         })
         .collect();
@@ -439,15 +484,26 @@ fn dot(p: &mut PathBuilder, cx: f64, cy: f64) {
     p.circle(cx, cy, DOT_R);
 }
 
+/// Footer notes plus the constant-row count that alt text reports.
+struct Notes<'a> {
+    more: Option<&'a str>,
+    const_line: Option<&'a str>,
+    constant: usize,
+}
+
 fn render(
     blocks: &[&Block],
-    more: Option<&str>,
-    const_line: Option<&str>,
-    constant: usize,
+    notes: &Notes,
     width: f64,
     pal: Palette,
     mode: Mode,
+    large: bool,
 ) -> Result<String, NonFiniteError> {
+    let Notes {
+        more,
+        const_line,
+        constant,
+    } = *notes;
     let plot_l = GUTTER;
     let plot_r = width - PAD;
     let block_h = |b: &Block| TITLE_H + b.lanes.len() as f64 * LANE_H + AXIS_H + BLOCK_GAP;
@@ -458,6 +514,12 @@ fn render(
         .filter(|l| l.stride() > 1)
         .count();
     let thin_line = (thinned_lanes > 0).then(|| {
+        if large {
+            return format!(
+                "Large chart: {thinned_lanes} {} draw an evenly spaced subset of dots; median and range use every sample",
+                if thinned_lanes == 1 { "lane" } else { "lanes" }
+            );
+        }
         format!(
             "{thinned_lanes} {} with more than {MAX_DOTS_PER_LANE} samples draw an evenly spaced subset; median and range use every sample",
             if thinned_lanes == 1 { "lane" } else { "lanes" }
@@ -526,7 +588,7 @@ fn render(
             d.open_titled_group(&format!(
                 "{} {}",
                 cut(&block.label, NAME_MAX_CHARS),
-                lane_summary(lane, &block.unit)
+                lane_summary(lane, &block.unit, !large)
             ));
             let name = truncate_to_width(&lane.name, SMALL_PX, GUTTER - PAD - 8.0);
             d.text_styled(
@@ -539,12 +601,20 @@ fn render(
             );
             let mut dots = PathBuilder::new();
             for (i, v) in lane.values.iter().enumerate().step_by(lane.stride()) {
-                dot(&mut dots, x_of(*v), mid + jitter(i));
+                if large {
+                    dots.compact_circle(x_of(*v), mid + jitter(i), DOT_R);
+                } else {
+                    dot(&mut dots, x_of(*v), mid + jitter(i));
+                }
             }
             let fill = if lane.hollow { "none" } else { color };
             d.path_styled(&dots, fill, stroke, 1.0);
             let mx = x_of(crate::stats::median(&lane.values));
-            d.line_stroke(mx, mid - TICK_HALF, mx, mid + TICK_HALF, pal.ink, 2.0);
+            if large {
+                d.vline_path(mx, mid - TICK_HALF, mid + TICK_HALF, pal.ink, 2.0);
+            } else {
+                d.line_stroke(mx, mid - TICK_HALF, mx, mid + TICK_HALF, pal.ink, 2.0);
+            }
             d.close_group();
         }
 

@@ -72,24 +72,46 @@ fn unescape(s: &str) -> String {
         .replace("&amp;", "&")
 }
 
-/// Path data from the writer: `M x y`, `L x y`, `A rx ry rot large sweep x y`, `Z`, no separators
-/// beyond a space or the command letter.
+/// Path data from the writer: `M x y`, `L x y`, `A rx ry rot large sweep x y`, `Z`, plus the
+/// large-chart forms `a` (relative arc) and `v` (relative vertical line). Numbers are separated
+/// by a space, a command letter or a minus sign.
 fn path_points(d: &str) -> Result<Vec<(f64, f64)>, String> {
     let mut points = vec![];
     let mut cmd = ' ';
     let mut args: Vec<f64> = vec![];
+    let (mut cur, mut start) = ((0.0, 0.0), (0.0, 0.0));
     let mut flush = |cmd: char, args: &[f64]| -> Result<(), String> {
         match (cmd, args.len()) {
-            ('M' | 'L', 2) => points.push((args[0], args[1])),
-            ('A', 7) => points.push((args[5], args[6])),
-            ('Z', 0) | (' ', 0) => {}
+            ('M', 2) => {
+                cur = (args[0], args[1]);
+                start = cur;
+                points.push(cur);
+            }
+            ('L', 2) => {
+                cur = (args[0], args[1]);
+                points.push(cur);
+            }
+            ('A', 7) => {
+                cur = (args[5], args[6]);
+                points.push(cur);
+            }
+            ('a', 7) => {
+                cur = (cur.0 + args[5], cur.1 + args[6]);
+                points.push(cur);
+            }
+            ('v', 1) => {
+                cur = (cur.0, cur.1 + args[0]);
+                points.push(cur);
+            }
+            ('Z' | 'z', 0) => cur = start,
+            (' ', 0) => {}
             _ => return Err(format!("unexpected path segment {cmd}{args:?}")),
         }
         Ok(())
     };
     let mut token = String::new();
     for c in d.chars().chain(std::iter::once('\u{0}')) {
-        if c.is_ascii_alphabetic() || c == ' ' || c == '\u{0}' {
+        if c.is_ascii_alphabetic() || c == ' ' || c == '\u{0}' || (c == '-' && !token.is_empty()) {
             if !token.is_empty() {
                 let v: f64 = token
                     .parse()
@@ -104,6 +126,8 @@ fn path_points(d: &str) -> Result<Vec<(f64, f64)>, String> {
                 flush(cmd, &args)?;
                 args.clear();
                 cmd = c;
+            } else if c == '-' {
+                token.push(c);
             }
         } else {
             token.push(c);
