@@ -439,6 +439,338 @@ fn matrix_delta(row: &MatrixRow) -> f64 {
         .fold(0.0, f64::max)
 }
 
+const TEXT_BAR_CELLS: usize = 5;
+const TEXT_BAR_FULL_PCT: f64 = 50.0;
+const TEXT_ORDER_NOTE: &str =
+    "Rows are in chart order (largest change first); the table above follows the sort setting.";
+
+/// The `Chart data (text)` content of one chart: the rows plus the lines around them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextTable {
+    /// Headers after `#` and `Benchmark`, one per `TextRow::cells` entry.
+    pub columns: Vec<String>,
+    pub rows: Vec<TextRow>,
+    /// Rows the ranking chart leaves out because they have no usable reference value.
+    pub uncharted: usize,
+    /// `+ N more not shown (key: cap)` when the chart is capped.
+    pub notice: Option<String>,
+}
+
+/// The rows of the `Chart data (text)` table for `kind`: exactly the rows, order and `#` numbers
+/// the chart draws (same `select_rows_where` call and predicate). Empty when `kind` does not
+/// apply to `input` (delta and distribution need a pair report for the former; ranking a matrix).
+pub fn chart_text_table(input: &SvgInput, kind: ChartKind, opts: &SvgOptions) -> Vec<TextRow> {
+    text_table(input, kind, opts).map_or_else(Vec::new, |t| t.rows)
+}
+
+/// The table body as Markdown (order sentence, table, uncharted line, cap line), or `None` when
+/// the chart has no rows. The `<details>` wrapper and title belong to the caller.
+pub fn render_text_table(input: &SvgInput, kind: ChartKind, opts: &SvgOptions) -> Option<String> {
+    let t = text_table(input, kind, opts)?;
+    let bar = t.rows.iter().any(|r| r.bar.is_some());
+    let mut head = vec!["#".to_string(), "Benchmark".to_string()];
+    head.extend(t.columns.iter().map(|c| text_escape(c)));
+    if bar {
+        head.push("▰ bar".into());
+    }
+    let mut out = format!("{TEXT_ORDER_NOTE}\n\n| {} |\n", head.join(" | "));
+    out.push_str(&format!("|{}\n", "---|".repeat(head.len())));
+    for r in &t.rows {
+        let mut cells = vec![r.index.to_string(), text_escape(&r.label)];
+        cells.extend(r.cells.iter().cloned());
+        cells.extend(r.bar.iter().cloned());
+        out.push_str(&format!("| {} |\n", cells.join(" | ")));
+    }
+    if t.uncharted > 0 {
+        let (n, verb) = if t.uncharted == 1 {
+            ("1 row has", "is")
+        } else {
+            (&*format!("{} rows have", t.uncharted), "are")
+        };
+        out.push_str(&format!(
+            "\n{n} no reference value and {verb} not charted\n"
+        ));
+    }
+    if let Some(n) = t.notice {
+        out.push_str(&format!("\n{n}\n"));
+    }
+    Some(out)
+}
+
+fn text_table(input: &SvgInput, kind: ChartKind, opts: &SvgOptions) -> Option<TextTable> {
+    let table = match (input, kind) {
+        (SvgInput::Pair(r), ChartKind::Delta) => delta_table(r, opts),
+        (SvgInput::Pair(r), ChartKind::Distribution) => distribution_pair_table(r, opts),
+        (SvgInput::Matrix(r), ChartKind::Ranking) => ranking_table(r, opts)?,
+        (SvgInput::Matrix(r), ChartKind::Distribution) => distribution_matrix_table(r, opts),
+        _ => return None,
+    };
+    (!table.rows.is_empty()).then_some(table)
+}
+
+fn text_row(sel: &SelectedRow, cells: Vec<String>, bar: Option<String>) -> TextRow {
+    TextRow {
+        index: sel.index,
+        label: sel.row.label(),
+        cells,
+        bar,
+    }
+}
+
+fn delta_table(report: &Report, opts: &SvgOptions) -> TextTable {
+    let selected = select_rows(&SvgInput::Pair(report), opts);
+    let rows = selected
+        .rows
+        .iter()
+        .filter_map(|sel| {
+            let RowRef::Pair(r) = sel.row else {
+                return None;
+            };
+            let (icon, pct) = match (r.verdict, r.delta_pct) {
+                (Verdict::Regressed, Some(p)) => ("🔴", p),
+                (Verdict::Improved, Some(p)) => ("🟢", p),
+                (_, Some(p)) => ("⚪", p),
+                _ => return None,
+            };
+            let filled = if r.verdict == Verdict::Unchanged {
+                0
+            } else {
+                ((pct.abs() / TEXT_BAR_FULL_PCT) * TEXT_BAR_CELLS as f64)
+                    .ceil()
+                    .clamp(1.0, TEXT_BAR_CELLS as f64) as usize
+            };
+            let bar = format!(
+                "{}{}",
+                "▰".repeat(filled),
+                "▱".repeat(TEXT_BAR_CELLS - filled)
+            );
+            let cell = format!("{icon} {}", crate::markdown::fmt_pct(pct));
+            Some(text_row(sel, vec![cell], Some(bar)))
+        })
+        .collect();
+    TextTable {
+        columns: vec!["Change".into()],
+        rows,
+        uncharted: 0,
+        notice: selected.notice(),
+    }
+}
+
+fn ranking_table(report: &MatrixReport, opts: &SvgOptions) -> Option<TextTable> {
+    let reference = report.summary.reference.as_ref()?.label.as_str();
+    let ref_col = report
+        .columns
+        .iter()
+        .position(|c| c.as_str() == reference)?;
+    let others: Vec<usize> = (0..report.columns.len())
+        .filter(|&c| c != ref_col)
+        .collect();
+    let series = &others[..others.len().min(opts.max_series.max(1))];
+    // The same eligibility as the ranking chart: a finite, positive reference value.
+    let has_ref = |row: &RowRef| {
+        matches!(row, RowRef::Matrix(r)
+            if matches!(r.cells.get(ref_col), Some(Cell::Present(p)) if p.value.is_finite() && p.value > 0.0))
+    };
+    let input = SvgInput::Matrix(report);
+    let selected = select_rows_where(&input, opts, &has_ref);
+    let uncharted = select_rows(&input, opts).population - selected.population;
+    let cols: Vec<usize> = std::iter::once(ref_col)
+        .chain(series.iter().copied())
+        .collect();
+    let rows = selected
+        .rows
+        .iter()
+        .filter_map(|sel| {
+            let RowRef::Matrix(row) = sel.row else {
+                return None;
+            };
+            let Some(Cell::Present(rp)) = row.cells.get(ref_col) else {
+                return None;
+            };
+            let cells = cols
+                .iter()
+                .map(|&c| ratio_cell(row.cells.get(c), rp.value))
+                .collect();
+            Some(text_row(sel, cells, None))
+        })
+        .collect();
+    let mut columns = vec![format!("{reference} (ref)")];
+    columns.extend(
+        series
+            .iter()
+            .map(|&c| report.columns[c].as_str().to_string()),
+    );
+    Some(TextTable {
+        columns,
+        rows,
+        uncharted,
+        notice: selected.notice(),
+    })
+}
+
+/// `0.74x 🟢`, `1.05x ~`, `1.00x` for the reference, `—` for Missing, `⚠️ invalid`.
+fn ratio_cell(cell: Option<&Cell>, ref_value: f64) -> String {
+    let Some(Cell::Present(p)) = cell else {
+        return "—".into();
+    };
+    let ratio = p.value / ref_value;
+    let text = if ratio < 10.0 {
+        format!("{ratio:.2}x")
+    } else if ratio < 100.0 {
+        format!("{ratio:.1}x")
+    } else {
+        format!("{ratio:.0}x")
+    };
+    match &p.vs_reference {
+        Comparison::Reference => "1.00x".into(),
+        Comparison::Invalid(_) => "⚠️ invalid".into(),
+        Comparison::Compared { verdict, .. } if ratio.is_finite() => match verdict {
+            Verdict::Regressed => format!("{text} 🔴"),
+            Verdict::Improved => format!("{text} 🟢"),
+            _ => format!("{text} ~"),
+        },
+        _ => "not comparable".into(),
+    }
+}
+
+fn finite_samples(values: &[f64]) -> Vec<f64> {
+    values.iter().copied().filter(|v| v.is_finite()).collect()
+}
+
+/// `median unit (min-max, n=N)` over non-empty finite samples.
+fn distribution_cell(values: &[f64], unit: &str) -> String {
+    let mut v = values.to_vec();
+    v.sort_by(f64::total_cmp);
+    let n = v.len();
+    let median = if n % 2 == 1 {
+        v[n / 2]
+    } else {
+        (v[n / 2 - 1] + v[n / 2]) / 2.0
+    };
+    let fmt = |x: f64| crate::markdown::fmt_num(x);
+    let unit = if unit.is_empty() {
+        String::new()
+    } else {
+        format!(" {}", text_escape(unit))
+    };
+    format!(
+        "{}{unit} ({}-{}, n={n})",
+        fmt(median),
+        fmt(v[0]),
+        fmt(v[n - 1])
+    )
+}
+
+fn distribution_pair_table(report: &Report, opts: &SvgOptions) -> TextTable {
+    let both_sided = |row: &RowRef| match row {
+        RowRef::Pair(r) => {
+            r.samples.base.iter().any(|v| v.is_finite())
+                && r.samples.head.iter().any(|v| v.is_finite())
+        }
+        RowRef::Matrix(_) => false,
+    };
+    let selected = select_rows_where(&SvgInput::Pair(report), opts, &both_sided);
+    let rows = selected
+        .rows
+        .iter()
+        .filter_map(|sel| {
+            let RowRef::Pair(r) = sel.row else {
+                return None;
+            };
+            let cells = vec![
+                distribution_cell(&finite_samples(&r.samples.base), &r.unit),
+                distribution_cell(&finite_samples(&r.samples.head), &r.unit),
+            ];
+            Some(text_row(sel, cells, None))
+        })
+        .collect();
+    TextTable {
+        columns: vec!["base".into(), "head".into()],
+        rows,
+        uncharted: 0,
+        notice: selected.notice(),
+    }
+}
+
+fn distribution_matrix_table(report: &MatrixReport, opts: &SvgOptions) -> TextTable {
+    // One lane per variant with samples, at most `max-series` per row, as the chart draws them.
+    let lanes_of = |row: &MatrixRow| -> Vec<(usize, Vec<f64>)> {
+        row.cells
+            .iter()
+            .enumerate()
+            .filter_map(|(c, cell)| match cell {
+                Cell::Present(p) => Some((c, finite_samples(&p.samples.head))),
+                Cell::Missing => None,
+            })
+            .filter(|(_, v)| !v.is_empty())
+            .take(opts.max_series)
+            .collect()
+    };
+    let has_lanes = |row: &RowRef| matches!(row, RowRef::Matrix(r) if !lanes_of(r).is_empty());
+    let selected = select_rows_where(&SvgInput::Matrix(report), opts, &has_lanes);
+    let lanes: Vec<_> = selected
+        .rows
+        .iter()
+        .map(|sel| match sel.row {
+            RowRef::Matrix(r) => lanes_of(r),
+            RowRef::Pair(_) => vec![],
+        })
+        .collect();
+    let mut cols: Vec<usize> = lanes.iter().flatten().map(|(c, _)| *c).collect();
+    cols.sort_unstable();
+    cols.dedup();
+    let rows = selected
+        .rows
+        .iter()
+        .zip(&lanes)
+        .filter_map(|(sel, lane)| {
+            let RowRef::Matrix(r) = sel.row else {
+                return None;
+            };
+            let cells = cols
+                .iter()
+                .map(|c| match lane.iter().find(|(lc, _)| lc == c) {
+                    Some((_, v)) => distribution_cell(v, &r.unit),
+                    None => "—".into(),
+                })
+                .collect();
+            Some(text_row(sel, cells, None))
+        })
+        .collect();
+    TextTable {
+        columns: cols
+            .iter()
+            .map(|&c| report.columns[c].as_str().to_string())
+            .collect(),
+        rows,
+        uncharted: 0,
+        notice: selected.notice(),
+    }
+}
+
+/// Untrusted text as one Markdown table-cell line; escapes what could become markup.
+fn text_escape(text: &str) -> String {
+    let mut out = String::new();
+    for ch in text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+    {
+        match ch {
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '&' => out.push_str("&amp;"),
+            '\\' | '`' | '*' | '_' | '[' | ']' | '|' | '@' | '#' | '!' | '~' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 impl fmt::Display for ChartKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.name())
@@ -663,5 +995,226 @@ mod tests {
         let r = preport(changed(500), None);
         let sel = select_rows(&SvgInput::Pair(&r), &SvgOptions::default());
         assert_eq!((sel.rows.len(), sel.more()), (30, 470));
+    }
+
+    use crate::compare::{Method as M2, Samples};
+    use crate::matrix::{
+        CellFormat, Correction, MatrixSort, MatrixSummary, PresentCell, ReferenceInfo, VariantLabel,
+    };
+
+    fn mcell(value: f64, cmp: Comparison, samples: Vec<f64>) -> Cell {
+        Cell::Present(PresentCell {
+            value,
+            samples: Samples {
+                base: vec![],
+                head: samples,
+            },
+            vs_reference: cmp,
+        })
+    }
+
+    fn cmp(verdict: Verdict, delta: f64) -> Comparison {
+        Comparison::Compared {
+            verdict,
+            delta: Some(delta),
+            method: Some(M2::Threshold),
+            p_value: None,
+            p_adjusted: None,
+        }
+    }
+
+    fn mrow(name: &str, cells: Vec<Cell>) -> MatrixRow {
+        MatrixRow {
+            group: String::new(),
+            name: name.into(),
+            measure: String::new(),
+            unit: "ns".into(),
+            better: Better::Lower,
+            dims: Default::default(),
+            cells,
+            ranking: vec![],
+        }
+    }
+
+    fn mreport(rows: Vec<MatrixRow>) -> MatrixReport {
+        MatrixReport {
+            summary: MatrixSummary {
+                title: String::new(),
+                tag: String::new(),
+                threshold_pct: 5.0,
+                min_abs: 0.0,
+                alpha: 0.05,
+                use_stats: true,
+                only_changed: false,
+                max_rows: None,
+                fail_on_regression_pct: None,
+                correction: Correction::Holm,
+                columns_cap: 8,
+                cell_format: CellFormat::Full,
+                sort: MatrixSort::Input,
+                reference: Some(ReferenceInfo {
+                    label: "quick".into(),
+                    explicit: true,
+                }),
+                skipped: vec![],
+                threshold_overrides: Default::default(),
+                config_sources: vec![],
+            },
+            columns: ["quick", "heap", "merge"]
+                .iter()
+                .map(|c| VariantLabel::parse(c).unwrap())
+                .collect(),
+            rows,
+            reference_absent: vec![],
+            geomean: vec![],
+            notices: vec![],
+        }
+    }
+
+    fn ranking_fixture() -> MatrixReport {
+        let r = |v: f64| mcell(v, Comparison::Reference, vec![]);
+        mreport(vec![
+            mrow(
+                "Sort",
+                vec![
+                    r(100.0),
+                    mcell(130.0, cmp(Verdict::Regressed, 30.0), vec![]),
+                    mcell(74.0, cmp(Verdict::Improved, -26.0), vec![]),
+                ],
+            ),
+            mrow(
+                "Parse",
+                vec![
+                    r(100.0),
+                    Cell::Missing,
+                    mcell(
+                        f64::NAN,
+                        Comparison::Invalid(crate::matrix::Reason("bad".into())),
+                        vec![],
+                    ),
+                ],
+            ),
+            mrow(
+                "Hash",
+                vec![
+                    r(100.0),
+                    mcell(105.0, cmp(Verdict::Unchanged, 5.0), vec![]),
+                    mcell(100.0, cmp(Verdict::Unchanged, 0.0), vec![]),
+                ],
+            ),
+            // The reference lacks this benchmark.
+            mrow(
+                "Orphan",
+                vec![
+                    Cell::Missing,
+                    mcell(5.0, Comparison::NoReference, vec![]),
+                    Cell::Missing,
+                ],
+            ),
+        ])
+    }
+
+    #[test]
+    fn chart_text_table_should_emit_ratio_columns_dash_for_missing_and_cap_line_when_ranking_and_median_range_when_distribution(
+    ) {
+        let rep = ranking_fixture();
+        let input = SvgInput::Matrix(&rep);
+        let md = render_text_table(&input, ChartKind::Ranking, &opts_rows(30)).unwrap();
+        assert!(md.starts_with(TEXT_ORDER_NOTE), "{md}");
+        assert!(
+            md.contains("| # | Benchmark | quick (ref) | heap | merge |"),
+            "{md}"
+        );
+        assert!(
+            md.contains("| 1 | Sort | 1.00x | 1.30x 🔴 | 0.74x 🟢 |"),
+            "{md}"
+        );
+        assert!(
+            md.contains("| 3 | Parse | 1.00x | — | ⚠️ invalid |"),
+            "{md}"
+        );
+        assert!(
+            md.contains("| 2 | Hash | 1.00x | 1.05x ~ | 1.00x ~ |"),
+            "{md}"
+        );
+        assert!(
+            md.contains("1 row has no reference value and is not charted"),
+            "{md}"
+        );
+        assert!(!md.contains("Orphan"), "{md}");
+
+        // Capped: the cap line names the key and equals the chart's count.
+        let capped = render_text_table(&input, ChartKind::Ranking, &opts_rows(1)).unwrap();
+        assert!(
+            capped.contains("+ 2 more not shown (chart-rows: 1)"),
+            "{capped}"
+        );
+
+        // Distribution: median (min-max, n) per variant, rows with samples only.
+        let rep = mreport(vec![
+            mrow(
+                "Sort",
+                vec![
+                    mcell(1.0, Comparison::Reference, vec![1.0, 2.0, 3.0]),
+                    mcell(2.0, cmp(Verdict::Regressed, 100.0), vec![]),
+                    mcell(2.0, cmp(Verdict::Regressed, 100.0), vec![4.0, 6.0]),
+                ],
+            ),
+            mrow("Bare", vec![Cell::Missing, Cell::Missing, Cell::Missing]),
+        ]);
+        let md = render_text_table(
+            &SvgInput::Matrix(&rep),
+            ChartKind::Distribution,
+            &opts_rows(30),
+        )
+        .unwrap();
+        assert!(md.contains("| # | Benchmark | quick | merge |"), "{md}");
+        assert!(
+            md.contains("| 1 | Sort | 2 ns (1-3, n=3) | 5 ns (4-6, n=2) |"),
+            "{md}"
+        );
+        assert!(!md.contains("Bare"), "{md}");
+    }
+
+    #[test]
+    fn chart_text_table_should_match_chart_rows_index_and_bar_when_delta() {
+        let r = preport(changed(40), None);
+        let input = SvgInput::Pair(&r);
+        let rows = chart_text_table(&input, ChartKind::Delta, &opts_rows(30));
+        let sel = select_rows(&input, &opts_rows(30));
+        assert_eq!(rows.len(), sel.rows.len());
+        for (t, s) in rows.iter().zip(&sel.rows) {
+            assert_eq!(
+                (t.index, format!("{}. {}", t.index, t.label)),
+                (s.index, s.label.clone())
+            );
+        }
+        assert_eq!(rows[0].cells, ["🔴 +40.0%"]);
+        assert_eq!(rows[0].bar.as_deref(), Some("▰▰▰▰▱"));
+        let md = render_text_table(&input, ChartKind::Delta, &opts_rows(30)).unwrap();
+        assert!(md.contains("| # | Benchmark | Change | ▰ bar |"), "{md}");
+        assert!(
+            md.ends_with("+ 10 more not shown (chart-rows: 30)\n"),
+            "{md}"
+        );
+    }
+
+    #[test]
+    fn chart_text_table_should_be_empty_when_kind_does_not_fit_input_or_no_rows() {
+        let r = preport(changed(3), None);
+        assert!(
+            chart_text_table(&SvgInput::Pair(&r), ChartKind::Ranking, &opts_rows(30)).is_empty()
+        );
+        assert!(
+            render_text_table(&SvgInput::Pair(&r), ChartKind::Distribution, &opts_rows(30))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn render_text_table_should_escape_hostile_names() {
+        let r = preport(vec![prow("a|b<img>`x`", 9.0, Verdict::Regressed)], None);
+        let md = render_text_table(&SvgInput::Pair(&r), ChartKind::Delta, &opts_rows(30)).unwrap();
+        assert!(md.contains(r"| 1 | a\|b&lt;img&gt;\`x\` |"), "{md}");
     }
 }
