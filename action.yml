@@ -7,41 +7,89 @@ branding:
 
 inputs:
   head:
-    description: Benchmark result file(s) for this commit; newline- or comma-separated paths or globs.
-    required: true
+    description: Benchmark result file(s) for this commit; newline- or comma-separated paths or globs. Required unless `variants` is set; cannot be combined with `variants`.
+    required: false
   base:
     description: Benchmark result file(s) to compare against. Omit for a head-only report.
     required: false
+  variants:
+    description: "N-way from labelled files: one `label=path-or-glob` per line (newline-separated, commas are not separators; the first `=` splits; label: A-Za-z0-9._- , max 40). One label is exactly one file, so a glob matching several files is an error. Cannot be combined with head, base or base-format. The first line is the default reference. Runs with variants leave head-json-path empty."
+    required: false
   format:
-    description: "Input format: auto, benchdiff, go, criterion, cargo-bench, jmh, hyperfine, googlebench, gab-smaller, gab-bigger, bmf."
-    default: auto
+    description: "Input format: auto, benchdiff, go, criterion, cargo-bench, jmh, hyperfine, googlebench, gab-smaller, gab-bigger, bmf. Default auto."
+    required: false
   base-format:
     description: "Input format of the base files (same values as format). Defaults to the value of format; set `benchdiff` when the base is a previous release's canonical JSON."
     required: false
   threshold:
-    description: Changes smaller than this many percent are treated as noise.
-    default: '5'
+    description: Changes smaller than this many percent are treated as noise. Default 5.
+    required: false
   min-abs:
-    description: Changes smaller than this many units (in the metric's own unit) are treated as noise.
-    default: '0'
+    description: Changes smaller than this many units (in the metric's own unit) are treated as noise. Default 0.
+    required: false
   only-changed:
-    description: Hide unchanged rows.
-    default: 'false'
+    description: "Hide unchanged rows. 'true' hides them; an explicit 'false' overrides a true set in the config file. Leave unset to let the config file (or the default, false) decide."
+    required: false
   sort:
-    description: "Row order: delta (worst regression first), name, or input."
-    default: delta
+    description: "Row order: delta (worst regression first), name, input, or rank (N-way runs only). Default delta."
+    required: false
   max-rows:
     description: Show at most this many changed rows (the JSON report keeps all).
     required: false
   title:
-    description: Report heading.
-    default: Benchmark comparison
+    description: Report heading. Default Benchmark comparison.
+    required: false
   tag:
-    description: Key of the sticky comment; use distinct tags for several reports on one PR.
-    default: default
+    description: Key of the sticky comment; use distinct tags for several reports on one PR. Default default.
+    required: false
   fail-on-regression:
-    description: "'true' fails on any regression, a number fails on a regression of at least that many percent, 'false' never fails."
-    default: 'false'
+    description: "'true' fails on any regression, a number fails on a regression of at least that many percent, 'false' never fails and explicitly overrides a limit set in the config file. Leave unset to let the config file (or the default, never fail) decide."
+    required: false
+  compare-by:
+    description: "N-way: pivot this dimension of the head results into columns (a dimension name or group, e.g. impl). Leave unset for a two-way comparison."
+    required: false
+  group-by:
+    description: "N-way: comma-separated dimensions that identify a row. Default: all dimensions except the compare-by axis."
+    required: false
+  dimensions:
+    description: "Extra dimension extraction rules, one `dim=regex` per line, each with a (?P<dim>...) group; added to the zero-config rules that read key=value path segments and [k=v] groups. Regex backslashes are written as-is here (YAML block scalars need no doubling)."
+    required: false
+  dimensions-strict:
+    description: "'true' fails (exit 2) instead of printing a notice on data-dependent dimension problems. There is no negative flag: a true set in the config file cannot be switched off by an input."
+    required: false
+  reference:
+    description: "N-way: the variant label or axis value every other column is compared against; required for fail-on-regression in an N-way run. Default: the first variant."
+    required: false
+  correction:
+    description: "Multiple-comparison correction across one row's cells: holm or none. Default holm."
+    required: false
+  cell-format:
+    description: "N-way matrix cell shape: full (`1210 ns (0.74x)`) or ratio (`0.74x`). Default full."
+    required: false
+  charts:
+    description: "SVG charts to render: none, or a comma-separated list of delta, ranking, distribution. A non-empty value embeds the charts in the comment and job summary and hosts them as images unless you opt out with svg-embed: false or publish-images: false. Hosting needs `permissions: contents: write` (and `pull-requests: write` for the sticky comment); it creates or updates the branch benchdiff-assets with at most one commit per run that has new bytes; commits are kept and never pruned (deleting the branch breaks images in old comments); hosted images are readable by anyone who has the URL, which for a public repository is the same audience as the comment; private repositories are never hosted, so nothing is written there. On a read-only token the first run shows a permission warning and falls back to a text block: add the permissions and rerun."
+    required: false
+  chart-rows:
+    description: "Rows per chart, 1 to 200. Default 30; the effective cap is min(chart-rows, max-rows) when max-rows is set."
+    required: false
+  chart-width:
+    description: "Chart width in pixels, 480 to 1600. Default 760."
+    required: false
+  chart-theme:
+    description: "Chart colors: light, dark or both (both embeds a light/dark pair via <picture>). Default light."
+    required: false
+  svg-dir:
+    description: "Workspace directory to copy the generated SVG files to (the paths are the svg-paths output). Leave unset to keep them in the runner temp directory."
+    required: false
+  svg-embed:
+    description: "Embed charts in the comment and job summary: true, false or auto. Unset means auto, which embeds iff charts is set (also when charts comes from the config file). 'false' writes the SVG files only. Embedding hosts the images: needs `permissions: contents: write`; creates or updates the branch benchdiff-assets, at most one commit per run that has new bytes; commits are kept, never pruned; hosted images are readable by anyone with the URL; private repositories are never hosted."
+    required: false
+  publish-images:
+    description: "Host embedded charts as images on the branch benchdiff-assets: true or false. Default true when charts are embedded; 'false' keeps the chart as a text block and writes the SVG files (see svg-dir). Hosting needs `permissions: contents: write`; at most one commit per run that has new bytes; commits are kept, never pruned (deleting the branch breaks images in old comments); hosted images are readable by anyone with the URL; private repositories are never hosted, so nothing is written there."
+    required: false
+  config:
+    description: "Path to a benchdiff.config.json settings file. Only read when set (never auto-discovered); inputs you set override the file."
+    required: false
   comment:
     description: Post or update the sticky PR comment.
     default: 'true'
@@ -50,18 +98,26 @@ inputs:
     default: ${{ github.token }}
 
 outputs:
+  svg-dir:
+    description: Directory holding the generated SVG files (empty when no charts were produced).
+  svg-paths:
+    description: Newline-separated paths of the generated SVG files.
   regressed:
-    description: Number of regressed benchmarks.
+    description: "Number of regressed benchmarks. N-way runs: cells vs the reference."
   improved:
-    description: Number of improved benchmarks.
+    description: "Number of improved benchmarks. N-way runs: cells vs the reference."
   unchanged:
-    description: Number of unchanged benchmarks.
+    description: "Number of unchanged benchmarks. N-way runs: cells vs the reference."
   new:
-    description: Number of benchmarks only in head.
+    description: "Number of benchmarks only in head. N-way runs: cells vs the reference."
   removed:
-    description: Number of benchmarks only in base.
+    description: "Number of benchmarks only in base. N-way runs: cells vs the reference."
+  incomparable:
+    description: "Number of benchmarks that cannot be compared (as in the report's counts). N-way runs: cells vs the reference, after Holm."
+  invalid:
+    description: "Number of benchmarks with invalid data (as in the report's counts). N-way runs: cells vs the reference, and a variant series that was skipped or unusable."
   failed:
-    description: "'true' when fail-on-regression tripped."
+    description: "'true' when fail-on-regression tripped (the regression gate result; N-way runs: cells vs the reference). False when fail-on-regression is unset."
   report-path:
     description: Markdown report file.
   json-path:

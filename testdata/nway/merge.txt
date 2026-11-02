@@ -1,0 +1,66 @@
+goos: linux
+goarch: amd64
+pkg: sortbench
+cpu: Fixture CPU @ 3.0GHz
+BenchmarkSort/n=1000-8 	  120822	      8276.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort/n=1000-8 	  122020	      8195.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort/n=1000-8 	  125252	      7983.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort/n=1000-8 	  124452	      8035.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort/n=1000-8 	  125973	      7938.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort/n=1000-8 	  121474	      8232.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort/n=1000-8 	  123215	      8115.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort/n=1000-8 	  121423	      8235.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort/n=1000-8 	  124731	      8017.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort/n=1000-8 	  125543	      7965.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort/n=100000-8 	    1090	    916821.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort/n=100000-8 	    1079	    926186.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort/n=100000-8 	    1088	    919042.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort/n=100000-8 	    1091	    916528.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort/n=100000-8 	    1090	    917190.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort/n=100000-8 	    1095	    912953.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort/n=100000-8 	    1129	    885243.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort/n=100000-8 	    1109	    900952.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort/n=100000-8 	    1120	    892200.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSort/n=100000-8 	    1143	    874564.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkJoin-8 	   39889	     25069.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkJoin-8 	   39279	     25458.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkJoin-8 	   39327	     25427.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkJoin-8 	   38317	     26098.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkJoin-8 	   37726	     26506.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkJoin-8 	   38882	     25718.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkJoin-8 	   37769	     26476.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkJoin-8 	   37657	     26555.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkJoin-8 	   37729	     26504.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkJoin-8 	   39077	     25590.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParse-8 	  188344	      5309.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParse-8 	  188270	      5311.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParse-8 	  188617	      5301.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParse-8 	  188529	      5304.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParse-8 	  183816	      5440.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParse-8 	  180841	      5529.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParse-8 	  181478	      5510.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParse-8 	  185413	      5393.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParse-8 	  183500	      5449.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParse-8 	  181914	      5497.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncode-8 	 3175061	       315.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncode-8 	 3130206	       319.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncode-8 	 3244799	       308.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncode-8 	 3127725	       319.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncode-8 	 3123491	       320.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncode-8 	 3277209	       305.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncode-8 	 3071562	       325.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncode-8 	 3369683	       296.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncode-8 	 3377640	       296.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncode-8 	 3121438	       320.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkHash-8 	 1318309	       758.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkHash-8 	 1265530	       790.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkHash-8 	 1254179	       797.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkHash-8 	 1278260	       782.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkHash-8 	 1302008	       768.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkHash-8 	 1286566	       777.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkHash-8 	 1319538	       757.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkHash-8 	 1329058	       752.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkHash-8 	 1254868	       796.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkHash-8 	 1278838	       782.0 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	sortbench	12.345s

@@ -4,7 +4,7 @@ use crate::model::{Better, Metric, MetricSet};
 use crate::stats::{mann_whitney_p, MIN_SAMPLES};
 use crate::units;
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Sort {
@@ -48,6 +48,42 @@ pub struct Options {
     pub tag: String,
     /// `Report::exceeds_failure_threshold` trips on a regression of at least this many percent.
     pub fail_on_regression_pct: Option<f64>,
+    /// Per-metric noise thresholds (`group/name` or `group` -> percent); see `threshold_for`.
+    pub threshold_overrides: BTreeMap<String, f64>,
+    /// Keep per-row samples for charts (`Row::samples`); internal, set by chart requests only.
+    pub keep_samples: bool,
+}
+
+impl Options {
+    /// Noise threshold for `m`: exact `group/name` (just `name` when the group is empty),
+    /// then `group`, then `threshold_pct`. The measure is not part of the key.
+    pub fn threshold_for(&self, m: &Metric) -> f64 {
+        self.threshold_for_group(&m.group, m)
+    }
+
+    /// `threshold_for` with `group` standing in for `m.group` (compare-by=group keys on the
+    /// reference's group without cloning the metric).
+    pub(crate) fn threshold_for_group(&self, group: &str, m: &Metric) -> f64 {
+        if self.threshold_overrides.is_empty() {
+            return self.threshold_pct;
+        }
+        let exact = if group.is_empty() {
+            m.name.clone()
+        } else {
+            format!("{group}/{}", m.name)
+        };
+        self.threshold_overrides
+            .get(&exact)
+            .or_else(|| {
+                if group.is_empty() {
+                    None
+                } else {
+                    self.threshold_overrides.get(group)
+                }
+            })
+            .copied()
+            .unwrap_or(self.threshold_pct)
+    }
 }
 
 impl Default for Options {
@@ -63,6 +99,8 @@ impl Default for Options {
             title: "Benchmark comparison".into(),
             tag: "default".into(),
             fail_on_regression_pct: None,
+            threshold_overrides: BTreeMap::new(),
+            keep_samples: false,
         }
     }
 }
@@ -94,6 +132,14 @@ pub enum Method {
     Threshold,
 }
 
+/// Raw samples of a compared pair, for charts. Never serialized.
+#[derive(Debug, Clone, Default)]
+pub struct Samples {
+    /// Already multiplied by the unit scale, i.e. in the head's unit.
+    pub base: Vec<f64>,
+    pub head: Vec<f64>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Row {
     pub group: String,
@@ -113,6 +159,8 @@ pub struct Row {
     pub n_head: usize,
     /// Head interval, shown in head-only reports.
     pub head_range: Option<(f64, f64)>,
+    #[serde(skip)]
+    pub samples: Samples,
 }
 
 impl Row {
@@ -144,6 +192,20 @@ pub struct Summary {
     pub skipped_head_total: usize,
     pub skipped_base: Vec<String>,
     pub skipped_base_total: usize,
+    /// Per-metric threshold overrides in force (`group/name` or `group` -> percent).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub threshold_overrides: BTreeMap<String, f64>,
+    /// Settings that came from a config file or flag rather than the defaults.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub config_sources: Vec<ConfigSource>,
+}
+
+/// One non-default setting and where it came from (`config` or `flag`).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+pub struct ConfigSource {
+    pub key: String,
+    pub value: String,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -184,7 +246,7 @@ pub fn compare(base: Option<&MetricSet>, head: &MetricSet, opts: &Options) -> Re
         .metrics
         .iter()
         .map(|h| match base_by_key.get(&h.key()) {
-            Some(b) => changed_row(b, h, opts),
+            Some(b) => compare_pair(b, h, opts),
             None => one_sided_row(h, Verdict::New),
         })
         .collect();
@@ -224,12 +286,14 @@ pub fn compare(base: Option<&MetricSet>, head: &MetricSet, opts: &Options) -> Re
             only_changed: opts.only_changed,
             max_rows: opts.max_rows,
             fail_on_regression_pct: opts.fail_on_regression_pct,
+            threshold_overrides: opts.threshold_overrides.clone(),
             base_env: env_of(base),
             head_env: env_of(Some(head)),
             skipped_head: head.skipped.labels(),
             skipped_head_total: head.skipped.total,
             skipped_base: base.map(|b| b.skipped.labels()).unwrap_or_default(),
             skipped_base_total: base.map_or(0, |b| b.skipped.total),
+            ..Default::default()
         },
         rows,
     }
@@ -253,6 +317,7 @@ fn one_sided_row(m: &Metric, verdict: Verdict) -> Row {
         n_base: if is_new { 0 } else { m.samples.len() },
         n_head: if is_new { m.samples.len() } else { 0 },
         head_range: m.lower.zip(m.upper).filter(|_| is_new),
+        samples: Samples::default(),
     }
 }
 
@@ -294,7 +359,17 @@ fn evidence(base: &Metric, head: &Metric, base_scale: f64, opts: &Options) -> Ev
     threshold_only
 }
 
-fn changed_row(base: &Metric, head: &Metric, opts: &Options) -> Row {
+pub(crate) fn compare_pair(base: &Metric, head: &Metric, opts: &Options) -> Row {
+    compare_pair_keyed(base, head, opts, &head.group)
+}
+
+/// `compare_pair` looking up the threshold under `threshold_group` instead of `head.group`.
+pub(crate) fn compare_pair_keyed(
+    base: &Metric,
+    head: &Metric,
+    opts: &Options,
+    threshold_group: &str,
+) -> Row {
     let mut row = Row {
         group: head.group.clone(),
         name: head.name.clone(),
@@ -310,6 +385,7 @@ fn changed_row(base: &Metric, head: &Metric, opts: &Options) -> Row {
         n_base: base.samples.len(),
         n_head: head.samples.len(),
         head_range: head.lower.zip(head.upper),
+        samples: Samples::default(),
     };
     // Express the base in the head's unit so the delta and the test are on one scale.
     let Some(scale) = units::factor(&base.unit, &head.unit) else {
@@ -323,10 +399,18 @@ fn changed_row(base: &Metric, head: &Metric, opts: &Options) -> Row {
     let ev = evidence(base, head, scale, opts);
     row.method = Some(ev.method);
     row.p_value = ev.p_value;
+    if opts.keep_samples {
+        row.samples = Samples {
+            base: base.samples.iter().map(|v| v * scale).collect(),
+            head: head.samples.clone(),
+        };
+    }
 
     let passes_floor = diff != 0.0
         && diff.abs() >= opts.min_abs
-        && row.delta_pct.is_none_or(|p| p.abs() >= opts.threshold_pct);
+        && row
+            .delta_pct
+            .is_none_or(|p| p.abs() >= opts.threshold_for_group(threshold_group, head));
     row.verdict = if !(passes_floor && ev.significant) {
         Verdict::Unchanged
     } else if (diff < 0.0) == (head.better == Better::Lower) {
@@ -396,6 +480,26 @@ mod tests {
             skipped: Default::default(),
             metrics: vec![m],
         }
+    }
+
+    #[test]
+    fn compare_pair_should_equal_the_row_compare_produces_for_the_same_pair() {
+        let opts = Options::default();
+        let (b, h) = (
+            metric("m", 100.0, Better::Lower),
+            metric("m", 150.0, Better::Lower),
+        );
+        let via_compare = compare(
+            Some(&set(&[("m", 100.0, Better::Lower)])),
+            &set(&[("m", 150.0, Better::Lower)]),
+            &opts,
+        );
+        let row = compare_pair(&b, &h, &opts);
+        assert_eq!(row.verdict, Verdict::Regressed);
+        assert_eq!(
+            serde_json::to_string(&row).unwrap(),
+            serde_json::to_string(&via_compare.rows[0]).unwrap()
+        );
     }
 
     #[test]
@@ -754,5 +858,128 @@ mod tests {
         let r = compare(Some(&mk(100.0, 8.0)), &mk(100.0, 16.0), &Options::default());
         assert_eq!(r.count(Verdict::Regressed), 1);
         assert_eq!(r.count(Verdict::Unchanged), 1);
+    }
+
+    fn gm(group: &str, name: &str) -> Metric {
+        Metric::new(group, name, "", "ms", 100.0, Better::Lower)
+    }
+
+    fn overrides(pairs: &[(&str, f64)]) -> Options {
+        Options {
+            threshold_overrides: pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+            ..Options::default()
+        }
+    }
+
+    #[test]
+    fn threshold_for_should_prefer_group_name_override_over_default_when_net_parse() {
+        let o = overrides(&[("net/Parse", 20.0)]);
+        assert_eq!(o.threshold_for(&gm("net", "Parse")), 20.0);
+        assert_eq!(o.threshold_for(&gm("net", "Dial")), 5.0);
+    }
+
+    #[test]
+    fn threshold_for_should_prefer_exact_over_group_over_default() {
+        let o = overrides(&[("net", 8.0), ("net/Parse", 20.0)]);
+        assert_eq!(o.threshold_for(&gm("net", "Parse")), 20.0);
+        assert_eq!(o.threshold_for(&gm("net", "Dial")), 8.0);
+        assert_eq!(o.threshold_for(&gm("db", "Query")), 5.0);
+    }
+
+    #[test]
+    fn threshold_for_should_use_bare_name_when_group_is_empty() {
+        let o = overrides(&[("Parse", 20.0), ("", 9.0)]);
+        assert_eq!(o.threshold_for(&gm("", "Parse")), 20.0);
+        assert_eq!(o.threshold_for(&gm("", "Other")), 5.0);
+    }
+
+    #[test]
+    fn compare_should_apply_group_threshold_when_only_group_key_matches() {
+        let o = overrides(&[("net", 8.0), ("net/Parse", 20.0)]);
+        let mk = |g: &str, n: &str, v: f64| Metric::new(g, n, "", "ms", v, Better::Lower);
+        let base = MetricSet {
+            env: Default::default(),
+            skipped: Default::default(),
+            metrics: vec![
+                mk("net", "Parse", 100.0),
+                mk("net", "Dial", 100.0),
+                mk("net", "Dial2", 100.0),
+                mk("db", "Query", 100.0),
+            ],
+        };
+        let head = MetricSet {
+            env: Default::default(),
+            skipped: Default::default(),
+            metrics: vec![
+                mk("net", "Parse", 112.0),
+                mk("net", "Dial", 106.0),
+                mk("net", "Dial2", 112.0),
+                mk("db", "Query", 106.0),
+            ],
+        };
+        let r = compare(Some(&base), &head, &o);
+        let v = |n: &str| r.rows.iter().find(|r| r.name == n).unwrap().verdict;
+        assert_eq!(v("Parse"), Verdict::Unchanged);
+        assert_eq!(v("Dial"), Verdict::Unchanged);
+        assert_eq!(v("Dial2"), Verdict::Regressed);
+        assert_eq!(v("Query"), Verdict::Regressed);
+        assert_eq!(r.summary.threshold_overrides, o.threshold_overrides);
+    }
+
+    fn sampled_unit(unit: &str, values: &[f64]) -> MetricSet {
+        let mut m = Metric::new(
+            "g",
+            "m",
+            "",
+            unit,
+            crate::stats::median(values),
+            Better::Lower,
+        );
+        m.samples = values.to_vec();
+        MetricSet {
+            env: Default::default(),
+            skipped: Default::default(),
+            metrics: vec![m],
+        }
+    }
+
+    #[test]
+    fn compare_should_leave_samples_empty_by_default() {
+        let r = compare(
+            Some(&sampled(&[1.0, 2.0, 3.0], Better::Lower)),
+            &sampled(&[4.0, 5.0, 6.0], Better::Lower),
+            &Options::default(),
+        );
+        assert!(r.rows[0].samples.base.is_empty() && r.rows[0].samples.head.is_empty());
+    }
+
+    #[test]
+    fn compare_should_scale_base_samples_to_head_unit_when_keep_samples_and_us_vs_ns() {
+        let o = Options {
+            keep_samples: true,
+            ..Options::default()
+        };
+        let r = compare(
+            Some(&sampled_unit("us", &[1.0, 2.0, 3.0])),
+            &sampled_unit("ns", &[1500.0, 2500.0, 3500.0]),
+            &o,
+        );
+        assert_eq!(r.rows[0].samples.base, vec![1000.0, 2000.0, 3000.0]);
+        assert_eq!(r.rows[0].samples.head, vec![1500.0, 2500.0, 3500.0]);
+    }
+
+    #[test]
+    fn compare_should_leave_samples_empty_for_one_sided_rows_when_keep_samples() {
+        let o = Options {
+            keep_samples: true,
+            ..Options::default()
+        };
+        let only = sampled(&[1.0, 2.0, 3.0], Better::Lower);
+        let new = compare(Some(&set(&[])), &only, &o);
+        let removed = compare(Some(&only), &set(&[]), &o);
+        for r in new.rows.iter().chain(removed.rows.iter()) {
+            assert!(r.samples.base.is_empty() && r.samples.head.is_empty());
+        }
+        assert_eq!(new.rows.len() + removed.rows.len(), 2);
     }
 }

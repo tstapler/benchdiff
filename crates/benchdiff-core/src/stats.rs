@@ -6,6 +6,32 @@ pub const MIN_SAMPLES: usize = 4;
 
 const EXACT_MAX: usize = 50;
 
+/// Holm step-down adjusted p-values, in input order: sorted ascending, `(m - rank) * p`,
+/// running maximum for monotonicity, clamped to 1. NaN counts as 1.
+pub fn holm_adjust(raw: &[f64]) -> Vec<f64> {
+    let m = raw.len();
+    let p = |i: usize| if raw[i].is_nan() { 1.0 } else { raw[i] };
+    let mut order: Vec<usize> = (0..m).collect();
+    order.sort_by(|&a, &b| p(a).total_cmp(&p(b)));
+    let mut out = vec![0.0; m];
+    let mut running = 0.0_f64;
+    for (rank, &i) in order.iter().enumerate() {
+        running = running.max(((m - rank) as f64 * p(i)).min(1.0));
+        out[i] = running;
+    }
+    out
+}
+
+/// Geometric mean via the mean of logs. `None` when `values` is empty or any value is not a
+/// finite positive number; callers exclude and count those first.
+pub fn geomean(values: &[f64]) -> Option<f64> {
+    if values.is_empty() || values.iter().any(|v| !v.is_finite() || *v <= 0.0) {
+        return None;
+    }
+    let mean_ln = values.iter().map(|v| v.ln()).sum::<f64>() / values.len() as f64;
+    Some(mean_ln.exp())
+}
+
 pub fn median(values: &[f64]) -> f64 {
     let mut v = values.to_vec();
     v.sort_by(f64::total_cmp);
@@ -124,6 +150,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn geomean_should_match_hand_computed_vectors_and_reject_non_positive_input() {
+        // sqrt(2 * 8) = 4; cbrt(1 * 10 * 100) = 10; ratios 0.5 and 2.0 cancel to 1.
+        assert!((geomean(&[2.0, 8.0]).unwrap() - 4.0).abs() < 1e-12);
+        assert!((geomean(&[1.0, 10.0, 100.0]).unwrap() - 10.0).abs() < 1e-12);
+        assert!((geomean(&[0.5, 2.0]).unwrap() - 1.0).abs() < 1e-12);
+        assert_eq!(geomean(&[]), None);
+        assert_eq!(geomean(&[1.0, 0.0]), None);
+        assert_eq!(geomean(&[1.0, -2.0]), None);
+        assert_eq!(geomean(&[1.0, f64::NAN]), None);
+        assert_eq!(geomean(&[1.0, f64::INFINITY]), None);
+    }
+
+    #[test]
     fn median_should_average_the_middle_pair_for_even_counts() {
         assert_eq!(median(&[3.0, 1.0, 2.0]), 2.0);
         assert_eq!(median(&[4.0, 1.0, 2.0, 3.0]), 2.5);
@@ -192,5 +231,44 @@ mod tests {
         let b: Vec<f64> = (0..20).map(|i| i as f64 * 2.0 + 7.5).collect();
         let (exact, approx) = (p_value(&a, &b, true), p_value(&a, &b, false));
         assert!((exact - approx).abs() < 0.01, "{exact} vs {approx}");
+    }
+
+    #[test]
+    fn holm_adjust_should_equal_textbook_vector_when_p_0_01_0_04_0_03() {
+        let adj = holm_adjust(&[0.01, 0.04, 0.03]);
+        for (got, want) in adj.iter().zip([0.03, 0.06, 0.06]) {
+            assert!((got - want).abs() < 1e-12, "{adj:?}");
+        }
+    }
+
+    #[test]
+    fn holm_adjust_should_clamp_to_one_and_pass_empty_and_single_through() {
+        assert!(holm_adjust(&[]).is_empty());
+        assert_eq!(holm_adjust(&[0.04]), [0.04]);
+        assert_eq!(holm_adjust(&[0.6, 0.7, f64::NAN]), [1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn holm_adjust_should_be_at_least_raw_at_most_one_and_monotone_in_raw_order() {
+        let mut seed = 7u64;
+        for _ in 0..200 {
+            let raw: Vec<f64> = (0..1 + seed % 8)
+                .map(|_| {
+                    seed = seed
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
+                    (seed >> 11) as f64 / (1u64 << 53) as f64
+                })
+                .collect();
+            let adj = holm_adjust(&raw);
+            let mut order: Vec<usize> = (0..raw.len()).collect();
+            order.sort_by(|&a, &b| raw[a].total_cmp(&raw[b]));
+            for (k, &i) in order.iter().enumerate() {
+                assert!(adj[i] >= raw[i] && adj[i] <= 1.0);
+                if k > 0 {
+                    assert!(adj[i] >= adj[order[k - 1]]);
+                }
+            }
+        }
     }
 }

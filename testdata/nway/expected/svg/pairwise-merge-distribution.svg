@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="292" viewBox="0 0 760 292" role="img" aria-labelledby="t d" font-family="Helvetica, Arial, sans-serif">
+<title id="t">Sample distributions, base vs head, 2 benchmarks; first: Parse [ns/op]</title>
+<desc id="d">Each dot is one sample; the tick marks the median. Largest change first: Parse [ns/op] (base: median 4150 ns/op (3980-4389, n=10); head: median 5417 ns/op (5302-5530, n=10)) | Sort/n=1000 [ns/op] (base: median 8916 ns/op (8750-9082, n=10); head: median 8076 ns/op (7938-8277, n=10)).</desc>
+<rect x="0" y="0" width="760" height="292" rx="8" fill="#fcfcfb"/>
+<text x="16" y="24" text-anchor="start" font-size="13" fill="#0b0b0b">Sample distributions, base vs head</text>
+<text x="16" y="42" text-anchor="start" font-size="12" fill="#52514e">2 benchmarks</text>
+<text x="16" y="70" text-anchor="start" font-size="12" fill="#0b0b0b">1. Parse [ns/op]</text>
+<g>
+<title>1. Parse [ns/op] base: median 4150 ns/op (3980-4389, n=10)</title>
+<text x="132" y="91" text-anchor="end" font-size="11" fill="#52514e">base</text>
+<path d="M202.62 89A3 3 0 1 0 208.62 89A3 3 0 1 0 202.62 89ZM143 83A3 3 0 1 0 149 83A3 3 0 1 0 143 83ZM170.57 87A3 3 0 1 0 176.57 87A3 3 0 1 0 170.57 87ZM213.23 91A3 3 0 1 0 219.23 91A3 3 0 1 0 213.23 91ZM243.63 85A3 3 0 1 0 249.63 85A3 3 0 1 0 243.63 85ZM188.64 89A3 3 0 1 0 194.64 89A3 3 0 1 0 188.64 89ZM265.48 83A3 3 0 1 0 271.48 83A3 3 0 1 0 265.48 83ZM241.49 87A3 3 0 1 0 247.49 87A3 3 0 1 0 241.49 87ZM299.39 91A3 3 0 1 0 305.39 91A3 3 0 1 0 299.39 91ZM186.35 85A3 3 0 1 0 192.35 85A3 3 0 1 0 186.35 85Z" fill="none" stroke="#2a78d6" stroke-width="1"/>
+<line x1="210.92" y1="78" x2="210.92" y2="96" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>1. Parse [ns/op] head: median 5417 ns/op (5302-5530, n=10)</title>
+<text x="132" y="113" text-anchor="end" font-size="11" fill="#52514e">head</text>
+<path d="M650.87 111A3 3 0 1 0 656.87 111A3 3 0 1 0 650.87 111ZM651.67 105A3 3 0 1 0 657.67 105A3 3 0 1 0 651.67 105ZM647.92 109A3 3 0 1 0 653.92 109A3 3 0 1 0 647.92 109ZM648.88 113A3 3 0 1 0 654.88 113A3 3 0 1 0 648.88 113ZM700.82 107A3 3 0 1 0 706.82 107A3 3 0 1 0 700.82 107ZM735 111A3 3 0 1 0 741 111A3 3 0 1 0 735 111ZM727.59 105A3 3 0 1 0 733.59 105A3 3 0 1 0 727.59 105ZM682.91 109A3 3 0 1 0 688.91 109A3 3 0 1 0 682.91 109ZM704.41 113A3 3 0 1 0 710.41 113A3 3 0 1 0 704.41 113ZM722.55 107A3 3 0 1 0 728.55 107A3 3 0 1 0 722.55 107Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="694.86" y1="100" x2="694.86" y2="118" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="120" x2="744" y2="120" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="133" text-anchor="start" font-size="11" fill="#52514e">3980</text>
+<text x="744" y="133" text-anchor="end" font-size="11" fill="#52514e">5530 ns/op</text>
+<text x="16" y="162" text-anchor="start" font-size="12" fill="#0b0b0b">2. Sort/n=1000 [ns/op]</text>
+<g>
+<title>2. Sort/n=1000 [ns/op] base: median 8916 ns/op (8750-9082, n=10)</title>
+<text x="132" y="183" text-anchor="end" font-size="11" fill="#52514e">base</text>
+<path d="M643.56 181A3 3 0 1 0 649.56 181A3 3 0 1 0 643.56 181ZM595.19 175A3 3 0 1 0 601.19 175A3 3 0 1 0 595.19 175ZM735 179A3 3 0 1 0 741 179A3 3 0 1 0 735 179ZM573.24 183A3 3 0 1 0 579.24 183A3 3 0 1 0 573.24 183ZM702.84 177A3 3 0 1 0 708.84 177A3 3 0 1 0 702.84 177ZM655.26 181A3 3 0 1 0 661.26 181A3 3 0 1 0 655.26 181ZM569.2 175A3 3 0 1 0 575.2 175A3 3 0 1 0 569.2 175ZM694.87 179A3 3 0 1 0 700.87 179A3 3 0 1 0 694.87 179ZM563.45 183A3 3 0 1 0 569.45 183A3 3 0 1 0 563.45 183ZM674.26 177A3 3 0 1 0 680.26 177A3 3 0 1 0 674.26 177Z" fill="none" stroke="#2a78d6" stroke-width="1"/>
+<line x1="652.41" y1="170" x2="652.41" y2="188" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>2. Sort/n=1000 [ns/op] head: median 8076 ns/op (7938-8277, n=10)</title>
+<text x="132" y="205" text-anchor="end" font-size="11" fill="#52514e">head</text>
+<path d="M318.22 203A3 3 0 1 0 324.22 203A3 3 0 1 0 318.22 203ZM276.18 197A3 3 0 1 0 282.18 197A3 3 0 1 0 276.18 197ZM166.66 201A3 3 0 1 0 172.66 201A3 3 0 1 0 166.66 201ZM193.23 205A3 3 0 1 0 199.23 205A3 3 0 1 0 193.23 205ZM143 199A3 3 0 1 0 149 199A3 3 0 1 0 143 199ZM295.23 203A3 3 0 1 0 301.23 203A3 3 0 1 0 295.23 203ZM234.96 197A3 3 0 1 0 240.96 197A3 3 0 1 0 234.96 197ZM296.99 201A3 3 0 1 0 302.99 201A3 3 0 1 0 296.99 201ZM183.91 205A3 3 0 1 0 189.91 205A3 3 0 1 0 183.91 205ZM157.08 199A3 3 0 1 0 163.08 199A3 3 0 1 0 157.08 199Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="217.09" y1="192" x2="217.09" y2="210" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="212" x2="744" y2="212" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="225" text-anchor="start" font-size="11" fill="#52514e">7938</text>
+<text x="744" y="225" text-anchor="end" font-size="11" fill="#52514e">9082 ns/op</text>
+<path d="M16 258A3 3 0 1 0 22 258A3 3 0 1 0 16 258Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<text x="28" y="262" text-anchor="start" font-size="12" fill="#52514e">one sample</text>
+<line x1="146" y1="250" x2="146" y2="264" stroke="#0b0b0b" stroke-width="2"/>
+<text x="154" y="262" text-anchor="start" font-size="12" fill="#52514e">median</text>
+<text x="16" y="280" text-anchor="start" font-size="12" fill="#52514e">Largest change first. Lanes in a benchmark share one axis.</text>
+</svg>

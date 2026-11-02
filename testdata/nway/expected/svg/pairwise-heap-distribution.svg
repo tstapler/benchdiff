@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="476" viewBox="0 0 760 476" role="img" aria-labelledby="t d" font-family="Helvetica, Arial, sans-serif">
+<title id="t">Sample distributions, base vs head, 4 benchmarks; first: Sort/n=1000 [ns/op]</title>
+<desc id="d">Each dot is one sample; the tick marks the median. Largest change first: Sort/n=1000 [ns/op] (base: median 8916 ns/op (8750-9082, n=10); head: median 6190 ns/op (6133-6440, n=10)) | Join [ns/op] (base: median 25686 ns/op (25293-26743, n=10); head: median 18296 ns/op (17950-18599, n=10)) | Hash [ns/op] (base: median 783 ns/op (758-803, n=10); head: median 561 ns/op (544-576, n=10)) | Sort/n=100000 [ns/op] (base: median 944904 ns/op (925482-975519, n=10); head: median 707743 ns/op (685339-719225, n=10)).</desc>
+<rect x="0" y="0" width="760" height="476" rx="8" fill="#fcfcfb"/>
+<text x="16" y="24" text-anchor="start" font-size="13" fill="#0b0b0b">Sample distributions, base vs head</text>
+<text x="16" y="42" text-anchor="start" font-size="12" fill="#52514e">4 benchmarks</text>
+<text x="16" y="70" text-anchor="start" font-size="12" fill="#0b0b0b">1. Sort/n=1000 [ns/op]</text>
+<g>
+<title>1. Sort/n=1000 [ns/op] base: median 8916 ns/op (8750-9082, n=10)</title>
+<text x="132" y="91" text-anchor="end" font-size="11" fill="#52514e">base</text>
+<path d="M699.54 89A3 3 0 1 0 705.54 89A3 3 0 1 0 699.54 89ZM680.78 83A3 3 0 1 0 686.78 83A3 3 0 1 0 680.78 83ZM735 87A3 3 0 1 0 741 87A3 3 0 1 0 735 87ZM672.27 91A3 3 0 1 0 678.27 91A3 3 0 1 0 672.27 91ZM722.53 85A3 3 0 1 0 728.53 85A3 3 0 1 0 722.53 85ZM704.08 89A3 3 0 1 0 710.08 89A3 3 0 1 0 704.08 89ZM670.7 83A3 3 0 1 0 676.7 83A3 3 0 1 0 670.7 83ZM719.44 87A3 3 0 1 0 725.44 87A3 3 0 1 0 719.44 87ZM668.47 91A3 3 0 1 0 674.47 91A3 3 0 1 0 668.47 91ZM711.45 85A3 3 0 1 0 717.45 85A3 3 0 1 0 711.45 85Z" fill="none" stroke="#2a78d6" stroke-width="1"/>
+<line x1="704.81" y1="78" x2="704.81" y2="96" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>1. Sort/n=1000 [ns/op] head: median 6190 ns/op (6133-6440, n=10)</title>
+<text x="132" y="113" text-anchor="end" font-size="11" fill="#52514e">head</text>
+<path d="M151.27 111A3 3 0 1 0 157.27 111A3 3 0 1 0 151.27 111ZM147.42 105A3 3 0 1 0 153.42 105A3 3 0 1 0 147.42 105ZM143 109A3 3 0 1 0 149 109A3 3 0 1 0 143 109ZM196.83 113A3 3 0 1 0 202.83 113A3 3 0 1 0 196.83 113ZM148.34 107A3 3 0 1 0 154.34 107A3 3 0 1 0 148.34 107ZM157.32 111A3 3 0 1 0 163.32 111A3 3 0 1 0 157.32 111ZM168.2 105A3 3 0 1 0 174.2 105A3 3 0 1 0 168.2 105ZM204.67 109A3 3 0 1 0 210.67 109A3 3 0 1 0 204.67 109ZM144.65 113A3 3 0 1 0 150.65 113A3 3 0 1 0 144.65 113ZM172.62 107A3 3 0 1 0 178.62 107A3 3 0 1 0 172.62 107Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="157.3" y1="100" x2="157.3" y2="118" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="120" x2="744" y2="120" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="133" text-anchor="start" font-size="11" fill="#52514e">6133</text>
+<text x="744" y="133" text-anchor="end" font-size="11" fill="#52514e">9082 ns/op</text>
+<text x="16" y="162" text-anchor="start" font-size="12" fill="#0b0b0b">2. Join [ns/op]</text>
+<g>
+<title>2. Join [ns/op] base: median 25686 ns/op (25293-26743, n=10)</title>
+<text x="132" y="183" text-anchor="end" font-size="11" fill="#52514e">base</text>
+<path d="M735 181A3 3 0 1 0 741 181A3 3 0 1 0 735 181ZM637.36 175A3 3 0 1 0 643.36 175A3 3 0 1 0 637.36 175ZM722.63 179A3 3 0 1 0 728.63 179A3 3 0 1 0 722.63 179ZM662.88 183A3 3 0 1 0 668.88 183A3 3 0 1 0 662.88 183ZM647.62 177A3 3 0 1 0 653.62 177A3 3 0 1 0 647.62 177ZM644.84 181A3 3 0 1 0 650.84 181A3 3 0 1 0 644.84 181ZM664.86 175A3 3 0 1 0 670.86 175A3 3 0 1 0 664.86 175ZM718.18 179A3 3 0 1 0 724.18 179A3 3 0 1 0 718.18 179ZM651.45 183A3 3 0 1 0 657.45 183A3 3 0 1 0 651.45 183ZM693.55 177A3 3 0 1 0 699.55 177A3 3 0 1 0 693.55 177Z" fill="none" stroke="#2a78d6" stroke-width="1"/>
+<line x1="666.87" y1="170" x2="666.87" y2="188" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>2. Join [ns/op] head: median 18296 ns/op (17950-18599, n=10)</title>
+<text x="132" y="205" text-anchor="end" font-size="11" fill="#52514e">head</text>
+<path d="M155.87 203A3 3 0 1 0 161.87 203A3 3 0 1 0 155.87 203ZM160.03 197A3 3 0 1 0 166.03 197A3 3 0 1 0 160.03 197ZM160.13 201A3 3 0 1 0 166.13 201A3 3 0 1 0 160.13 201ZM178.94 205A3 3 0 1 0 184.94 205A3 3 0 1 0 178.94 205ZM186.72 199A3 3 0 1 0 192.72 199A3 3 0 1 0 186.72 199ZM162.33 203A3 3 0 1 0 168.33 203A3 3 0 1 0 162.33 203ZM143 197A3 3 0 1 0 149 197A3 3 0 1 0 143 197ZM174 201A3 3 0 1 0 180 201A3 3 0 1 0 174 201ZM170.29 205A3 3 0 1 0 176.29 205A3 3 0 1 0 170.29 205ZM185.02 199A3 3 0 1 0 191.02 199A3 3 0 1 0 185.02 199Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="169.31" y1="192" x2="169.31" y2="210" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="212" x2="744" y2="212" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="225" text-anchor="start" font-size="11" fill="#52514e">17950</text>
+<text x="744" y="225" text-anchor="end" font-size="11" fill="#52514e">26743 ns/op</text>
+<text x="16" y="254" text-anchor="start" font-size="12" fill="#0b0b0b">3. Hash [ns/op]</text>
+<g>
+<title>3. Hash [ns/op] base: median 783 ns/op (758-803, n=10)</title>
+<text x="132" y="275" text-anchor="end" font-size="11" fill="#52514e">base</text>
+<path d="M635.15 273A3 3 0 1 0 641.15 273A3 3 0 1 0 635.15 273ZM703.7 267A3 3 0 1 0 709.7 267A3 3 0 1 0 703.7 267ZM697.99 271A3 3 0 1 0 703.99 271A3 3 0 1 0 697.99 271ZM735 275A3 3 0 1 0 741 275A3 3 0 1 0 735 275ZM716.72 269A3 3 0 1 0 722.72 269A3 3 0 1 0 716.72 269ZM659.14 273A3 3 0 1 0 665.14 273A3 3 0 1 0 659.14 273ZM670.11 267A3 3 0 1 0 676.11 267A3 3 0 1 0 670.11 267ZM700.27 271A3 3 0 1 0 706.27 271A3 3 0 1 0 700.27 271ZM631.27 275A3 3 0 1 0 637.27 275A3 3 0 1 0 631.27 275ZM678.11 269A3 3 0 1 0 684.11 269A3 3 0 1 0 678.11 269Z" fill="none" stroke="#2a78d6" stroke-width="1"/>
+<line x1="691.05" y1="262" x2="691.05" y2="280" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>3. Hash [ns/op] head: median 561 ns/op (544-576, n=10)</title>
+<text x="132" y="297" text-anchor="end" font-size="11" fill="#52514e">head</text>
+<path d="M204.69 295A3 3 0 1 0 210.69 295A3 3 0 1 0 204.69 295ZM153.51 289A3 3 0 1 0 159.51 289A3 3 0 1 0 153.51 289ZM143 293A3 3 0 1 0 149 293A3 3 0 1 0 143 293ZM214.29 297A3 3 0 1 0 220.29 297A3 3 0 1 0 214.29 297ZM181.61 291A3 3 0 1 0 187.61 291A3 3 0 1 0 181.61 291ZM152.37 295A3 3 0 1 0 158.37 295A3 3 0 1 0 152.37 295ZM182.98 289A3 3 0 1 0 188.98 289A3 3 0 1 0 182.98 289ZM143.23 293A3 3 0 1 0 149.23 293A3 3 0 1 0 143.23 293ZM181.61 297A3 3 0 1 0 187.61 297A3 3 0 1 0 181.61 297ZM216.34 291A3 3 0 1 0 222.34 291A3 3 0 1 0 216.34 291Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="184.61" y1="284" x2="184.61" y2="302" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="304" x2="744" y2="304" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="317" text-anchor="start" font-size="11" fill="#52514e">544</text>
+<text x="744" y="317" text-anchor="end" font-size="11" fill="#52514e">803 ns/op</text>
+<text x="16" y="346" text-anchor="start" font-size="12" fill="#0b0b0b">4. Sort/n=100000 [ns/op]</text>
+<g>
+<title>4. Sort/n=100000 [ns/op] base: median 944904 ns/op (925482-975519, n=10)</title>
+<text x="132" y="367" text-anchor="end" font-size="11" fill="#52514e">base</text>
+<path d="M632.92 365A3 3 0 1 0 638.92 365A3 3 0 1 0 632.92 365ZM635.34 359A3 3 0 1 0 641.34 359A3 3 0 1 0 635.34 359ZM674.16 363A3 3 0 1 0 680.16 363A3 3 0 1 0 674.16 363ZM720.95 367A3 3 0 1 0 726.95 367A3 3 0 1 0 720.95 367ZM639.19 361A3 3 0 1 0 645.19 361A3 3 0 1 0 639.19 361ZM650.75 365A3 3 0 1 0 656.75 365A3 3 0 1 0 650.75 365ZM697.76 359A3 3 0 1 0 703.76 359A3 3 0 1 0 697.76 359ZM735 363A3 3 0 1 0 741 363A3 3 0 1 0 735 363ZM691.9 367A3 3 0 1 0 697.9 367A3 3 0 1 0 691.9 367ZM670.92 361A3 3 0 1 0 676.92 361A3 3 0 1 0 670.92 361Z" fill="none" stroke="#2a78d6" stroke-width="1"/>
+<line x1="675.54" y1="354" x2="675.54" y2="372" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>4. Sort/n=100000 [ns/op] head: median 707743 ns/op (685339-719225, n=10)</title>
+<text x="132" y="389" text-anchor="end" font-size="11" fill="#52514e">head</text>
+<path d="M177.15 387A3 3 0 1 0 183.15 387A3 3 0 1 0 177.15 387ZM205.76 381A3 3 0 1 0 211.76 381A3 3 0 1 0 205.76 381ZM200.27 385A3 3 0 1 0 206.27 385A3 3 0 1 0 200.27 385ZM204.1 389A3 3 0 1 0 210.1 389A3 3 0 1 0 204.1 389ZM153.92 383A3 3 0 1 0 159.92 383A3 3 0 1 0 153.92 383ZM165.65 387A3 3 0 1 0 171.65 387A3 3 0 1 0 165.65 387ZM160.81 381A3 3 0 1 0 166.81 381A3 3 0 1 0 160.81 381ZM205.83 385A3 3 0 1 0 211.83 385A3 3 0 1 0 205.83 385ZM212.13 389A3 3 0 1 0 218.13 389A3 3 0 1 0 212.13 389ZM143 383A3 3 0 1 0 149 383A3 3 0 1 0 143 383Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="191.71" y1="376" x2="191.71" y2="394" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="396" x2="744" y2="396" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="409" text-anchor="start" font-size="11" fill="#52514e">685339</text>
+<text x="744" y="409" text-anchor="end" font-size="11" fill="#52514e">975519 ns/op</text>
+<path d="M16 442A3 3 0 1 0 22 442A3 3 0 1 0 16 442Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<text x="28" y="446" text-anchor="start" font-size="12" fill="#52514e">one sample</text>
+<line x1="146" y1="434" x2="146" y2="448" stroke="#0b0b0b" stroke-width="2"/>
+<text x="154" y="446" text-anchor="start" font-size="12" fill="#52514e">median</text>
+<text x="16" y="464" text-anchor="start" font-size="12" fill="#52514e">Largest change first. Lanes in a benchmark share one axis.</text>
+</svg>

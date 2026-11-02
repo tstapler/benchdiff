@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="222" viewBox="0 0 760 222" role="img" aria-labelledby="t d" font-family="Helvetica, Arial, sans-serif">
+<title id="t">Sample distributions per variant, 1 benchmark; first: Sort</title>
+<desc id="d">Each dot is one sample; the tick marks the median. Largest change first: Sort (quick: median 104 ns (100-109, n=10); heap: median 134 ns (130-139, n=10); merge: median 84.5 ns (80-89, n=10)).</desc>
+<rect x="0" y="0" width="760" height="222" rx="8" fill="#fcfcfb"/>
+<text x="16" y="24" text-anchor="start" font-size="13" fill="#0b0b0b">Sample distributions per variant</text>
+<text x="16" y="42" text-anchor="start" font-size="12" fill="#52514e">1 benchmark</text>
+<text x="16" y="70" text-anchor="start" font-size="12" fill="#0b0b0b">1. Sort</text>
+<g>
+<title>1. Sort quick: median 104 ns (100-109, n=10)</title>
+<text x="132" y="91" text-anchor="end" font-size="11" fill="#52514e">quick</text>
+<path d="M343.68 89A3 3 0 1 0 349.68 89A3 3 0 1 0 343.68 89ZM353.71 83A3 3 0 1 0 359.71 83A3 3 0 1 0 353.71 83ZM363.75 87A3 3 0 1 0 369.75 87A3 3 0 1 0 363.75 87ZM373.78 91A3 3 0 1 0 379.78 91A3 3 0 1 0 373.78 91ZM383.81 85A3 3 0 1 0 389.81 85A3 3 0 1 0 383.81 85ZM393.85 89A3 3 0 1 0 399.85 89A3 3 0 1 0 393.85 89ZM403.88 83A3 3 0 1 0 409.88 83A3 3 0 1 0 403.88 83ZM413.92 87A3 3 0 1 0 419.92 87A3 3 0 1 0 413.92 87ZM423.95 91A3 3 0 1 0 429.95 91A3 3 0 1 0 423.95 91ZM433.98 85A3 3 0 1 0 439.98 85A3 3 0 1 0 433.98 85Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<line x1="391.83" y1="78" x2="391.83" y2="96" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>1. Sort heap: median 134 ns (130-139, n=10)</title>
+<text x="132" y="113" text-anchor="end" font-size="11" fill="#52514e">heap</text>
+<path d="M644.69 111A3 3 0 1 0 650.69 111A3 3 0 1 0 644.69 111ZM654.73 105A3 3 0 1 0 660.73 105A3 3 0 1 0 654.73 105ZM664.76 109A3 3 0 1 0 670.76 109A3 3 0 1 0 664.76 109ZM674.8 113A3 3 0 1 0 680.8 113A3 3 0 1 0 674.8 113ZM684.83 107A3 3 0 1 0 690.83 107A3 3 0 1 0 684.83 107ZM694.86 111A3 3 0 1 0 700.86 111A3 3 0 1 0 694.86 111ZM704.9 105A3 3 0 1 0 710.9 105A3 3 0 1 0 704.9 105ZM714.93 109A3 3 0 1 0 720.93 109A3 3 0 1 0 714.93 109ZM724.97 113A3 3 0 1 0 730.97 113A3 3 0 1 0 724.97 113ZM735 107A3 3 0 1 0 741 107A3 3 0 1 0 735 107Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="692.85" y1="100" x2="692.85" y2="118" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>1. Sort merge: median 84.5 ns (80-89, n=10)</title>
+<text x="132" y="135" text-anchor="end" font-size="11" fill="#52514e">merge</text>
+<path d="M143 133A3 3 0 1 0 149 133A3 3 0 1 0 143 133ZM153.03 127A3 3 0 1 0 159.03 127A3 3 0 1 0 153.03 127ZM163.07 131A3 3 0 1 0 169.07 131A3 3 0 1 0 163.07 131ZM173.1 135A3 3 0 1 0 179.1 135A3 3 0 1 0 173.1 135ZM183.14 129A3 3 0 1 0 189.14 129A3 3 0 1 0 183.14 129ZM193.17 133A3 3 0 1 0 199.17 133A3 3 0 1 0 193.17 133ZM203.2 127A3 3 0 1 0 209.2 127A3 3 0 1 0 203.2 127ZM213.24 131A3 3 0 1 0 219.24 131A3 3 0 1 0 213.24 131ZM223.27 135A3 3 0 1 0 229.27 135A3 3 0 1 0 223.27 135ZM233.31 129A3 3 0 1 0 239.31 129A3 3 0 1 0 233.31 129Z" fill="#1baf7a" stroke="#52514e" stroke-width="1"/>
+<line x1="191.15" y1="122" x2="191.15" y2="140" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="142" x2="744" y2="142" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="155" text-anchor="start" font-size="11" fill="#52514e">80</text>
+<text x="744" y="155" text-anchor="end" font-size="11" fill="#52514e">139 ns</text>
+<path d="M16 188A3 3 0 1 0 22 188A3 3 0 1 0 16 188Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<text x="28" y="192" text-anchor="start" font-size="12" fill="#52514e">one sample</text>
+<line x1="146" y1="180" x2="146" y2="194" stroke="#0b0b0b" stroke-width="2"/>
+<text x="154" y="192" text-anchor="start" font-size="12" fill="#52514e">median</text>
+<text x="16" y="210" text-anchor="start" font-size="12" fill="#52514e">Largest change first. Lanes in a benchmark share one axis.</text>
+</svg>

@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="396" viewBox="0 0 760 396" role="img" aria-labelledby="t d" font-family="Helvetica, Arial, sans-serif">
+<title id="t">Ratio vs quick: heap has the best geomean (0.80x); largest gap: heap 0.69x on Sort [n=1000]</title>
+<desc id="d">6 benchmarks, 2 variants against reference quick; log2 axis, bars start at 1.00x. heap has the best geomean (0.80x). Largest gaps: heap 0.69x on Sort [n=1000]; heap 0.71x on Join; heap 0.72x on Hash; heap 0.75x on Sort [n=100000]; merge 1.31x on Parse.</desc>
+<rect x="0" y="0" width="760" height="396" rx="8" fill="#fcfcfb"/>
+<text x="16" y="24" text-anchor="start" font-size="13" fill="#0b0b0b">Ratio vs quick</text>
+<text x="16" y="42" text-anchor="start" font-size="12" fill="#52514e">6 benchmarks · 2 variants · log2 scale</text>
+<line x1="304" y1="64" x2="304" y2="316" stroke="#8a8a86" stroke-width="0.5"/>
+<text x="304" y="60" text-anchor="middle" font-size="11" fill="#52514e">0.5x</text>
+<line x1="660" y1="64" x2="660" y2="316" stroke="#8a8a86" stroke-width="0.5"/>
+<text x="660" y="60" text-anchor="middle" font-size="11" fill="#52514e">2x</text>
+<line x1="482" y1="64" x2="482" y2="316" stroke="#0b0b0b" stroke-width="1.5"/>
+<text x="482" y="60" text-anchor="middle" font-size="11" fill="#0b0b0b">1.00x</text>
+<g>
+<title>1. Sort [n=1000]: heap 0.69x, merge 0.91x</title>
+<text x="16" y="81" text-anchor="start" font-size="12" fill="#0b0b0b">1. Sort [n=1000]</text>
+<path d="M482 73L388.27 73L388.27 81L482 81Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5"/>
+<path d="M383.27 77A5 5 0 1 0 393.27 77A5 5 0 1 0 383.27 77Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5"/>
+<text x="379.27" y="81" text-anchor="end" font-size="12" fill="#0b0b0b">0.69x</text>
+<path d="M482 89L456.57 89L456.57 97L482 97Z" fill="#eb6834" stroke="#eb6834" stroke-width="1.5"/>
+<path d="M451.57 88L461.57 88L461.57 98L451.57 98Z" fill="#eb6834" stroke="#eb6834" stroke-width="1.5"/>
+<text x="447.57" y="97" text-anchor="end" font-size="12" fill="#0b0b0b">0.91x</text>
+</g>
+<g>
+<title>2. Parse: heap 1.00x, merge 1.31x</title>
+<text x="16" y="123" text-anchor="start" font-size="12" fill="#0b0b0b">2. Parse</text>
+<path d="M482 115L482.28 115L482.28 123L482 123Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5"/>
+<path d="M477.28 119A5 5 0 1 0 487.28 119A5 5 0 1 0 477.28 119Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5"/>
+<text x="491.28" y="123" text-anchor="start" font-size="12" fill="#0b0b0b">1.00x</text>
+<path d="M482 131L550.43 131L550.43 139L482 139Z" fill="#eb6834" stroke="#eb6834" stroke-width="1.5"/>
+<path d="M545.43 130L555.43 130L555.43 140L545.43 140Z" fill="#eb6834" stroke="#eb6834" stroke-width="1.5"/>
+<text x="559.43" y="139" text-anchor="start" font-size="12" fill="#0b0b0b">1.31x</text>
+</g>
+<g>
+<title>3. Join: heap 0.71x, merge 1.01x</title>
+<text x="16" y="165" text-anchor="start" font-size="12" fill="#0b0b0b">3. Join</text>
+<path d="M482 157L394.87 157L394.87 165L482 165Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5"/>
+<path d="M389.87 161A5 5 0 1 0 399.87 161A5 5 0 1 0 389.87 161Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5"/>
+<text x="385.87" y="165" text-anchor="end" font-size="12" fill="#0b0b0b">0.71x</text>
+<path d="M482 173L484.21 173L484.21 181L482 181Z" fill="#eb6834" stroke="#eb6834" stroke-width="1.5"/>
+<path d="M479.21 172L489.21 172L489.21 182L479.21 182Z" fill="#eb6834" stroke="#eb6834" stroke-width="1.5"/>
+<text x="493.21" y="181" text-anchor="start" font-size="12" fill="#0b0b0b">1.01x</text>
+</g>
+<g>
+<title>4. Hash: heap 0.72x, merge 1.00x</title>
+<text x="16" y="207" text-anchor="start" font-size="12" fill="#0b0b0b">4. Hash</text>
+<path d="M482 199L396.48 199L396.48 207L482 207Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5"/>
+<path d="M391.48 203A5 5 0 1 0 401.48 203A5 5 0 1 0 391.48 203Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5"/>
+<text x="387.48" y="207" text-anchor="end" font-size="12" fill="#0b0b0b">0.72x</text>
+<path d="M482 215L481.05 215L481.05 223L482 223Z" fill="#eb6834" stroke="#eb6834" stroke-width="1.5"/>
+<path d="M476.05 214L486.05 214L486.05 224L476.05 224Z" fill="#eb6834" stroke="#eb6834" stroke-width="1.5"/>
+<text x="472.05" y="223" text-anchor="end" font-size="12" fill="#0b0b0b">1.00x</text>
+</g>
+<g>
+<title>5. Sort [n=100000]: heap 0.75x, merge 0.97x</title>
+<text x="16" y="249" text-anchor="start" font-size="12" fill="#0b0b0b">5. Sort [n=100000]</text>
+<path d="M482 241L407.78 241L407.78 249L482 249Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5"/>
+<path d="M402.78 245A5 5 0 1 0 412.78 245A5 5 0 1 0 402.78 245Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5"/>
+<text x="398.78" y="249" text-anchor="end" font-size="12" fill="#0b0b0b">0.75x</text>
+<path d="M482 257L473.67 257L473.67 265L482 265Z" fill="#eb6834" stroke="#eb6834" stroke-width="1.5"/>
+<path d="M468.67 256L478.67 256L478.67 266L468.67 266Z" fill="#eb6834" stroke="#eb6834" stroke-width="1.5"/>
+<text x="464.67" y="265" text-anchor="end" font-size="12" fill="#0b0b0b">0.97x</text>
+</g>
+<g>
+<title>6. Encode: heap 0.96x, merge 1.01x</title>
+<text x="16" y="291" text-anchor="start" font-size="12" fill="#0b0b0b">6. Encode</text>
+<path d="M482 283L471.75 283L471.75 291L482 291Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5"/>
+<path d="M466.75 287A5 5 0 1 0 476.75 287A5 5 0 1 0 466.75 287Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5"/>
+<text x="462.75" y="291" text-anchor="end" font-size="12" fill="#0b0b0b">0.96x</text>
+<path d="M482 299L485.38 299L485.38 307L482 307Z" fill="#eb6834" stroke="#eb6834" stroke-width="1.5"/>
+<path d="M480.38 298L490.38 298L490.38 308L480.38 308Z" fill="#eb6834" stroke="#eb6834" stroke-width="1.5"/>
+<text x="494.38" y="307" text-anchor="start" font-size="12" fill="#0b0b0b">1.01x</text>
+</g>
+<line x1="21" y1="329" x2="21" y2="339" stroke="#0b0b0b" stroke-width="1.5"/>
+<text x="32" y="338" text-anchor="start" font-size="12" fill="#52514e">quick (reference)</text>
+<path d="M149.03 334A5 5 0 1 0 159.03 334A5 5 0 1 0 149.03 334Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5"/>
+<text x="165.03" y="338" text-anchor="start" font-size="12" fill="#52514e">heap</text>
+<path d="M212.38 329L222.38 329L222.38 339L212.38 339Z" fill="#eb6834" stroke="#eb6834" stroke-width="1.5"/>
+<text x="228.38" y="338" text-anchor="start" font-size="12" fill="#52514e">merge</text>
+<text x="16" y="356" text-anchor="start" font-size="12" fill="#52514e">Bars: value ÷ quick, log2 scale; left of the line is smaller.</text>
+<text x="16" y="374" text-anchor="start" font-size="12" fill="#52514e">Largest change first.</text>
+</svg>

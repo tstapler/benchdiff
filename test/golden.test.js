@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { runWasm, stage, expand, upsertComment, clip } = require('../index.js');
+const { runWasm, stage, expand, upsertComment, clip, main } = require('../index.js');
 
 const root = path.resolve(__dirname, '..');
 const native = process.env.BENCHDIFF_NATIVE || path.join(root, 'target', 'release', 'benchdiff');
@@ -94,6 +94,186 @@ for (const [name, c] of Object.entries(cases)) {
     if (c.check) c.check(JSON.parse(fs.readFileSync(path.join(wasmDir, 'report.json'), 'utf8')));
   });
 }
+
+// Frozen outputs in testdata/golden/expected (UPDATE_GOLDEN=1 rewrites them; review the diff as a
+// behaviour change). Same 15 CLI cases as crates/benchdiff/tests/golden_expected.rs.
+const expectedDir = td('golden', 'expected');
+const update = !!process.env.UPDATE_GOLDEN;
+const GH = td('golden/head.go.txt');
+const GB = td('golden/base.go.txt');
+const optionCase = (extra) => ({ head: GH, base: GB, extra });
+const sameFile = (file, format) => ({ head: td(file), base: td(file), extra: ['--format', format] });
+const expectedCases = {
+  default: optionCase([]),
+  json: optionCase(['--format', 'go']),
+  'only-changed': optionCase(['--only-changed']),
+  'max-rows-2': optionCase(['--max-rows', '2']),
+  'sort-name': optionCase(['--sort', 'name']),
+  'threshold-1-min-abs-5': optionCase(['--threshold', '1', '--min-abs', '5']),
+  'native-base': sameFile('benchdiff/native.json', 'benchdiff'),
+  'importer-bmf': sameFile('bmf/bmf.json', 'bmf'),
+  'importer-cargo-bench': sameFile('cargo-bench/bench.txt', 'cargo-bench'),
+  'importer-criterion': sameFile('criterion/criterion.jsonl', 'criterion'),
+  'importer-gab-smaller': sameFile('gab/custom.json', 'gab-smaller'),
+  'importer-gab-bigger': sameFile('gab/custom.json', 'gab-bigger'),
+  'importer-googlebench': sameFile('googlebench/googlebench.json', 'googlebench'),
+  'importer-hyperfine': sameFile('hyperfine/hyperfine.json', 'hyperfine'),
+  'importer-jmh': sameFile('jmh/jmh.json', 'jmh'),
+};
+
+function assertGolden(name, ext, actual) {
+  const file = path.join(expectedDir, `${name}.${ext}`);
+  if (update) fs.writeFileSync(file, actual);
+  else assert.equal(actual, fs.readFileSync(file, 'utf8'), `case \`${name}\`: ${name}.${ext} differs from testdata/golden/expected (UPDATE_GOLDEN=1 to refresh)`);
+}
+
+for (const [name, c] of Object.entries(expectedCases)) {
+  const outputs = (dir, prefix) => ['--markdown', `${prefix}report.md`, '--json', `${prefix}report.json`];
+  test(`wasm matches expected files: ${name}`, async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-exp-wasm-'));
+    const [head] = stage([c.head], dir, 'head');
+    const [base] = stage([c.base], dir, 'base');
+    const r = await runWasm(['--head', head, '--base', base, ...c.extra, ...outputs(dir, '/work/')], dir);
+    assert.equal(r.code, 0, r.stderr);
+    assertGolden(name, 'md', fs.readFileSync(path.join(dir, 'report.md'), 'utf8'));
+    assertGolden(name, 'json', fs.readFileSync(path.join(dir, 'report.json'), 'utf8'));
+  });
+  test(`native matches expected files: ${name}`, () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-exp-native-'));
+    const code = runNative(['--head', c.head, '--base', c.base, ...c.extra, ...outputs(dir, `${dir}/`)], root);
+    assert.equal(code, 0);
+    assertGolden(name, 'md', fs.readFileSync(path.join(dir, 'report.md'), 'utf8'));
+    assertGolden(name, 'json', fs.readFileSync(path.join(dir, 'report.json'), 'utf8'));
+  });
+}
+
+// N-way matrix (testdata/nway): the labelled-files invocation and `--compare-by impl` on impl.txt both
+// freeze to expected/matrix.{md,json}; wasm and native must each reproduce them byte for byte.
+const nwayDir = td('nway', 'expected');
+const nwayLabels = ['quick', 'heap', 'merge'];
+const nwayCases = {
+  'matrix (three --variant files, --reference quick)': (stageFile) => nwayLabels.flatMap((l) => ['--variant', `${l}=${stageFile(td('nway', `${l}.txt`), `${l}.txt`)}`]).concat(['--reference', 'quick']),
+  'matrix (--compare-by impl on impl.txt)': (stageFile) => ['--head', stageFile(td('nway', 'impl.txt'), 'impl.txt'), '--compare-by', 'impl', '--reference', 'quick'],
+};
+function assertNway(ext, actual) {
+  const file = path.join(nwayDir, `matrix.${ext}`);
+  if (update) fs.writeFileSync(file, actual);
+  else assert.equal(actual, fs.readFileSync(file, 'utf8'), `matrix.${ext} differs from testdata/nway/expected (UPDATE_GOLDEN=1 to refresh)`);
+}
+for (const [name, build] of Object.entries(nwayCases)) {
+  test(`wasm matches expected files: ${name}`, async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-nway-wasm-'));
+    const stageFile = (src, base) => { fs.copyFileSync(src, path.join(dir, base)); return `/work/${base}`; };
+    const r = await runWasm([...build(stageFile), '--markdown', '/work/report.md', '--json', '/work/report.json'], dir);
+    assert.equal(r.code, 0, r.stderr);
+    assertNway('md', fs.readFileSync(path.join(dir, 'report.md'), 'utf8'));
+    assertNway('json', fs.readFileSync(path.join(dir, 'report.json'), 'utf8'));
+  });
+  test(`native matches expected files: ${name}`, () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-nway-native-'));
+    const stageFile = (src) => src;
+    const code = runNative([...build(stageFile), '--markdown', path.join(dir, 'report.md'), '--json', path.join(dir, 'report.json')], root);
+    assert.equal(code, 0);
+    assertNway('md', fs.readFileSync(path.join(dir, 'report.md'), 'utf8'));
+    assertNway('json', fs.readFileSync(path.join(dir, 'report.json'), 'utf8'));
+  });
+}
+
+// Golden SVG shim (testdata/nway/expected/svg): the same charts rendered natively (--svg-dir in a temp
+// dir) and under wasm (--svg-dir /work/svg, a WASI preopen) must be byte-identical and equal the
+// frozen files, as must the `<picture>` Markdown that embeds them. `--chart-theme both` gives the
+// light/dark twins. Review changed goldens as PNG (scripts/svg-to-png.sh, see testdata/README.md).
+const svgExpectedDir = td('nway', 'expected', 'svg');
+const nwayFile = (l) => td('nway', `${l}.txt`);
+const svgCases = {
+  matrix: {
+    args: (f) => nwayLabels.flatMap((l) => ['--variant', `${l}=${f(nwayFile(l), `${l}.txt`)}`]).concat(['--reference', 'quick', '--charts', 'ranking,distribution', '--chart-theme', 'both']),
+    files: ['ranking-light', 'ranking-dark', 'distribution-light', 'distribution-dark'],
+  },
+  'pairwise-heap': {
+    args: (f) => ['--base', f(nwayFile('quick'), 'quick.txt'), '--head', f(nwayFile('heap'), 'heap.txt'), '--charts', 'delta,distribution'],
+    files: ['delta', 'distribution'],
+  },
+  'pairwise-merge': {
+    args: (f) => ['--base', f(nwayFile('quick'), 'quick.txt'), '--head', f(nwayFile('merge'), 'merge.txt'), '--charts', 'delta,distribution'],
+    files: ['delta', 'distribution'],
+  },
+};
+function svgRun(name, c, kind) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `bd-svg-${kind}-`));
+  const isWasm = kind === 'wasm';
+  const stageFile = (src, base) => { fs.copyFileSync(src, path.join(dir, base)); return isWasm ? `/work/${base}` : path.join(dir, base); };
+  fs.mkdirSync(path.join(dir, 'svg'));
+  const where = (n) => (isWasm ? `/work/${n}` : path.join(dir, n));
+  const args = [...c.args(stageFile), '--svg-embed', 'true', '--svg-dir', where('svg'), '--markdown', where('report.md')];
+  return { dir, args };
+}
+for (const [name, c] of Object.entries(svgCases)) {
+  test(`wasm and native render byte-identical SVGs and <picture> Markdown equal to expected files: ${name}`, async () => {
+    const w = svgRun(name, c, 'wasm');
+    const n = svgRun(name, c, 'native');
+    const r = await runWasm(w.args, w.dir);
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(runNative(n.args, n.dir), 0);
+    const listing = (d) => fs.readdirSync(path.join(d, 'svg')).sort();
+    const expectedNames = c.files.map((f) => `${f}.svg`).sort();
+    assert.deepEqual(listing(w.dir), expectedNames);
+    assert.deepEqual(listing(n.dir), expectedNames);
+    assert.equal(fs.readFileSync(path.join(w.dir, 'report.md'), 'utf8'), fs.readFileSync(path.join(n.dir, 'report.md'), 'utf8'), 'embedded Markdown differs between wasm and native; rebuild dist/benchdiff.wasm (make wasm)');
+    if (c.files.some((f) => f.endsWith('-dark'))) assert.match(fs.readFileSync(path.join(n.dir, 'report.md'), 'utf8'), /<picture><source media="\(prefers-color-scheme: dark\)" srcset="benchdiff-svg:[^"]+-dark\.svg">/);
+    for (const f of c.files) {
+      const wasmBytes = fs.readFileSync(path.join(w.dir, 'svg', `${f}.svg`));
+      const nativeBytes = fs.readFileSync(path.join(n.dir, 'svg', `${f}.svg`));
+      assert.ok(wasmBytes.equals(nativeBytes), `${name}/${f}.svg differs between wasm and native; rebuild dist/benchdiff.wasm (make wasm)`);
+      const file = path.join(svgExpectedDir, `${name}-${f}.svg`);
+      if (update) { fs.mkdirSync(svgExpectedDir, { recursive: true }); fs.writeFileSync(file, nativeBytes); } else assert.ok(nativeBytes.equals(fs.readFileSync(file)), `${name}-${f}.svg differs from testdata/nway/expected/svg (UPDATE_GOLDEN=1 to refresh, then review the PNGs)`);
+    }
+  });
+}
+
+// Action level: main() through the real wasm with default inputs and a mocked GitHub API.
+// action-default.md is the sticky-comment body; action-default.json holds everything else observable.
+test('action-default: main() comment body, report files and outputs match expected files', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-action-'));
+  const eventPath = path.join(dir, 'event.json');
+  fs.writeFileSync(eventPath, JSON.stringify({ pull_request: { number: 7 } }));
+  const outputFile = path.join(dir, 'output');
+  const vars = {
+    INPUT_HEAD: GH, INPUT_BASE: GB, 'INPUT_GITHUB-TOKEN': 't',
+    GITHUB_OUTPUT: outputFile, RUNNER_TEMP: dir, GITHUB_EVENT_PATH: eventPath,
+    GITHUB_REPOSITORY: 'o/r', GITHUB_API_URL: 'https://api.test',
+  };
+  const saved = { env: { ...process.env }, fetch: globalThis.fetch };
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    const key = `${init.method || 'GET'} ${new URL(url).pathname}`;
+    calls.push({ key, body: init.body });
+    const json = key.startsWith('GET') ? [] : { id: 1 };
+    return { ok: true, status: key.startsWith('GET') ? 200 : 201, json: async () => json };
+  };
+  Object.assign(process.env, vars);
+  try {
+    await main();
+  } finally {
+    globalThis.fetch = saved.fetch;
+    for (const k of Object.keys(process.env)) if (!(k in saved.env)) delete process.env[k];
+    Object.assign(process.env, saved.env);
+  }
+  const outputs = Object.fromEntries(fs.readFileSync(outputFile, 'utf8').split('\n').filter(Boolean).map((l) => l.split('=')));
+  const reportPath = outputs['report-path'];
+  const jsonPath = outputs['json-path'];
+  const post = calls.find((c) => c.key.startsWith('POST'));
+  assert.ok(post, 'main() did not post a comment');
+  const commentBody = JSON.parse(post.body).body;
+  const observed = {
+    comment_requests: calls.map((c) => c.key),
+    outputs: Object.fromEntries(Object.entries(outputs).map(([k, v]) => [k, k.endsWith('-path') ? path.basename(v) : v])),
+    report_path_contents: fs.readFileSync(reportPath, 'utf8'),
+    json_path_contents: JSON.parse(fs.readFileSync(jsonPath, 'utf8')),
+  };
+  assertGolden('action-default', 'md', commentBody);
+  assertGolden('action-default', 'json', `${JSON.stringify(observed, null, 2)}\n`);
+});
 
 test('wasm reports a usage error with exit code 2 and a message', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-wasm-'));
