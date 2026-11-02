@@ -5,7 +5,7 @@ use std::fmt;
 
 use serde::Serialize;
 
-use crate::compare::{compare_pair, ConfigSource, Method, Options, Row, Samples, Verdict};
+use crate::compare::{compare_pair_keyed, ConfigSource, Method, Options, Row, Samples, Verdict};
 use crate::dimensioned::Dimensioned;
 use crate::dimensions::{axis_value, row_dims, GROUP_AXIS, MEASURE_AXIS};
 use crate::model::{Better, Dims, Metric, MetricSet, SkippedKey};
@@ -782,15 +782,15 @@ fn compute_geomeans(
         let values: Vec<VariantGeomean> = (0..columns.len())
             .map(|c| variant_geomean(&common, columns, ref_col, c))
             .collect();
-        let best = comparable
-            .then(|| {
-                values
-                    .iter()
-                    .filter_map(|v| v.value.map(|g| (v.column, g)))
-                    .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
-                    .map(|(c, _)| c)
-            })
-            .flatten();
+        let best = if comparable {
+            values
+                .iter()
+                .filter_map(|v| v.value.map(|g| (v.column, g)))
+                .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
+                .map(|(c, _)| c)
+        } else {
+            None
+        };
         out.push(GeomeanFamily {
             measure: key.0,
             unit: key.1,
@@ -927,10 +927,10 @@ thread_local! {
     static KERNEL_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-fn kernel(base: &Metric, head: &Metric, opts: &Options) -> Row {
+fn kernel(base: &Metric, head: &Metric, opts: &Options, threshold_group: &str) -> Row {
     #[cfg(test)]
     KERNEL_CALLS.with(|c| c.set(c.get() + 1));
-    compare_pair(base, head, opts)
+    compare_pair_keyed(base, head, opts, threshold_group)
 }
 
 type RowKey = (String, String, String, Dims);
@@ -1151,13 +1151,7 @@ fn compare_cell(r: &Metric, m: &Metric, opts: &Options) -> (Comparison, Samples)
         return (Comparison::DirectionMismatch, Samples::default());
     }
     // Under compare-by=group the variant's group differs; thresholds key on the reference's.
-    let row = if r.group == m.group {
-        kernel(r, m, opts)
-    } else {
-        let mut head = m.clone();
-        head.group = r.group.clone();
-        kernel(r, &head, opts)
-    };
+    let row = kernel(r, m, opts, &r.group);
     if row.verdict == Verdict::Incomparable {
         let reason = format!("units '{}' and '{}' cannot be compared", r.unit, m.unit);
         return (Comparison::Incomparable(Reason(reason)), row.samples);
@@ -1176,19 +1170,21 @@ fn compare_cell(r: &Metric, m: &Metric, opts: &Options) -> (Comparison, Samples)
 /// residual when the group is empty) nor its `group`; such a key can never apply in the matrix.
 /// Keys written against raw benchmark names are the usual cause.
 pub fn unmatched_threshold_notices(report: &MatrixReport, opts: &Options) -> Vec<Notice> {
-    let matched = |key: &str| {
-        report.rows.iter().any(|row| {
-            let exact = if row.group.is_empty() {
-                row.name.clone()
-            } else {
-                format!("{}/{}", row.group, row.name)
-            };
-            key == exact || (!row.group.is_empty() && key == row.group)
-        })
-    };
+    if opts.threshold_overrides.is_empty() {
+        return Vec::new();
+    }
+    let mut valid: HashSet<String> = HashSet::new();
+    for row in &report.rows {
+        if row.group.is_empty() {
+            valid.insert(row.name.clone());
+        } else {
+            valid.insert(format!("{}/{}", row.group, row.name));
+            valid.insert(row.group.clone());
+        }
+    }
     opts.threshold_overrides
         .keys()
-        .filter(|key| !matched(key))
+        .filter(|key| !valid.contains(key.as_str()))
         .map(|key| Notice {
             class: NoticeClass::Degradation,
             text: format!(

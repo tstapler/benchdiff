@@ -58,17 +58,28 @@ impl Options {
     /// Noise threshold for `m`: exact `group/name` (just `name` when the group is empty),
     /// then `group`, then `threshold_pct`. The measure is not part of the key.
     pub fn threshold_for(&self, m: &Metric) -> f64 {
-        let exact = if m.group.is_empty() {
+        self.threshold_for_group(&m.group, m)
+    }
+
+    /// `threshold_for` with `group` standing in for `m.group` (compare-by=group keys on the
+    /// reference's group without cloning the metric).
+    pub(crate) fn threshold_for_group(&self, group: &str, m: &Metric) -> f64 {
+        if self.threshold_overrides.is_empty() {
+            return self.threshold_pct;
+        }
+        let exact = if group.is_empty() {
             m.name.clone()
         } else {
-            format!("{}/{}", m.group, m.name)
+            format!("{group}/{}", m.name)
         };
         self.threshold_overrides
             .get(&exact)
             .or_else(|| {
-                (!m.group.is_empty())
-                    .then(|| self.threshold_overrides.get(&m.group))
-                    .flatten()
+                if group.is_empty() {
+                    None
+                } else {
+                    self.threshold_overrides.get(group)
+                }
             })
             .copied()
             .unwrap_or(self.threshold_pct)
@@ -349,6 +360,16 @@ fn evidence(base: &Metric, head: &Metric, base_scale: f64, opts: &Options) -> Ev
 }
 
 pub(crate) fn compare_pair(base: &Metric, head: &Metric, opts: &Options) -> Row {
+    compare_pair_keyed(base, head, opts, &head.group)
+}
+
+/// `compare_pair` looking up the threshold under `threshold_group` instead of `head.group`.
+pub(crate) fn compare_pair_keyed(
+    base: &Metric,
+    head: &Metric,
+    opts: &Options,
+    threshold_group: &str,
+) -> Row {
     let mut row = Row {
         group: head.group.clone(),
         name: head.name.clone(),
@@ -389,7 +410,7 @@ pub(crate) fn compare_pair(base: &Metric, head: &Metric, opts: &Options) -> Row 
         && diff.abs() >= opts.min_abs
         && row
             .delta_pct
-            .is_none_or(|p| p.abs() >= opts.threshold_for(head));
+            .is_none_or(|p| p.abs() >= opts.threshold_for_group(threshold_group, head));
     row.verdict = if !(passes_floor && ev.significant) {
         Verdict::Unchanged
     } else if (diff < 0.0) == (head.better == Better::Lower) {
