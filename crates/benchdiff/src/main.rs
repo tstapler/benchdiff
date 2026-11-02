@@ -371,18 +371,57 @@ fn main() -> ExitCode {
     }
 }
 
+/// Writes `text` to stdout. A closed pipe (`| head`) is a quiet success; any other failure
+/// (a full disk behind `> /dev/full`) is the exit-2 error, never a `print!` panic.
+fn print_out(text: &str) -> Result<(), String> {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+    match out.write_all(text.as_bytes()).and_then(|()| out.flush()) {
+        Err(e) if e.kind() != std::io::ErrorKind::BrokenPipe => Err(format!("stdout: {e}")),
+        _ => Ok(()),
+    }
+}
+
+/// The arguments as UTF-8, or the usage error naming the first one that is not.
+fn utf8_args(raw: impl Iterator<Item = std::ffi::OsString>) -> Result<Vec<String>, String> {
+    raw.map(|a| {
+        a.into_string()
+            .map_err(|a| format!("argument \"{}\" is not valid UTF-8", a.to_string_lossy()))
+    })
+    .collect()
+}
+
+/// Appends the `--config` sources to a summary's list; only an explicit config surfaces them, so
+/// flag-only runs keep their exact output. Generic because `compare` is a private module of the
+/// core crate, so the element type cannot be named here; `set` receives (key, value, source).
+fn push_config_sources<T: Default>(
+    list: &mut Vec<T>,
+    args: &Args,
+    eff: &Effective,
+    set: impl Fn(&mut T, (String, String, String)),
+) {
+    if args.config.is_none() {
+        return;
+    }
+    for (key, value, source) in &eff.sources {
+        let mut entry = T::default();
+        set(&mut entry, (key.clone(), value.clone(), (*source).into()));
+        list.push(entry);
+    }
+}
+
 fn run() -> Result<bool, String> {
-    let Some(args) = parse_args(std::env::args().skip(1))? else {
-        println!("{}", help_text());
+    let Some(args) = parse_args(utf8_args(std::env::args_os().skip(1))?.into_iter())? else {
+        print_out(&format!("{}\n", help_text()))?;
         return Ok(false);
     };
     let eff = args.effective()?;
     if args.print_config {
-        print!("{}", print_config(&args, &eff));
+        print_out(&print_config(&args, &eff))?;
         return Ok(false);
     }
     if args.print_dimensions {
-        print!("{}", print_dimensions(&args, &eff)?);
+        print_out(&print_dimensions(&args, &eff)?)?;
         return Ok(false);
     }
     let mut fallback_notices = vec![];
@@ -400,21 +439,14 @@ fn run() -> Result<bool, String> {
     };
 
     let mut report = compare(base.as_ref(), &head, &eff.options);
-    // Only an explicit config surfaces sources, so flag-only runs keep their exact output.
-    if args.config.is_some() {
-        // `compare` is a private module of the core crate, so the type is named by inference.
-        for (key, value, source) in &eff.sources {
-            report.summary.config_sources.push(Default::default());
-            if let Some(c) = report.summary.config_sources.last_mut() {
-                (c.key, c.value, c.source) = (key.clone(), value.clone(), (*source).into());
-            }
-        }
-    }
+    push_config_sources(&mut report.summary.config_sources, &args, &eff, |c, v| {
+        (c.key, c.value, c.source) = v;
+    });
     let (extras, write_error) = chart_extras(SvgInput::Pair(&report), &eff);
     let markdown = with_notices(render_markdown_with(&report, &extras), &fallback_notices);
     match &args.markdown {
         Some(path) => write(path, &markdown)?,
-        None => print!("{markdown}"),
+        None => print_out(&markdown)?,
     }
     if let Some(path) = &args.json {
         write(path, &render_json(&report))?;
@@ -496,9 +528,26 @@ fn degrade(strict: bool, mut notices: Vec<Notice>, text: String) -> Result<Degra
     Ok(Degraded(notices))
 }
 
-fn read_variant(path: &str, format: Format) -> Result<Option<MetricSet>, String> {
+/// A variant file's data, or why it has none: the parse error, absent for a file with no metrics.
+type VariantRead = Result<MetricSet, Option<String>>;
+
+fn read_variant(path: &str, format: Format) -> Result<VariantRead, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
-    Ok(parse(format, &text).ok().filter(|s| !s.metrics.is_empty()))
+    if text.trim().is_empty() {
+        return Ok(Err(None));
+    }
+    Ok(match parse(format, &text) {
+        Ok(set) if set.metrics.is_empty() => Err(None),
+        Ok(set) => Ok(set),
+        Err(e) => Err(Some(e.to_string())),
+    })
+}
+
+/// `: <parse error>` for a file that failed to parse; nothing for one that was merely empty.
+fn cause_suffix(cause: &Option<String>) -> String {
+    cause
+        .as_ref()
+        .map_or_else(String::new, |e| format!(": {e}"))
 }
 
 /// Labelled files, never merged. A file with no data is dropped with a notice.
@@ -508,9 +557,12 @@ fn labelled_variants(args: &Args, eff: &Effective, rules: &[Rule]) -> Built {
     let mut dropped = vec![];
     let mut notices = vec![];
     for (i, (label, path)) in args.variants.iter().enumerate() {
-        let Some(set) = read_variant(path, eff.format)? else {
-            dropped.push((i, label, path));
-            continue;
+        let set = match read_variant(path, eff.format)? {
+            Ok(set) => set,
+            Err(cause) => {
+                dropped.push((i, label, path, cause));
+                continue;
+            }
         };
         let (dimensioned, diagnostics) = apply_dimensions(set, rules, strict)?;
         notices.extend(diagnostics.notices());
@@ -522,9 +574,12 @@ fn labelled_variants(args: &Args, eff: &Effective, rules: &[Rule]) -> Built {
         Reference::Label(l) => l,
         Reference::First => &args.variants[0].0,
     };
-    for (_, label, _) in &dropped {
+    for (_, label, _, cause) in &dropped {
         if *label == reference_label {
-            let text = format!("reference '{label}' produced no data; no comparison made");
+            let text = format!(
+                "reference '{label}' produced no data; no comparison made{}",
+                cause_suffix(cause)
+            );
             return degrade(strict, notices, text).map(Err);
         }
     }
@@ -534,8 +589,11 @@ fn labelled_variants(args: &Args, eff: &Effective, rules: &[Rule]) -> Built {
             .map(|v| v.label.as_str())
             .collect::<Vec<_>>()
     };
-    for (_, label, path) in &dropped {
-        let base = format!("variant '{label}' produced no data ({path})");
+    for (_, label, path, cause) in &dropped {
+        let base = format!(
+            "variant '{label}' produced no data ({path}){}",
+            cause_suffix(cause)
+        );
         if strict {
             return Err(base);
         }
@@ -628,14 +686,9 @@ fn run_matrix(args: &Args, eff: &Effective) -> Result<MatrixOutcome, String> {
     notices.extend(stray_keys);
     notices.sort_by_key(|n| n.class);
     report.notices.extend(notices);
-    if args.config.is_some() {
-        for (key, value, source) in &eff.sources {
-            report.summary.config_sources.push(Default::default());
-            if let Some(c) = report.summary.config_sources.last_mut() {
-                (c.key, c.value, c.source) = (key.clone(), value.clone(), (*source).into());
-            }
-        }
-    }
+    push_config_sources(&mut report.summary.config_sources, args, eff, |c, v| {
+        (c.key, c.value, c.source) = v;
+    });
     let (extras, write_error) = chart_extras(SvgInput::Matrix(&report), eff);
     emit(
         args,
@@ -708,7 +761,7 @@ fn write_svgs(dir: &str, files: &[SvgFile]) -> std::io::Result<()> {
 fn emit(args: &Args, markdown: &str, json: &str) -> Result<(), String> {
     match &args.markdown {
         Some(path) => write(path, markdown)?,
-        None => print!("{markdown}"),
+        None => print_out(markdown)?,
     }
     if let Some(path) = &args.json {
         write(path, json)?;
@@ -725,8 +778,14 @@ fn print_dimensions(args: &Args, eff: &Effective) -> Result<String, String> {
     if args.variants.is_empty() {
         sets.push(load(&args.head, eff.format)?);
     } else {
-        for (_, path) in &args.variants {
-            sets.extend(read_variant(path, eff.format)?);
+        for (label, path) in &args.variants {
+            match read_variant(path, eff.format)? {
+                Ok(set) => sets.push(set),
+                Err(Some(e)) => {
+                    return Err(format!("variant '{label}' produced no data ({path}): {e}"))
+                }
+                Err(None) => {}
+            }
         }
     }
     let mut parts = vec![];
@@ -783,6 +842,13 @@ fn write(path: &str, text: &str) -> Result<(), String> {
     std::fs::write(path, text).map_err(|e| format!("{path}: {e}"))
 }
 
+/// `--name` followed by a lowercase letter: a forgotten value rather than one that starts `--`.
+fn is_flag_like(arg: &str) -> bool {
+    arg.strip_prefix("--")
+        .and_then(|rest| rest.chars().next())
+        .is_some_and(|c| c.is_ascii_lowercase())
+}
+
 /// A flag whose value is optional: `--flag=V` always takes V; `--flag V` takes V only when it
 /// is one of `words`; a bare `--flag` means `true`.
 fn optional_value(
@@ -835,12 +901,26 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
             _ => (arg.clone(), None),
         };
         let mut value = |name: &str| -> Result<String, String> {
-            if inline.is_some() {
-                return Ok(inline.clone().unwrap_or_default());
+            if let Some(v) = &inline {
+                return Ok(v.clone());
             }
             // A following flag means the value was forgotten, not that it starts with `--`.
-            raw.next_if(|next| !next.starts_with("--"))
-                .ok_or_else(|| format!("{name} needs a value"))
+            match raw.next_if(|next| !next.starts_with("--")) {
+                Some(v) => Ok(v),
+                None => Err(match raw.peek() {
+                    Some(next) if !is_flag_like(next) => format!(
+                        "{name} needs a value; one starting with \"--\" must be written {name}=VALUE"
+                    ),
+                    _ => format!("{name} needs a value"),
+                }),
+            }
+        };
+        // Paths: `--svg-dir=` would otherwise silently mean "no directory".
+        let mut path_value = |name: &str| -> Result<String, String> {
+            match value(name)? {
+                v if v.is_empty() => Err(format!("{name}= needs a value")),
+                v => Ok(v),
+            }
         };
         let number = |name: &str, text: String| {
             text.trim()
@@ -857,7 +937,7 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
             "-h" | "--help" => return Ok(None),
             "--head" => a.head.push(value("--head")?),
             "--base" => a.base.push(value("--base")?),
-            "--config" => a.config = Some(value("--config")?),
+            "--config" => a.config = Some(path_value("--config")?),
             "--print-config" => {
                 reject_inline("--print-config")?;
                 a.print_config = true;
@@ -946,7 +1026,7 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
                         .map_err(|e| format!("--chart-theme: {e}"))?,
                 );
             }
-            "--svg-dir" => a.svg_flags.svg_dir = Some(value("--svg-dir")?),
+            "--svg-dir" => a.svg_flags.svg_dir = Some(path_value("--svg-dir")?),
             "--svg-embed" => {
                 let v = optional_value(&mut raw, inline, &["true", "false", "auto"]);
                 a.svg_flags.embed =
@@ -1004,9 +1084,9 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
                 reject_inline("--print-dimensions")?;
                 a.print_dimensions = true;
             }
-            "--markdown" => a.markdown = Some(value("--markdown")?),
-            "--json" => a.json = Some(value("--json")?),
-            "--head-json" => a.head_json = Some(value("--head-json")?),
+            "--markdown" => a.markdown = Some(path_value("--markdown")?),
+            "--json" => a.json = Some(path_value("--json")?),
+            "--head-json" => a.head_json = Some(path_value("--head-json")?),
             other => return Err(format!("unknown argument {other:?}; try --help")),
         }
     }
