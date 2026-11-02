@@ -2,10 +2,12 @@
 //! Built natively and as `wasm32-wasip1` (the GitHub Action runs the latter, with the
 //! files in a preopened directory), so it sticks to `std::fs` and `std::env::args`.
 
+use benchdiff_core::config::{parse_config, ConfigFormat};
 use benchdiff_core::{
     compare, options::OptionsOverlay, parse, render_json, render_markdown, Format, MetricSet,
     Options, Sort,
 };
+use serde_json::{json, Value};
 use std::process::ExitCode;
 
 const USAGE: &str = "\
@@ -17,6 +19,8 @@ USAGE:
 OPTIONS:
     --head FILE            head results (repeatable; files are merged)
     --base FILE            base results (repeatable); omit for a head-only report
+    --config FILE          settings file (benchdiff.config.json); flags override it
+    --print-config         print the effective settings and where each came from, then exit
     --format NAME          input format for head and base [auto]
     --base-format NAME     input format for base, if different from --format
     --threshold PCT        changes smaller than this many percent are noise [5]
@@ -41,7 +45,9 @@ FORMATS: ";
 struct Args {
     head: Vec<String>,
     base: Vec<String>,
-    format: Format,
+    config: Option<String>,
+    print_config: bool,
+    format: Option<Format>,
     base_format: Option<Format>,
     markdown: Option<String>,
     json: Option<String>,
@@ -49,12 +55,172 @@ struct Args {
     flags: OptionsOverlay,
 }
 
+/// Defaults, then the config file, then flags; `sources` names the layer of each non-default key.
+struct Effective {
+    options: Options,
+    format: Format,
+    base_format: Option<Format>,
+    sources: Vec<(String, String, &'static str)>,
+    file_overrides_set: bool,
+}
+
 impl Args {
+    /// Flags over defaults only; the config file is layered in by [`Args::effective`].
+    #[cfg(test)]
     fn options(&self) -> Options {
         let mut opts = Options::default();
         self.flags.apply(&mut opts);
         opts
     }
+
+    fn effective(&self) -> Result<Effective, String> {
+        let mut options = Options::default();
+        let mut format = None;
+        let mut base_format = None;
+        let mut file_values = vec![];
+        let mut file_overrides_set = false;
+        if let Some(path) = &self.config {
+            let text = std::fs::read_to_string(path).map_err(|e| match e.kind() {
+                std::io::ErrorKind::NotFound => format!("config file not found: {path}"),
+                _ => format!("{path}: {e}"),
+            })?;
+            let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+            let config = parse_config(&text, name, ConfigFormat::Json)?;
+            (format, base_format) = (config.format, config.base_format);
+            let overlay = config.into_overlay();
+            file_overrides_set = overlay.threshold_overrides.is_some();
+            file_values = layer_values(&overlay, format, base_format);
+            overlay.apply(&mut options);
+        }
+        self.flags.apply(&mut options);
+        let flag_values = layer_values(&self.flags, self.format, self.base_format);
+
+        let mut sources = vec![];
+        for key in SETTING_KEYS {
+            let pick = |values: &[(&'static str, String)]| {
+                values
+                    .iter()
+                    .find(|(k, _)| k == &key)
+                    .map(|(_, v)| v.clone())
+            };
+            if let Some(value) = pick(&flag_values) {
+                sources.push((key.to_string(), value, "flag"));
+            } else if let Some(value) = pick(&file_values) {
+                sources.push((key.to_string(), value, "config"));
+            }
+        }
+        Ok(Effective {
+            options,
+            format: self.format.or(format).unwrap_or(Format::Auto),
+            base_format: self.base_format.or(base_format),
+            sources,
+            file_overrides_set,
+        })
+    }
+}
+
+/// Config-governed keys in display order.
+const SETTING_KEYS: [&str; 10] = [
+    "threshold",
+    "min-abs",
+    "sort",
+    "max-rows",
+    "only-changed",
+    "fail-on-regression",
+    "title",
+    "tag",
+    "format",
+    "base-format",
+];
+
+/// The config-governed settings a layer sets, as display text.
+fn layer_values(
+    o: &OptionsOverlay,
+    format: Option<Format>,
+    base_format: Option<Format>,
+) -> Vec<(&'static str, String)> {
+    let mut v = vec![];
+    if let Some(x) = o.threshold_pct {
+        v.push(("threshold", x.to_string()));
+    }
+    if let Some(x) = o.min_abs {
+        v.push(("min-abs", x.to_string()));
+    }
+    if let Some(x) = o.sort {
+        v.push(("sort", sort_name(x).into()));
+    }
+    if let Some(x) = o.max_rows {
+        v.push(("max-rows", x.to_string()));
+    }
+    if let Some(x) = o.only_changed {
+        v.push(("only-changed", x.to_string()));
+    }
+    if let Some(x) = o.fail_on_regression_pct {
+        v.push(("fail-on-regression", x.to_string()));
+    }
+    if let Some(x) = &o.title {
+        v.push(("title", x.clone()));
+    }
+    if let Some(x) = &o.tag {
+        v.push(("tag", x.clone()));
+    }
+    if let Some(x) = format {
+        v.push(("format", format_name(x).into()));
+    }
+    if let Some(x) = base_format {
+        v.push(("base-format", format_name(x).into()));
+    }
+    v
+}
+
+fn sort_name(s: Sort) -> &'static str {
+    match s {
+        Sort::Delta => "delta",
+        Sort::Name => "name",
+        Sort::Input => "input",
+    }
+}
+
+fn format_name(f: Format) -> &'static str {
+    match f {
+        Format::Auto => "auto",
+        Format::Benchdiff => "benchdiff",
+        Format::Go => "go",
+        Format::Criterion => "criterion",
+        Format::CargoBench => "cargo-bench",
+        Format::Jmh => "jmh",
+        Format::Hyperfine => "hyperfine",
+        Format::GoogleBench => "googlebench",
+        Format::GabSmaller => "gab-smaller",
+        Format::GabBigger => "gab-bigger",
+        Format::Bmf => "bmf",
+    }
+}
+
+fn print_config(args: &Args, eff: &Effective) -> String {
+    let o = &eff.options;
+    let mut sources = serde_json::Map::new();
+    for s in &eff.sources {
+        sources.insert(s.0.clone(), Value::String(s.2.into()));
+    }
+    if eff.file_overrides_set {
+        sources.insert("thresholds".into(), "config".into());
+    }
+    let config = json!({
+        "threshold": o.threshold_pct,
+        "thresholds": o.threshold_overrides,
+        "min-abs": o.min_abs,
+        "sort": sort_name(o.sort),
+        "max-rows": o.max_rows,
+        "only-changed": o.only_changed,
+        "fail-on-regression": o.fail_on_regression_pct,
+        "title": o.title,
+        "tag": o.tag,
+        "format": format_name(eff.format),
+        "base-format": eff.base_format.map(format_name),
+    });
+    let out = json!({"config-file": args.config, "config": config, "sources": sources});
+    format!("{out:#}\n")
 }
 
 fn main() -> ExitCode {
@@ -78,14 +244,29 @@ fn run() -> Result<bool, String> {
         println!("{USAGE}{}", Format::NAMES);
         return Ok(false);
     };
-    let head = load(&args.head, args.format)?;
+    let eff = args.effective()?;
+    if args.print_config {
+        print!("{}", print_config(&args, &eff));
+        return Ok(false);
+    }
+    let head = load(&args.head, eff.format)?;
     let base = if args.base.is_empty() {
         None
     } else {
-        Some(load(&args.base, args.base_format.unwrap_or(args.format))?)
+        Some(load(&args.base, eff.base_format.unwrap_or(eff.format))?)
     };
 
-    let report = compare(base.as_ref(), &head, &args.options());
+    let mut report = compare(base.as_ref(), &head, &eff.options);
+    // Only an explicit config surfaces sources, so flag-only runs keep their exact output.
+    if args.config.is_some() {
+        // `compare` is a private module of the core crate, so the type is named by inference.
+        for (key, value, source) in eff.sources {
+            report.summary.config_sources.push(Default::default());
+            if let Some(c) = report.summary.config_sources.last_mut() {
+                (c.key, c.value, c.source) = (key, value, source.into());
+            }
+        }
+    }
     let markdown = render_markdown(&report);
     match &args.markdown {
         Some(path) => write(path, &markdown)?,
@@ -119,7 +300,9 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
     let mut a = Args {
         head: vec![],
         base: vec![],
-        format: Format::Auto,
+        config: None,
+        print_config: false,
+        format: None,
         base_format: None,
         markdown: None,
         json: None,
@@ -155,7 +338,12 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
             "-h" | "--help" => return Ok(None),
             "--head" => a.head.push(value("--head")?),
             "--base" => a.base.push(value("--base")?),
-            "--format" => a.format = Format::from_name(&value("--format")?)?,
+            "--config" => a.config = Some(value("--config")?),
+            "--print-config" => {
+                reject_inline("--print-config")?;
+                a.print_config = true;
+            }
+            "--format" => a.format = Some(Format::from_name(&value("--format")?)?),
             "--base-format" => a.base_format = Some(Format::from_name(&value("--base-format")?)?),
             "--threshold" => {
                 a.flags.threshold_pct = Some(number("--threshold", value("--threshold")?)?)
@@ -199,7 +387,7 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
             other => return Err(format!("unknown argument {other:?}; try --help")),
         }
     }
-    if a.head.is_empty() {
+    if a.head.is_empty() && !a.print_config {
         return Err("--head is required; try --help".into());
     }
     Ok(Some(a))
