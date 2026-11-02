@@ -4,7 +4,7 @@ use crate::model::{Better, Metric, MetricSet};
 use crate::stats::{mann_whitney_p, MIN_SAMPLES};
 use crate::units;
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Sort {
@@ -144,6 +144,20 @@ pub struct Summary {
     pub skipped_head_total: usize,
     pub skipped_base: Vec<String>,
     pub skipped_base_total: usize,
+    /// Per-metric threshold overrides in force (`group/name` or `group` -> percent).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub threshold_overrides: BTreeMap<String, f64>,
+    /// Settings that came from a config file or flag rather than the defaults.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub config_sources: Vec<ConfigSource>,
+}
+
+/// One non-default setting and where it came from (`config` or `flag`).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+pub struct ConfigSource {
+    pub key: String,
+    pub value: String,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -230,6 +244,7 @@ pub fn compare(base: Option<&MetricSet>, head: &MetricSet, opts: &Options) -> Re
             skipped_head_total: head.skipped.total,
             skipped_base: base.map(|b| b.skipped.labels()).unwrap_or_default(),
             skipped_base_total: base.map_or(0, |b| b.skipped.total),
+            ..Default::default()
         },
         rows,
     }

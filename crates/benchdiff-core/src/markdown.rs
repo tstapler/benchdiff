@@ -2,7 +2,7 @@
 //! bar, unchanged rows collapsed, environment and method notes. Deterministic output only
 //! (no clock), so native and wasm builds agree byte for byte.
 
-use crate::compare::{Method, Report, Row, Verdict};
+use crate::compare::{Method, Report, Row, Summary, Verdict};
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -368,9 +368,36 @@ fn render_method(out: &mut String, report: &Report) {
     };
     let _ = writeln!(
         out,
-        "<sub>A change counts when it is ≥ {}%{floor} and, where the data allows, statistically significant. Judged: {method}.{stats}</sub>",
-        fmt_num(s.threshold_pct)
+        "<sub>A change counts when it is ≥ {}%{floor} and, where the data allows, statistically significant. Judged: {method}.{stats}{}</sub>",
+        fmt_num(s.threshold_pct),
+        method_facts(s)
     );
+}
+
+/// Sentences for `Summary.threshold_overrides` and `config_sources`; empty when both are.
+fn method_facts(s: &Summary) -> String {
+    let mut out = String::new();
+    if !s.threshold_overrides.is_empty() {
+        let items: Vec<String> = s
+            .threshold_overrides
+            .iter()
+            .map(|(k, v)| format!("{k} {}%", fmt_num(*v)))
+            .collect();
+        let _ = write!(out, " Per-metric thresholds: {}.", items.join(", "));
+    }
+    if !s.config_sources.is_empty() {
+        let items: Vec<String> = s
+            .config_sources
+            .iter()
+            .map(|c| format!("{}={} ({})", c.key, c.value, c.source))
+            .collect();
+        let _ = write!(
+            out,
+            " Settings not at their defaults: {}.",
+            items.join(", ")
+        );
+    }
+    out
 }
 
 #[cfg(test)]
@@ -698,5 +725,59 @@ mod tests {
             },
         );
         assert!(md.contains("### Perf\n"), "{md}");
+    }
+
+    #[test]
+    fn summary_should_serialize_identically_and_method_note_should_print_nothing_extra_when_overrides_and_sources_empty(
+    ) {
+        let base = set(&[("g", "a", 100.0)]);
+        let head = set(&[("g", "a", 150.0)]);
+        let report = compare(Some(&base), &head, &Options::default());
+        assert!(report.summary.threshold_overrides.is_empty());
+        assert!(report.summary.config_sources.is_empty());
+        let json = crate::render_json(&report);
+        assert!(!json.contains("threshold_overrides"), "{json}");
+        assert!(!json.contains("config_sources"), "{json}");
+        let md = render_markdown(&report);
+        assert!(!md.contains("Per-metric thresholds"), "{md}");
+        assert!(!md.contains("Settings not at their defaults"), "{md}");
+        assert!(
+            md.contains(
+                "statistically significant. Judged: 1 by threshold only (point estimates).</sub>\n"
+            ),
+            "{md}"
+        );
+    }
+
+    #[test]
+    fn render_method_should_list_threshold_overrides_and_non_default_sources_when_present() {
+        let base = set(&[("net", "Parse", 100.0)]);
+        let head = set(&[("net", "Parse", 150.0)]);
+        let mut report = compare(Some(&base), &head, &Options::default());
+        report
+            .summary
+            .threshold_overrides
+            .insert("net/Parse".into(), 20.0);
+        report.summary.config_sources = vec![
+            crate::compare::ConfigSource {
+                key: "threshold".into(),
+                value: "3".into(),
+                source: "config".into(),
+            },
+            crate::compare::ConfigSource {
+                key: "sort".into(),
+                value: "name".into(),
+                source: "flag".into(),
+            },
+        ];
+        let md = render_markdown(&report);
+        assert!(md.contains("Per-metric thresholds: net/Parse 20%."), "{md}");
+        assert!(
+            md.contains("Settings not at their defaults: threshold=3 (config), sort=name (flag)."),
+            "{md}"
+        );
+        let json = crate::render_json(&report);
+        assert!(json.contains("\"threshold_overrides\""), "{json}");
+        assert!(json.contains("\"config_sources\""), "{json}");
     }
 }
