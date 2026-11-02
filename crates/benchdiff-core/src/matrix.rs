@@ -466,6 +466,13 @@ pub enum Cell {
     Present(PresentCell),
 }
 
+impl Cell {
+    /// Present with a value the ratio maths can use (not `Invalid`).
+    pub fn is_usable(&self) -> bool {
+        matches!(self, Cell::Present(p) if !matches!(p.vs_reference, Comparison::Invalid(_)))
+    }
+}
+
 /// One benchmark across all variants.
 #[derive(Debug, Clone, Serialize)]
 pub struct MatrixRow {
@@ -730,10 +737,6 @@ fn variant_geomean(
     }
 }
 
-fn usable(cell: &Cell) -> bool {
-    matches!(cell, Cell::Present(p) if !matches!(p.vs_reference, Comparison::Invalid(_)))
-}
-
 /// Runs after the Holm pass; verdicts do not feed the ratios, but this keeps one aggregate stage.
 fn compute_geomeans(
     rows: &[MatrixRow],
@@ -767,13 +770,13 @@ fn compute_geomeans(
             .collect();
         let common: Vec<&MatrixRow> = members
             .iter()
-            .filter(|r| r.cells.iter().all(usable))
+            .filter(|r| r.cells.iter().all(Cell::is_usable))
             .copied()
             .collect();
         let comparable = common.len() >= GEOMEAN_MIN_ROWS && common.len() * 2 >= total;
         let least_covered = (0..columns.len())
             .filter(|c| *c != ref_col)
-            .map(|c| (c, members.iter().filter(|r| usable(&r.cells[c])).count()))
+            .map(|c| (c, members.iter().filter(|r| r.cells[c].is_usable()).count()))
             .min_by_key(|(_, n)| *n)
             .map(|(c, n)| (columns[c].to_string(), n));
         let values: Vec<VariantGeomean> = (0..columns.len())

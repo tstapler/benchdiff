@@ -6,12 +6,11 @@
 
 use crate::compare::{Method, Options, Verdict};
 use crate::markdown::{
-    chart_notices, code, esc, flatten, fmt_num, marker, render_chart_blocks, RenderExtras,
+    chart_notices, code, esc, flatten, fmt_num, marker, plural, render_chart_blocks, RenderExtras,
 };
-use crate::matrix::{matrix_failures, FailedCell, FailureKind};
 use crate::matrix::{
-    Cell, CellFormat, Comparison, Correction, GeomeanFamily, MatrixReport, MatrixRow,
-    MatrixSummary, PresentCell,
+    matrix_failures, Cell, CellFormat, Comparison, Correction, FailedCell, FailureKind,
+    GeomeanFamily, MatrixReport, MatrixRow, MatrixSummary, PresentCell,
 };
 use crate::model::Better;
 use crate::notice::{Notice, NoticeClass};
@@ -63,11 +62,10 @@ pub fn render_matrix_markdown_with(report: &MatrixReport, extras: &RenderExtras)
         );
     }
     if sel.quiet > 0 {
-        let noun = if sel.quiet == 1 { "row" } else { "rows" };
         let _ = writeln!(
             out,
-            "\n_{} {noun} with no significant difference hidden (`only-changed`)._",
-            sel.quiet
+            "\n_{} with no significant difference hidden (`only-changed`)._",
+            plural(sel.quiet, "row")
         );
     }
     if cols.len() < report.columns.len() {
@@ -90,13 +88,12 @@ pub fn render_matrix_markdown_with(report: &MatrixReport, extras: &RenderExtras)
 fn heading(report: &MatrixReport) -> String {
     let s = &report.summary;
     let n = report.columns.len();
-    let noun = if n == 1 { "variant" } else { "variants" };
     let mut line = String::from("### ");
     let title = esc(&s.title);
     if !title.trim().is_empty() {
         let _ = write!(line, "{title}: ");
     }
-    let _ = write!(line, "{n} {noun}");
+    let _ = write!(line, "{}", plural(n, "variant"));
     if let Some(r) = &s.reference {
         let _ = write!(line, " (reference: {})", esc(&r.label));
     }
@@ -137,10 +134,6 @@ fn family_name(f: &GeomeanFamily) -> &str {
 
 fn in_family(row: &MatrixRow, f: &GeomeanFamily) -> bool {
     row.measure == f.measure && row.unit == f.unit
-}
-
-fn usable(cell: &Cell) -> bool {
-    matches!(cell, Cell::Present(p) if !matches!(p.vs_reference, Comparison::Invalid(_)))
 }
 
 fn is_regressed(cell: &Cell) -> bool {
@@ -184,7 +177,7 @@ fn headline(report: &MatrixReport) -> Option<String> {
             let slower = report
                 .rows
                 .iter()
-                .filter(|row| in_family(row, fam) && row.cells.iter().all(usable))
+                .filter(|row| in_family(row, fam) && row.cells.iter().all(Cell::is_usable))
                 .filter(|row| is_regressed(&row.cells[best]))
                 .count();
             format!(
@@ -310,7 +303,7 @@ fn render_table(
         let _ = writeln!(out, " {rank} |");
     }
     for fam in &report.geomean {
-        render_geomean_row(out, report, fam, cols);
+        render_geomean_row(out, fam, cols);
     }
     used
 }
@@ -326,12 +319,7 @@ fn row_label(row: &MatrixRow, multi_measure: bool) -> String {
     code(&label)
 }
 
-fn render_geomean_row(
-    out: &mut String,
-    report: &MatrixReport,
-    fam: &GeomeanFamily,
-    cols: &[usize],
-) {
+fn render_geomean_row(out: &mut String, fam: &GeomeanFamily, cols: &[usize]) {
     let h = &fam.headline;
     let label = if h.comparable {
         format!(
@@ -358,7 +346,6 @@ fn render_geomean_row(
         let _ = write!(out, " {text} |");
     }
     let _ = writeln!(out, " |");
-    let _ = report;
 }
 
 fn cell_text(
@@ -491,7 +478,7 @@ fn collect_notices(report: &MatrixReport) -> Vec<Notice> {
             .skipped
             .iter()
             .take(ABSENT_LISTED)
-            .map(|l| code(l))
+            .map(|l| flatten(l))
             .collect();
         let first = if v.total > shown.len() {
             format!(" (first {})", shown.len())
@@ -520,12 +507,12 @@ fn collect_notices(report: &MatrixReport) -> Vec<Notice> {
         } else {
             String::new()
         };
-        let noun = if n == 1 { "benchmark" } else { "benchmarks" };
         out.push(Notice {
             class: NoticeClass::ReferenceAbsent,
             text: format!(
-                "reference \"{}\" absent from {n} {noun}: {}{tail}; set 'reference' to another variant",
+                "reference \"{}\" absent from {}: {}{tail}; set 'reference' to another variant",
                 r.label,
+                plural(n, "benchmark"),
                 names.join(", ")
             ),
         });
@@ -609,7 +596,6 @@ fn gate_line(s: &MatrixSummary, failures: Option<&[FailedCell]>) -> Option<Strin
         return Some(format!("{head} passed"));
     }
     let n = failures.len();
-    let noun = if n == 1 { "cell" } else { "cells" };
     let more = n.saturating_sub(GATE_NAMED);
     // Trim the names, never the count, until the line fits.
     let build = |max: usize| {
@@ -623,7 +609,11 @@ fn gate_line(s: &MatrixSummary, failures: Option<&[FailedCell]>) -> Option<Strin
         } else {
             String::new()
         };
-        format!("{head} FAILED ({n} {noun}: {}{tail})", names.join(", "))
+        format!(
+            "{head} FAILED ({}: {}{tail})",
+            plural(n, "cell"),
+            names.join(", ")
+        )
     };
     let mut max = GATE_NAME_MAX;
     let mut line = build(max);
@@ -776,8 +766,11 @@ fn missing_sentence(report: &MatrixReport) -> String {
                 .filter(|row| matches!(row.cells[c], Cell::Missing))
                 .count();
             (n > 0).then(|| {
-                let noun = if n == 1 { "benchmark" } else { "benchmarks" };
-                format!("{} is missing {n} {noun}", esc(label.as_str()))
+                format!(
+                    "{} is missing {}",
+                    esc(label.as_str()),
+                    plural(n, "benchmark")
+                )
             })
         })
         .collect();
@@ -1282,6 +1275,48 @@ mod tests {
                 "- ⚠️ c1"
             ]
         );
+    }
+
+    #[test]
+    fn ux_s1_6_reference_absent_notice_should_list_first_ten_names_and_count_the_rest() {
+        let mut report = compare_matrix(&fifteen(0), &Options::default(), &mopts());
+        report.reference_absent = (0..12).map(|i| format!("Z{i:02}")).collect();
+        let md = render_matrix_markdown(&report);
+        let line = md
+            .lines()
+            .find(|l| l.starts_with("⚠️ reference \"quick\" absent from 12 benchmarks"))
+            .unwrap_or_else(|| panic!("{md}"));
+        assert!(
+            line.ends_with("Z09 (first 10, and 2 more); set 'reference' to another variant"),
+            "{line}"
+        );
+        assert!(!line.contains("Z10"), "{line}");
+    }
+
+    #[test]
+    fn ux_s1_8_relative_should_switch_to_words_at_exactly_two_x_in_both_directions() {
+        let pct = |ratio: f64| Some((ratio - 1.0) * 100.0);
+        assert_eq!(relative(Better::Lower, pct(1.9)), "1.90x");
+        assert_eq!(relative(Better::Lower, pct(2.0)), "2.0x slower");
+        assert_eq!(relative(Better::Lower, pct(0.5)), "2.0x faster");
+        assert_eq!(relative(Better::Lower, pct(0.51)), "0.51x");
+        assert_eq!(relative(Better::Lower, pct(41.0)), "41.0x slower");
+    }
+
+    #[test]
+    fn notices_should_escape_skipped_metric_names_once_without_code_spans() {
+        let mut report = compare_matrix(&fifteen(0), &Options::default(), &mopts());
+        report.summary.skipped = vec![crate::matrix::VariantSkipped {
+            label: "heap".into(),
+            skipped: vec!["A*B".into()],
+            total: 1,
+        }];
+        let md = render_matrix_markdown(&report);
+        assert!(
+            md.contains("had no usable value and were ignored: A\\*B\n"),
+            "{md}"
+        );
+        assert!(!md.contains("\\`"), "{md}");
     }
 
     #[test]

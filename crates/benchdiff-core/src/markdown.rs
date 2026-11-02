@@ -68,7 +68,7 @@ pub(crate) fn esc(text: &str) -> String {
     out
 }
 
-fn plural(n: usize, noun: &str) -> String {
+pub(crate) fn plural(n: usize, noun: &str) -> String {
     format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
 }
 
@@ -1182,6 +1182,28 @@ mod tests {
             md.contains("⚠️ distribution chart skipped: no samples in the input (use -count=10 or Criterion)\n"),
             "{md}"
         );
+    }
+
+    #[test]
+    fn ux_s1_2_bold_summary_should_be_first_line_after_heading_with_notice_and_gate() {
+        let extras = RenderExtras {
+            notices: vec![Notice {
+                class: NoticeClass::Chart,
+                text: "a notice".into(),
+            }],
+            ..RenderExtras::default()
+        };
+        let mut report = two_way();
+        report.summary.fail_on_regression_pct = Some(10.0);
+        let md = render_markdown_with(&report, &extras);
+        assert!(md.contains("⚠️ a notice"), "{md}");
+        let after: Vec<&str> = md
+            .lines()
+            .skip_while(|l| !l.starts_with("### "))
+            .skip(1)
+            .filter(|l| !l.is_empty())
+            .collect();
+        assert!(after[0].starts_with("**"), "{md}");
     }
 
     #[test]
