@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tstapler/benchdiff/v0/benchdiff.config.schema.json",
+  "title": "benchdiff config",
+  "description": "Options file for benchdiff (--config). Keys are the kebab-case names of the CLI flags and Action inputs; command-line flags and Action inputs override the file.",
+  "type": "object",
+  "required": ["version"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "description": "Config format version; must be 1.", "type": "integer", "enum": [1] },
+    "$schema": { "description": "Editor hint; ignored by benchdiff.", "type": "string" },
+    "threshold": { "description": "Percent change below which a row is unchanged.", "type": "number", "minimum": 0 },
+    "thresholds": {
+      "description": "Per-metric thresholds in percent; the 'default' entry replaces 'threshold' (set only one of the two).",
+      "type": "object",
+      "additionalProperties": { "type": "number", "minimum": 0 }
+    },
+    "min-abs": { "description": "Ignore changes smaller than this absolute amount.", "type": "number", "minimum": 0 },
+    "sort": { "description": "Row order; 'rank' applies to matrix output only.", "type": "string", "enum": ["input", "name", "delta", "rank"] },
+    "max-rows": { "description": "Maximum rows shown in the report.", "type": "integer", "minimum": 0 },
+    "only-changed": { "description": "Hide unchanged rows.", "type": "boolean" },
+    "fail-on-regression": { "description": "Exit non-zero when a regression exceeds this percent.", "type": "number", "minimum": 0 },
+    "title": { "description": "Report heading.", "type": "string" },
+    "tag": { "description": "Marker used to find and update an existing PR comment.", "type": "string" },
+    "format": { "description": "Input format of the head file.", "$ref": "#/$defs/inputFormat" },
+    "base-format": { "description": "Input format of the base file.", "$ref": "#/$defs/inputFormat" },
+    "charts": {
+      "description": "Comma-separated chart kinds: delta, ranking, distribution, or 'none'.",
+      "type": "string",
+      "pattern": "^\\s*(none|(delta|ranking|distribution)(\\s*,\\s*(delta|ranking|distribution))*)\\s*$"
+    },
+    "chart-rows": { "description": "Rows drawn per chart.", "type": "integer", "minimum": 1, "maximum": 200 },
+    "chart-width": { "description": "Chart width in pixels.", "type": "integer", "minimum": 480, "maximum": 1600 },
+    "chart-theme": { "type": "string", "enum": ["light", "dark", "both"] },
+    "svg-dir": { "description": "Directory to write chart SVG files to.", "type": "string" },
+    "svg-embed": {
+      "description": "Embed charts in the Markdown as data URIs.",
+      "anyOf": [
+        { "type": "boolean" },
+        { "type": "string", "enum": ["true", "false", "auto"] }
+      ]
+    },
+    "publish-images": { "description": "Publish chart SVGs and link them from the comment.", "type": "boolean" },
+    "compare-by": { "description": "Dimension to compare variants along; not 'measure'.", "type": "string", "minLength": 1 },
+    "group-by": {
+      "description": "Dimensions that group the matrix rows.",
+      "anyOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ]
+    },
+    "dimensions": {
+      "description": "Rules 'dim=regex' that extract a dimension from benchmark names (array, or one rule per line).",
+      "anyOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ]
+    },
+    "dimensions-strict": { "description": "Fail when a benchmark name matches no dimension rule.", "type": "boolean" },
+    "reference": {
+      "description": "Variant label the others are compared against (1 to 40 of A-Z a-z 0-9 . _ -).",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,40}$"
+    },
+    "correction": { "description": "Multiple-comparison correction.", "type": "string", "enum": ["holm", "none"] },
+    "cell-format": { "description": "Matrix cell content.", "type": "string", "enum": ["full", "ratio"] }
+  },
+  "$defs": {
+    "inputFormat": {
+      "type": "string",
+      "enum": ["auto", "benchdiff", "go", "criterion", "cargo-bench", "jmh", "hyperfine", "googlebench", "gab-smaller", "gab-bigger", "bmf"]
+    }
+  }
+}
