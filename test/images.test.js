@@ -288,6 +288,11 @@ test('publishImages_should_return_private_without_network_when_repository_privat
   await gated({ eventName: 'push', event: { repository: { private: true } } }, 'private');
 });
 
+test('publishImages_should_return_fork_without_network_for_pull_request_target_from_a_fork', async () => {
+  await gated({ eventName: 'pull_request_target', event: prEvent('x/r', 'o/r') }, 'fork');
+  await gated({ eventName: 'pull_request_target', event: prEvent(null, 'o/r') }, 'fork');
+});
+
 test('publishImages_should_return_fork_without_network_when_head_repo_differs_from_base', async () => {
   await gated({ event: prEvent('x/r', 'o/r') }, 'fork');
   await gated({ event: prEvent(null, 'o/r') }, 'fork');

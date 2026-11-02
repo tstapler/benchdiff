@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { buildArgs, stageConfig, parseFailOnRegression, validateTag, clip, main } = require('../index.js');
+const { buildArgs, stageConfig, parseFailOnRegression, validateTag, clip, main, expand, setOutputs } = require('../index.js');
 
 const root = path.resolve(__dirname, '..');
 const base = { head: ['/work/h'], base: ['/work/b'], format: 'auto', threshold: '5', minAbs: '0', sort: 'delta', title: 'T', tag: 'default', failOnRegression: '' };
@@ -62,13 +62,17 @@ function withEnv(vars, fn) {
   });
 }
 
-function setup(limit, head = path.join(root, 'testdata/golden/head.go.txt')) {
+// Fixtures are copied into the temp dir, which doubles as GITHUB_WORKSPACE (paths must stay inside it).
+function setup(limit, head) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-main-'));
+  const fixture = (name) => { const to = path.join(dir, name); fs.copyFileSync(path.join(root, 'testdata/golden', name), to); return to; };
+  if (head === undefined) head = fixture('head.go.txt');
   const output = path.join(dir, 'output');
   const summary = path.join(dir, 'summary');
   const env = {
     INPUT_HEAD: head,
-    INPUT_BASE: path.join(root, 'testdata/golden/base.go.txt'),
+    INPUT_BASE: fixture('base.go.txt'),
+    GITHUB_WORKSPACE: dir,
     'INPUT_FAIL-ON-REGRESSION': limit,
     INPUT_COMMENT: 'false',
     GITHUB_OUTPUT: output,
@@ -160,16 +164,18 @@ test('action.yml: config-governed inputs have no default and a config input exis
   assert.match(yml, /^  config:$/m);
 });
 
-test('stageConfig copies the config byte for byte under its own sanitized base name', () => {
+test('stageConfig copies the config byte for byte under its own sanitized base name', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-cfg-'));
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-ws-'));
   const text = '{"version":1,\n "threshold":3}';
   fs.writeFileSync(path.join(ws, 'benchdiff.config.json'), text);
   fs.writeFileSync(path.join(ws, 'my config (1).json'), text);
-  assert.equal(stageConfig('benchdiff.config.json', dir, ws), '/work/config/benchdiff.config.json');
-  assert.equal(fs.readFileSync(path.join(dir, 'config', 'benchdiff.config.json'), 'utf8'), text);
-  assert.equal(stageConfig('my config (1).json', dir, ws), '/work/config/my_config__1_.json');
-  assert.throws(() => stageConfig('nope.json', dir, ws), /config file not found: nope\.json/);
+  await withEnv({ GITHUB_WORKSPACE: ws }, () => {
+    assert.equal(stageConfig('benchdiff.config.json', dir, ws), '/work/config/benchdiff.config.json');
+    assert.equal(fs.readFileSync(path.join(dir, 'config', 'benchdiff.config.json'), 'utf8'), text);
+    assert.equal(stageConfig('my config (1).json', dir, ws), '/work/config/my_config__1_.json');
+    assert.throws(() => stageConfig('nope.json', dir, ws), /config file not found: nope\.json/);
+  });
 });
 
 test('main() output is identical with a stray benchdiff.json in the workspace and passes no --config', async () => {
@@ -319,14 +325,14 @@ const SVG = '<svg xmlns="http://www.w3.org/2000/svg"><title>t</title></svg>';
 const CHART_MD = `${MARKER}\n## T\n\n![Delta chart](benchdiff-svg:delta.svg)\n\n<details>\n<summary>Chart data (text)</summary>\n\nrows\n\n</details>\n\n| a | b |\n`;
 
 /** Fake wasm: records argv, asserts svg/ exists, writes the report files and the given SVGs. */
-function fakeWasm({ markdown = CHART_MD, svgs = ['delta'], stderr = 'charts: produced=1 skipped=0\n', code = 0 } = {}) {
+function fakeWasm({ markdown = CHART_MD, svgs = ['delta'], stderr = 'charts: produced=1 skipped=0\n', code = 0, svgContent = SVG } = {}) {
   const calls = [];
   const run = async (args, workDir) => {
     calls.push({ args, svgExisted: fs.existsSync(path.join(workDir, 'svg')) });
     fs.writeFileSync(path.join(workDir, 'report.md'), markdown);
     fs.writeFileSync(path.join(workDir, 'report.json'), JSON.stringify({ counts: { regressed: 0, improved: 0, unchanged: 1, new: 0, removed: 0 }, failed: false }));
     fs.writeFileSync(path.join(workDir, 'head.json'), '{}');
-    for (const n of svgs) fs.writeFileSync(path.join(workDir, 'svg', `${n}.svg`), SVG);
+    for (const n of svgs) fs.writeFileSync(path.join(workDir, 'svg', `${n}.svg`), svgContent);
     return { code, stderr, stdout: '' };
   };
   return { run, calls };
@@ -516,8 +522,10 @@ test('action.yml: count outputs say N-way runs compare cells vs the reference', 
 
 const { parseVariants, resolveOne, resolveVariants, stageVariants } = require('../index.js');
 
+// Variant tests share one temp GITHUB_WORKSPACE holding a copy of testdata/nway (paths must stay inside it).
+const VWS = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bd-vws-')));
 function variantDir(files) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-variants-'));
+  const dir = fs.mkdtempSync(path.join(VWS, 'bd-variants-'));
   for (const [name, text] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
     fs.writeFileSync(path.join(dir, name), text);
@@ -594,6 +602,7 @@ function variantSetup(variants, extra = {}) {
   const s = setup('');
   delete s.env.INPUT_HEAD;
   delete s.env.INPUT_BASE;
+  s.env.GITHUB_WORKSPACE = VWS;
   s.env.INPUT_VARIANTS = variants;
   Object.assign(s.env, extra);
   return s;
@@ -770,7 +779,8 @@ test('main: matrix JSON counts and failed reach the outputs unchanged and the ga
 
 // ---- Task 4.2.3c: end-to-end `variants` runs through the real dist/benchdiff.wasm (mocked fetch only) ----
 
-const NWAY = path.join(root, 'testdata/nway');
+fs.cpSync(path.join(root, 'testdata/nway'), path.join(VWS, 'nway'), { recursive: true });
+const NWAY = path.join(VWS, 'nway');
 const nwayVariants = () => ['quick', 'heap', 'merge'].map((n) => `${n}=${path.join(NWAY, `${n}.txt`)}`).join('\n');
 const MATRIX_MD = fs.readFileSync(path.join(NWAY, 'expected/matrix.md'), 'utf8');
 const MATRIX_JSON = JSON.parse(fs.readFileSync(path.join(NWAY, 'expected/matrix.json'), 'utf8'));
@@ -785,7 +795,6 @@ async function runReal(extra = {}, variants = nwayVariants()) {
   const repo = { full_name: 'o/r' };
   fs.writeFileSync(eventPath, JSON.stringify({ repository: { private: false }, pull_request: { number: 7, head: { repo }, base: { repo } } }));
   s.env.GITHUB_EVENT_PATH = eventPath;
-  s.env.GITHUB_WORKSPACE = path.dirname(s.output);
   const gh = fakeGithub();
   const logs = [];
   const orig = process.stdout.write;
@@ -846,7 +855,7 @@ test('action_variants_should_post_notice_only_report_and_pass_when_reference_fil
 });
 
 test('action_variants_should_drop_empty_variant_post_matrix_and_pass_when_not_strict', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-e2e-empty-'));
+  const dir = fs.mkdtempSync(path.join(VWS, 'bd-e2e-empty-'));
   fs.writeFileSync(path.join(dir, 'heap.txt'), '');
   const variants = `quick=${path.join(NWAY, 'quick.txt')}\nheap=${path.join(dir, 'heap.txt')}\nmerge=${path.join(NWAY, 'merge.txt')}`;
   const r = await runReal({ INPUT_REFERENCE: 'quick', 'INPUT_FAIL-ON-REGRESSION': '100' }, variants);
@@ -867,7 +876,7 @@ test('action_variants_should_reject_head_or_base_combined_with_variants_before_a
 });
 
 test('action_variants_should_expose_svgs_and_strip_placeholders_when_charts_ranking_distribution_and_publish_images_false', async () => {
-  const svgDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bd-e2e-svg-')), 'out');
+  const svgDir = path.join(fs.mkdtempSync(path.join(VWS, 'bd-e2e-svg-')), 'out');
   const r = await runReal({ INPUT_REFERENCE: 'quick', INPUT_CHARTS: 'ranking,distribution', 'INPUT_PUBLISH-IMAGES': 'false', 'INPUT_SVG-DIR': svgDir });
   assert.equal(r.error, undefined, r.error?.message);
   assert.equal(r.gh.publishCalls().length, 0, 'nothing hosted');
@@ -894,7 +903,6 @@ test('action_variants_should_pass_the_job_when_chart_hosting_fails_with_a_permis
   const repo = { full_name: 'o/r' };
   fs.writeFileSync(eventPath, JSON.stringify({ repository: { private: false }, pull_request: { number: 7, head: { repo }, base: { repo } } }));
   s.env.GITHUB_EVENT_PATH = eventPath;
-  s.env.GITHUB_WORKSPACE = path.dirname(s.output);
   const gh = fakeGithub({ failStatus: 403 });
   await withEnv(s.env, () => main({ fetchImpl: gh.fetchImpl }));
   assert.ok(!commentBody(gh).includes('benchdiff-svg:'));
@@ -946,7 +954,176 @@ test('release_workflow_should_upload_svg_paths_and_never_set_publish_images_when
   assert.match(wf, /SVG_PATHS: \$\{\{ steps\.diff\.outputs\.svg-paths \}\}/);
   assert.match(wf, /gh release upload "\$TAG" "\$\{assets\[@\]\}" --clobber/);
   assert.match(wf, /assets\+=\("\$svg"\)/);
-  assert.match(wf, /svg-embed: \$\{\{ inputs\.charts != '' && 'false' \|\| '' \}\}/);
+  assert.match(wf, /^ {10}svg-embed: 'false'$/m, 'embedding is always off, even when a config file enables charts');
+  assert.ok(!/^permissions:/m.test(wf), 'no workflow-level permissions');
+  assert.match(wf, /^ {4}permissions:\n {6}contents: write$/m, 'contents: write is scoped to the job');
   const code = wf.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
   assert.ok(!/publish-images/.test(code), 'workflow never sets publish-images');
+});
+
+// ---- Phase 6 review fixes ----
+
+test('clip_should_balance_details_and_keep_the_notice_when_a_stripped_open_block_is_cut', () => {
+  const rows = Array.from({ length: 30000 }, (_, i) => `row ${i}`).join('\n');
+  const body = `${MARKER}\n## T\n\n<details open>\n<summary>Chart data (text)</summary>\n\n${rows}\n\n</details>\n`;
+  const out = clip(body, MARKER);
+  assert.equal((out.match(/<details[\s>]/g) || []).length, (out.match(/<\/details>/g) || []).length);
+  assert.ok(out.indexOf('Report truncated') > out.lastIndexOf('<details open>'));
+  assert.ok(out.indexOf('Report truncated') > out.lastIndexOf('</details>') - 1);
+  assert.ok(out.trimEnd().endsWith(MARKER));
+});
+
+test('expand_should_skip_a_dangling_symlink_and_use_the_valid_file', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-dangle-'));
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'x');
+  fs.symlinkSync(path.join(dir, 'missing-target'), path.join(dir, 'b.txt'));
+  assert.deepEqual(expand('*.txt', dir), [path.join(dir, 'a.txt')]);
+  assert.deepEqual(expand('b.txt', dir), []);
+  assert.deepEqual(resolveOne('*.txt', dir), [path.join(dir, 'a.txt')]);
+});
+
+test('main_should_report_no_files_match_when_the_only_glob_hit_is_a_dangling_symlink', async () => {
+  const s = wsSetup();
+  fs.symlinkSync(path.join(s.ws, 'nowhere'), path.join(s.ws, 'dangling.txt'));
+  s.env.INPUT_HEAD = path.join(s.ws, 'dangling.txt');
+  await withEnv(s.env, async () => {
+    await assert.rejects(main({ runWasm: fakeWasm({ svgs: [] }).run }), /no head files match/);
+  });
+});
+
+test('logLine_should_strip_carriage_returns_and_control_characters_from_chart_skip_reasons', async () => {
+  const s = chartSetup();
+  const fake = fakeWasm({ stderr: 'charts: produced=1 skipped=1\nnotice: delta chart skipped: bad\rname\u001b[31m\u0007 here\n' });
+  const log = await runCaptured(s, fake, fakeGithub());
+  assert.ok(!/[\r\u001b\u0007]/.test(log), JSON.stringify(log));
+  assert.match(log, /delta chart skipped: bad/);
+});
+
+test('setOutputs_should_use_a_heredoc_for_carriage_returns_and_redraw_the_delimiter_on_collision', () => {
+  const crypto = require('node:crypto');
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bd-out-')), 'output');
+  const process_ = process.env.GITHUB_OUTPUT;
+  process.env.GITHUB_OUTPUT = file;
+  const orig = crypto.randomBytes;
+  const seq = [Buffer.from('0000000000000001', 'hex'), Buffer.from('0000000000000002', 'hex')];
+  crypto.randomBytes = () => seq.shift();
+  try {
+    setOutputs({ a: 'x\ry', b: 'benchdiff_0000000000000001\nz' });
+  } finally {
+    crypto.randomBytes = orig;
+    if (process_ === undefined) delete process.env.GITHUB_OUTPUT; else process.env.GITHUB_OUTPUT = process_;
+  }
+  const text = fs.readFileSync(file, 'utf8');
+  assert.ok(text.startsWith('a<<benchdiff_'), text);
+  assert.ok(text.includes('b<<benchdiff_0000000000000002\nbenchdiff_0000000000000001\nz\nbenchdiff_0000000000000002\n'), text);
+});
+
+/** A workspace dir holding head.txt, with GITHUB_WORKSPACE pointed at it; fake-wasm friendly. */
+function wsSetup(extra = {}) {
+  const s = setup('');
+  const dir = path.dirname(s.output);
+  const ws = path.join(dir, 'ws');
+  fs.mkdirSync(ws);
+  fs.writeFileSync(path.join(ws, 'head.txt'), 'BenchmarkX-8 \t 1000 \t 1000.0 ns/op\n');
+  delete s.env.INPUT_BASE;
+  Object.assign(s.env, { INPUT_HEAD: path.join(ws, 'head.txt'), GITHUB_WORKSPACE: ws, ...extra });
+  return { ...s, dir, ws };
+}
+const outsideFile = () => {
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bd-outside-')), 'secret.txt');
+  fs.writeFileSync(f, 'BenchmarkX-8 \t 1000 \t 1000.0 ns/op\n');
+  return f;
+};
+const rejectsOutside = async (s, input) => withEnv(s.env, async () => {
+  await assert.rejects(main({ runWasm: fakeWasm({ svgs: [] }).run }), new RegExp(`${input} '.*' resolves outside the workspace`));
+});
+
+test('main_should_reject_a_head_path_that_escapes_the_workspace_with_dotdot', async () => {
+  const s = wsSetup();
+  const out = outsideFile();
+  s.env.INPUT_HEAD = path.relative(s.ws, out);
+  await withEnv(s.env, async () => {
+    const cwd = process.cwd();
+    process.chdir(s.ws);
+    try { await assert.rejects(main({ runWasm: fakeWasm({ svgs: [] }).run }), /head '.*secret\.txt' resolves outside the workspace/); } finally { process.chdir(cwd); }
+  });
+});
+
+test('main_should_reject_a_head_symlink_that_points_outside_the_workspace', async () => {
+  const s = wsSetup();
+  fs.symlinkSync(outsideFile(), path.join(s.ws, 'link.txt'));
+  s.env.INPUT_HEAD = path.join(s.ws, 'link.txt');
+  await rejectsOutside(s, 'head');
+});
+
+test('main_should_reject_base_variant_and_config_paths_outside_the_workspace', async () => {
+  const out = outsideFile();
+  const base = wsSetup(); base.env.INPUT_BASE = out;
+  await rejectsOutside(base, 'base');
+  const cfg = wsSetup(); cfg.env.INPUT_CONFIG = out;
+  await rejectsOutside(cfg, 'config');
+  const variants = wsSetup(); delete variants.env.INPUT_HEAD;
+  variants.env.INPUT_VARIANTS = `a=${path.join(variants.ws, 'head.txt')}\nb=${out}`;
+  await rejectsOutside(variants, 'variants');
+});
+
+test('main_should_reject_an_svg_dir_outside_the_workspace_and_accept_one_inside', async () => {
+  const outside = wsSetup({ INPUT_CHARTS: 'delta', 'INPUT_SVG-DIR': '../escape' });
+  await rejectsOutside(outside, 'svg-dir');
+  const inside = wsSetup({ INPUT_CHARTS: 'delta', 'INPUT_SVG-DIR': 'out/svgs' });
+  await withEnv(inside.env, () => main({ runWasm: fakeWasm().run }));
+  assert.ok(fs.existsSync(path.join(inside.ws, 'out/svgs/delta.svg')));
+});
+
+test('main_should_warn_in_log_when_svg_exceeds_100kb', async () => {
+  const s = chartSetup();
+  const big = `<svg xmlns="http://www.w3.org/2000/svg">${'a'.repeat(150 * 1024)}</svg>`;
+  const fake = fakeWasm({ svgContent: big });
+  const log = await runCaptured(s, fake, fakeGithub());
+  assert.match(log, /^::warning::delta\.svg is 150 KB \(over the 100 KB guideline\)$/m);
+  const small = await runCaptured(chartSetup(), fakeWasm(), fakeGithub());
+  assert.ok(!/100 KB guideline/.test(small));
+});
+
+test('main_should_embed_when_charts_only_in_config_file_and_svg_embed_input_unset', async () => {
+  const s = chartSetup({ INPUT_CHARTS: '' });
+  const dir = path.dirname(s.output);
+  fs.writeFileSync(path.join(dir, 'base.txt'), 'BenchmarkX-8 \t 1000 \t 1000.0 ns/op\n');
+  fs.writeFileSync(path.join(dir, 'head.txt'), 'BenchmarkX-8 \t 1000 \t 1200.0 ns/op\n');
+  fs.writeFileSync(path.join(dir, 'bd.config.json'), JSON.stringify({ version: 1, charts: 'delta' }));
+  Object.assign(s.env, { INPUT_HEAD: path.join(dir, 'head.txt'), INPUT_BASE: path.join(dir, 'base.txt'), INPUT_CONFIG: path.join(dir, 'bd.config.json') });
+  const gh = fakeGithub();
+  const logs = [];
+  const orig = process.stdout.write;
+  process.stdout.write = (c) => { logs.push(String(c)); return true; };
+  try { await withEnv(s.env, () => main({ fetchImpl: gh.fetchImpl })); } finally { process.stdout.write = orig; }
+  assert.ok(gh.publishCalls().length > 0, 'charts from the config file were hosted');
+  assert.ok(commentBody(gh).includes('raw.githubusercontent.com/o/r/'), 'comment embeds the hosted chart');
+  assert.ok(!commentBody(gh).includes('benchdiff-svg:'));
+  assert.match(logs.join(''), /^images: published 1 file to benchdiff-assets@/m);
+});
+
+test('ux_s4_5_should_log_the_publishing_line_before_the_first_git_request', async () => {
+  const s = chartSetup();
+  const gh = fakeGithub();
+  const logs = [];
+  let logLengthAtFirstGit = -1;
+  const wrapped = (url, init) => {
+    if (logLengthAtFirstGit < 0 && url.includes('/git/')) logLengthAtFirstGit = logs.join('').length;
+    return gh.fetchImpl(url, init);
+  };
+  const orig = process.stdout.write;
+  process.stdout.write = (c) => { logs.push(String(c)); return true; };
+  try { await withEnv(s.env, () => main({ runWasm: fakeWasm().run, fetchImpl: wrapped })); } finally { process.stdout.write = orig; }
+  assert.ok(logLengthAtFirstGit >= 0, 'a /git/ request was made');
+  assert.match(logs.join('').slice(0, logLengthAtFirstGit), /^images: publishing to branch benchdiff-assets /m);
+});
+
+test('ci_workflow_should_run_wasm_fresh_on_tags_and_pass_event_data_through_env', () => {
+  const wf = fs.readFileSync(path.join(root, '.github/workflows/ci.yml'), 'utf8');
+  assert.match(wf, /^ {4}tags: \['v\*'\]$/m);
+  assert.match(wf, /BASE_REF: \$\{\{ github\.base_ref \}\}/);
+  assert.match(wf, /EVENT: \$\{\{ github\.event_name \}\}/);
+  const run = wf.slice(wf.indexOf('touched dist/'));
+  assert.ok(!/\$\{\{ github\.(base_ref|event_name) \}\}"/.test(run.split('env:')[1].split('run:')[1]), 'no expressions inside the script');
 });
