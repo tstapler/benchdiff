@@ -146,4 +146,4 @@ Opt-in: all new behavior behind new inputs/flags/config (default off, so existin
 - **Added to existing scope, not new epics**: a non-text contrast rule (3:1 for bars and markers) and a forced-colors/print note for charts, and the first-run permission guidance for `charts: delta` alone. Each is an accessibility or documentation consequence of the SVG requirement.
 
 ## Falsifier baseline result
-Not yet run (plan task 0.3.1b, gate G0). Task 0.3.1b appends here: the readers (or the waiver reason), their answers to Q1-Q3 on today's pairwise output, the seconds, and the decision (`proceed` or `stop after Phase 1`).
+Run 2026-11-01 (task 0.3.1b, gate G0). Reader: the owner only (single reader; the 2-reader requirement was not met, so confidence is low). Result: the owner reported missing at least one of Q1-Q3 or exceeding 60 seconds on today's pairwise output (self-reported; exact answers and seconds not recorded). Decision: `proceed`.
