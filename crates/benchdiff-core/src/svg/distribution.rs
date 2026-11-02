@@ -8,7 +8,8 @@ use super::style::{Palette, Theme};
 use super::text::truncate_to_width;
 use super::writer::{Anchor, NonFiniteError, PathBuilder, SvgWriter};
 use super::{
-    select_rows_where, ChartTheme, RowRef, Selected, SkipReason, SvgFile, SvgInput, SvgOptions,
+    select_rows_where, ChartRows, ChartTheme, RowRef, Selected, SkipReason, SvgFile, SvgInput,
+    SvgOptions,
 };
 use crate::compare::{Report, Samples};
 use crate::matrix::{Cell, MatrixReport, MatrixRow};
@@ -72,13 +73,7 @@ pub fn distribution_chart_themed(
     opts: &SvgOptions,
     theme: Theme,
 ) -> Result<SvgFile, SkipReason> {
-    let both_sided = |row: &RowRef| match row {
-        RowRef::Pair(r) => {
-            !finite(&r.samples.base).is_empty() && !finite(&r.samples.head).is_empty()
-        }
-        RowRef::Matrix(_) => false,
-    };
-    let selected = select_rows_where(&SvgInput::Pair(report), opts, &both_sided);
+    let (selected, constants) = pair_selection(report, opts);
     let blocks = selected
         .rows
         .iter()
@@ -108,7 +103,7 @@ pub fn distribution_chart_themed(
             })
         })
         .collect();
-    finish(blocks, &selected, opts, theme, Mode::Pair)
+    finish(blocks, &selected, &constants, opts, theme, Mode::Pair)
 }
 
 /// N-way distribution chart: one lane per variant that has samples, for the `opts.rows`
@@ -126,26 +121,8 @@ pub fn distribution_matrix_chart_themed(
     opts: &SvgOptions,
     theme: Theme,
 ) -> Result<SvgFile, SkipReason> {
-    let lanes_of = |row: &MatrixRow| -> Vec<Lane> {
-        let mut lanes = vec![];
-        for (i, (col, cell)) in report.columns.iter().zip(&row.cells).enumerate() {
-            let Cell::Present(p) = cell else { continue };
-            // The reference column has no `Compared` data but still has samples to show.
-            let values = finite(&p.samples.head);
-            if values.is_empty() || lanes.len() >= opts.max_series {
-                continue;
-            }
-            lanes.push(Lane {
-                name: col.as_str().to_string(),
-                series: i,
-                hollow: false,
-                values,
-            });
-        }
-        lanes
-    };
-    let has_lanes = |row: &RowRef| matches!(row, RowRef::Matrix(r) if !lanes_of(r).is_empty());
-    let selected = select_rows_where(&SvgInput::Matrix(report), opts, &has_lanes);
+    let (selected, constants) = matrix_selection(report, opts);
+    let lanes_of = |row: &MatrixRow| matrix_lanes(report, row, opts);
     let blocks = selected
         .rows
         .iter()
@@ -161,7 +138,148 @@ pub fn distribution_matrix_chart_themed(
             })
         })
         .collect();
-    finish(blocks, &selected, opts, theme, Mode::Matrix)
+    finish(blocks, &selected, &constants, opts, theme, Mode::Matrix)
+}
+
+/// Rows the chart leaves out because every sample of every lane is one value: they would draw as
+/// a column of identical dots, so they are counted and named in one footer line instead.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(super) struct ConstantRows {
+    count: usize,
+    /// The first `CONST_NAMES_SHOWN` names, in chart order (largest change first).
+    names: Vec<String>,
+}
+
+const CONST_NAMES_SHOWN: usize = 5;
+const CONST_NAME_MAX_CHARS: usize = 40;
+
+impl ConstantRows {
+    /// `N rows with constant values not drawn: a, b and M more`; `None` when none were collapsed.
+    pub(super) fn line(&self) -> Option<String> {
+        if self.count == 0 {
+            return None;
+        }
+        let noun = if self.count == 1 { "row" } else { "rows" };
+        let rest = self.count.saturating_sub(self.names.len());
+        let tail = if rest > 0 {
+            format!(" and {rest} more")
+        } else {
+            String::new()
+        };
+        let list = self.names.join(", ");
+        Some(format!(
+            "{} {noun} with constant values not drawn: {list}{tail}",
+            self.count
+        ))
+    }
+}
+
+/// `label (unit)`: rows such as `Sort` in `ns/op` and `B/op` share a label, the unit tells them apart.
+fn constant_name(row: &RowRef) -> String {
+    let (label, unit) = match row {
+        RowRef::Pair(r) => (r.label(), &r.unit),
+        RowRef::Matrix(r) => (r.label(), &r.unit),
+    };
+    if unit.is_empty() {
+        cut(&label, CONST_NAME_MAX_CHARS)
+    } else {
+        format!(
+            "{} ({})",
+            cut(&label, CONST_NAME_MAX_CHARS - 12),
+            cut(unit, 10)
+        )
+    }
+}
+
+/// True when the finite samples of all `lanes` together are one single value (and there is one).
+fn all_one_value<'a>(lanes: impl IntoIterator<Item = &'a [f64]>) -> bool {
+    let mut seen: Option<f64> = None;
+    for v in lanes.into_iter().flatten().filter(|v| v.is_finite()) {
+        match seen {
+            Some(s) if s != *v => return false,
+            _ => seen = Some(*v),
+        }
+    }
+    seen.is_some()
+}
+
+/// Selects the drawn rows (constant rows dropped before the cap, so the cap counts only drawn
+/// rows) and separately counts the constant rows among the same eligible rows.
+fn select_with_constants<'a>(
+    input: &SvgInput<'a>,
+    opts: &SvgOptions,
+    usable: &dyn Fn(&RowRef<'a>) -> bool,
+    constant: &dyn Fn(&RowRef<'a>) -> bool,
+) -> (Selected<'a>, ConstantRows) {
+    let selected = select_rows_where(input, opts, &|r| usable(r) && !constant(r));
+    let wide = SvgOptions {
+        rows: ChartRows::new(ChartRows::MAX).expect("MAX is a valid chart-rows"),
+        ..opts.clone()
+    };
+    let collapsed = select_rows_where(input, &wide, &|r| usable(r) && constant(r));
+    let constants = ConstantRows {
+        count: collapsed.population,
+        names: collapsed
+            .rows
+            .iter()
+            .take(CONST_NAMES_SHOWN)
+            .map(|s| constant_name(&s.row))
+            .collect(),
+    };
+    (selected, constants)
+}
+
+/// The rows the two-way distribution chart and its text block draw, plus the collapsed ones.
+pub(super) fn pair_selection<'a>(
+    report: &'a Report,
+    opts: &SvgOptions,
+) -> (Selected<'a>, ConstantRows) {
+    let both_sided = |row: &RowRef| match row {
+        RowRef::Pair(r) => {
+            !finite(&r.samples.base).is_empty() && !finite(&r.samples.head).is_empty()
+        }
+        RowRef::Matrix(_) => false,
+    };
+    let constant = |row: &RowRef| match row {
+        RowRef::Pair(r) => all_one_value([&r.samples.base[..], &r.samples.head[..]]),
+        RowRef::Matrix(_) => false,
+    };
+    select_with_constants(&SvgInput::Pair(report), opts, &both_sided, &constant)
+}
+
+/// As [`pair_selection`] for the N-way chart; a row is constant when all its drawn lanes are.
+pub(super) fn matrix_selection<'a>(
+    report: &'a MatrixReport,
+    opts: &SvgOptions,
+) -> (Selected<'a>, ConstantRows) {
+    let has_lanes = |row: &RowRef| matches!(row, RowRef::Matrix(r) if !matrix_lanes(report, r, opts).is_empty());
+    let constant = |row: &RowRef| match row {
+        RowRef::Matrix(r) => {
+            let lanes = matrix_lanes(report, r, opts);
+            all_one_value(lanes.iter().map(|l| &l.values[..]))
+        }
+        RowRef::Pair(_) => false,
+    };
+    select_with_constants(&SvgInput::Matrix(report), opts, &has_lanes, &constant)
+}
+
+fn matrix_lanes(report: &MatrixReport, row: &MatrixRow, opts: &SvgOptions) -> Vec<Lane> {
+    let mut lanes = vec![];
+    for (i, (col, cell)) in report.columns.iter().zip(&row.cells).enumerate() {
+        let Cell::Present(p) = cell else { continue };
+        // The reference column has no `Compared` data but still has samples to show.
+        let values = finite(&p.samples.head);
+        if values.is_empty() || lanes.len() >= opts.max_series {
+            continue;
+        }
+        lanes.push(Lane {
+            name: col.as_str().to_string(),
+            series: i,
+            hollow: false,
+            values,
+        });
+    }
+    lanes
 }
 
 fn theme_of(opts: &SvgOptions) -> Theme {
@@ -178,18 +296,26 @@ fn finite(values: &[f64]) -> Vec<f64> {
 fn finish(
     blocks: Vec<Block>,
     selected: &Selected,
+    constants: &ConstantRows,
     opts: &SvgOptions,
     theme: Theme,
     mode: Mode,
 ) -> Result<SvgFile, SkipReason> {
     if blocks.is_empty() {
-        return Err(SkipReason::NoSamples);
+        return Err(if constants.count > 0 {
+            SkipReason::Empty
+        } else {
+            SkipReason::NoSamples
+        });
     }
     let blocks: Vec<&Block> = blocks.iter().collect();
     let more = selected.footer();
+    let const_line = constants.line();
     let svg = render(
         &blocks,
         more.as_deref(),
+        const_line.as_deref(),
+        constants.count,
         opts.width.get() as f64,
         Palette::for_theme(theme),
         mode,
@@ -203,7 +329,7 @@ fn finish(
     Ok(SvgFile {
         name: name.to_string(),
         svg,
-        alt: alt_text(&blocks, mode),
+        alt: alt_text(&blocks, mode, constants.count),
         skipped: selected.skip_reason(),
     })
 }
@@ -267,14 +393,19 @@ fn cut(s: &str, max: usize) -> String {
 }
 
 /// At most 125 characters; the benchmark name is cut, never the counts.
-fn alt_text(blocks: &[&Block], mode: Mode) -> String {
+fn alt_text(blocks: &[&Block], mode: Mode, constant: usize) -> String {
     let what = match mode {
         Mode::Pair => "Sample distributions, base vs head",
         Mode::Matrix => "Sample distributions per variant",
     };
     let n = blocks.len();
     let plural = if n == 1 { "benchmark" } else { "benchmarks" };
-    let prefix = format!("{what}, {n} {plural}; first: ");
+    let skipped = match constant {
+        0 => String::new(),
+        1 => ", 1 constant row not drawn".to_string(),
+        c => format!(", {c} constant rows not drawn"),
+    };
+    let prefix = format!("{what}, {n} {plural}{skipped}; first: ");
     let room = ALT_MAX_CHARS.saturating_sub(prefix.chars().count()).max(1);
     format!("{prefix}{}", cut(&blocks[0].name, room))
 }
@@ -291,7 +422,7 @@ fn lane_summary(lane: &Lane, unit: &str) -> String {
     )
 }
 
-fn desc_text(blocks: &[&Block]) -> String {
+fn desc_text(blocks: &[&Block], const_line: Option<&str>) -> String {
     let top: Vec<String> = blocks
         .iter()
         .take(DESC_TOP)
@@ -300,8 +431,9 @@ fn desc_text(blocks: &[&Block]) -> String {
             format!("{} ({})", cut(&b.name, NAME_MAX_CHARS), lanes.join("; "))
         })
         .collect();
+    let collapsed = const_line.map(|l| format!(" {l}.")).unwrap_or_default();
     format!(
-        "Each dot is one sample; the tick marks the median. Largest change first: {}.",
+        "Each dot is one sample; the tick marks the median. Largest change first: {}.{collapsed}",
         top.join(" | ")
     )
 }
@@ -321,6 +453,8 @@ fn dot(p: &mut PathBuilder, cx: f64, cy: f64) {
 fn render(
     blocks: &[&Block],
     more: Option<&str>,
+    const_line: Option<&str>,
+    constant: usize,
     width: f64,
     pal: Palette,
     mode: Mode,
@@ -329,15 +463,16 @@ fn render(
     let plot_r = width - PAD;
     let block_h = |b: &Block| TITLE_H + b.lanes.len() as f64 * LANE_H + AXIS_H + BLOCK_GAP;
     let body_h: f64 = blocks.iter().map(|b| block_h(b)).sum();
-    let footer_h = FOOTER_H + if more.is_some() { MORE_LINE_H } else { 0.0 };
+    let extra_lines = usize::from(more.is_some()) + usize::from(const_line.is_some());
+    let footer_h = FOOTER_H + extra_lines as f64 * MORE_LINE_H;
     let height = HEADER_H + body_h + footer_h;
 
     let mut d = SvgWriter::new_accessible(
         width,
         height,
         "Helvetica, Arial, sans-serif",
-        &alt_text(blocks, mode),
-        &desc_text(blocks),
+        &alt_text(blocks, mode, constant),
+        &desc_text(blocks, const_line),
     );
     d.rect_fill(0.0, 0.0, width, height, 8.0, pal.card);
     let title = match mode {
@@ -459,8 +594,11 @@ fn render(
         pal.secondary,
         "Largest change first. Lanes in a benchmark share one axis.",
     );
-    if let Some(more) = more {
-        d.text_styled(PAD, fy + 36.0, Anchor::Start, FONT_PX, pal.secondary, more);
+    let mut note_y = fy + 36.0;
+    for line in more.into_iter().chain(const_line) {
+        let line = truncate_to_width(line, FONT_PX, width - 2.0 * PAD);
+        d.text_styled(PAD, note_y, Anchor::Start, FONT_PX, pal.secondary, &line);
+        note_y += MORE_LINE_H;
     }
     d.finish()
 }
@@ -635,12 +773,14 @@ mod tests {
     }
 
     #[test]
-    fn distribution_chart_should_handle_identical_values_and_drop_non_finite() {
+    fn distribution_chart_should_drop_non_finite_samples() {
+        let mut moving = ten(0.0);
+        moving[3] = f64::NAN;
         let r = report(vec![row(
-            "Flat",
-            Some(0.0),
-            vec![5.0, 5.0, f64::NAN],
-            vec![5.0, f64::INFINITY, 5.0],
+            "Moving",
+            Some(2.0),
+            moving,
+            vec![5.0, f64::INFINITY, 6.0],
         )]);
         let f = distribution_chart(&r, &opts(ChartTheme::Light)).unwrap();
         assert!(!f.svg.contains("NaN") && !f.svg.contains("inf"));
@@ -777,5 +917,196 @@ mod tests {
         let f = distribution_chart(&r, &SvgOptions::default()).unwrap();
         assert!(f.svg.contains("+ 27 more not shown"));
         assert!(f.svg.contains("1. b19") && !f.svg.contains("b20"));
+    }
+
+    fn flat(name: &str, v: f64) -> Row {
+        row(name, Some(0.0), vec![v; 10], vec![v; 10])
+    }
+
+    #[test]
+    fn distribution_chart_should_collapse_constant_rows_into_one_footer_line_when_mixed() {
+        let r = report(vec![
+            flat("B/op", 0.0),
+            row("Sort", Some(-20.0), ten(0.0), ten(-20.0)),
+            flat("allocs/op", 0.0),
+        ]);
+        let f = distribution_chart(&r, &opts(ChartTheme::Light)).unwrap();
+        assert!(
+            f.svg.contains(
+                ">2 rows with constant values not drawn: B/op (ns), allocs/op (ns)</text>"
+            ),
+            "{}",
+            f.svg
+        );
+        assert!(
+            f.svg.contains("1. Sort") && !f.svg.contains("2. "),
+            "{}",
+            f.svg
+        );
+        assert!(f.svg.contains(">1 benchmark</text>"));
+        assert!(f.alt.contains("2 constant rows not drawn"), "{}", f.alt);
+        assert!(f.alt.chars().count() <= 125);
+        assert!(f.svg.contains("2 rows with constant values not drawn") && f.svg.contains("<desc"));
+        let desc = &f.svg[f.svg.find("<desc").unwrap()..];
+        assert!(desc[..desc.find("</desc>").unwrap()].contains("constant values not drawn"));
+        assert_eq!(f.skipped, None);
+    }
+
+    #[test]
+    fn distribution_chart_should_skip_empty_when_every_row_is_constant() {
+        let r = report(vec![flat("B/op", 0.0), flat("allocs/op", 3.0)]);
+        assert_eq!(
+            distribution_chart(&r, &opts(ChartTheme::Light)).unwrap_err(),
+            SkipReason::Empty
+        );
+        // constant after dropping non-finite samples
+        let nan = report(vec![row(
+            "Flat",
+            Some(0.0),
+            vec![5.0, 5.0, f64::NAN],
+            vec![5.0, f64::INFINITY, 5.0],
+        )]);
+        assert_eq!(
+            distribution_chart(&nan, &opts(ChartTheme::Light)).unwrap_err(),
+            SkipReason::Empty
+        );
+        // no samples at all stays NoSamples
+        let none = report(vec![row("Sort", Some(5.0), vec![], vec![])]);
+        assert_eq!(
+            distribution_chart(&none, &opts(ChartTheme::Light)).unwrap_err(),
+            SkipReason::NoSamples
+        );
+    }
+
+    #[test]
+    fn distribution_chart_should_treat_rows_as_constant_only_when_all_lanes_share_one_value() {
+        let one = |b: f64, h: f64| {
+            report(vec![
+                row("Moving", Some(9.0), ten(0.0), ten(5.0)),
+                row("Probe", Some(0.0), vec![b], vec![h]),
+            ])
+        };
+        // single-sample lanes, same value: collapsed
+        let f = distribution_chart(&one(5.0, 5.0), &opts(ChartTheme::Light)).unwrap();
+        assert!(f
+            .svg
+            .contains("1 row with constant values not drawn: Probe"));
+        // identical within each lane but lanes differ: drawn
+        let f = distribution_chart(&one(5.0, 6.0), &opts(ChartTheme::Light)).unwrap();
+        assert!(f.svg.contains("2. Probe") && !f.svg.contains("constant values"));
+        let two = report(vec![
+            row("Moving", Some(9.0), ten(0.0), ten(5.0)),
+            row("Probe", Some(0.0), vec![5.0; 3], vec![6.0; 3]),
+        ]);
+        let f = distribution_chart(&two, &opts(ChartTheme::Light)).unwrap();
+        assert!(f.svg.contains("2. Probe") && !f.svg.contains("constant values"));
+    }
+
+    #[test]
+    fn distribution_chart_should_count_only_drawn_rows_against_the_cap_when_constants_present() {
+        let mut rows: Vec<Row> = (0..40)
+            .map(|i| row(&format!("v{i}"), Some(1.0 + i as f64), ten(0.0), ten(1.0)))
+            .collect();
+        rows.extend((0..8).map(|i| flat(&format!("c{i}"), 0.0)));
+        let f = distribution_chart(&report(rows), &SvgOptions::default()).unwrap();
+        // 30 drawn (cap counts only non-constant rows), 10 cut, 8 constant
+        assert_eq!(f.svg.matches(". v").count(), 30 * 3);
+        assert!(f.svg.contains(">+ 10 more not shown</text>"), "{}", f.svg);
+        assert!(
+            f.svg.contains(
+                ">8 rows with constant values not drawn: c0 (ns), c1 (ns), c2 (ns), c3 (ns), c4 (ns) and 3 more</text>"
+            ),
+            "{}",
+            f.svg
+        );
+        assert_eq!(
+            f.skipped,
+            Some(SkipReason::CapExceeded {
+                shown: 30,
+                total: 40
+            })
+        );
+    }
+
+    fn matrix_with_allocs(second: [f64; 3]) -> MatrixReport {
+        let var = |label: &str, v: f64, alloc: f64| Variant {
+            label: VariantLabel::parse(label).unwrap(),
+            set: MetricSet {
+                metrics: vec![
+                    {
+                        let mut m = Metric::new("", "Sort", "", "ns", v, Better::Lower);
+                        m.samples = (0..10).map(|i| v + i as f64).collect();
+                        m
+                    },
+                    {
+                        let mut m =
+                            Metric::new("", "allocs", "", "allocs/op", alloc, Better::Lower);
+                        m.samples = vec![alloc; 10];
+                        m
+                    },
+                ],
+                ..Default::default()
+            },
+        };
+        compare_matrix(
+            &[
+                var("quick", 100.0, second[0]),
+                var("heap", 130.0, second[1]),
+                var("merge", 80.0, second[2]),
+            ],
+            &Options {
+                keep_samples: true,
+                ..Options::default()
+            },
+            &MatrixOptions {
+                compare_by: "impl".into(),
+                ..MatrixOptions::default()
+            },
+        )
+    }
+
+    #[test]
+    fn distribution_matrix_chart_should_collapse_rows_constant_across_all_lanes() {
+        let f = distribution_matrix_chart(&matrix_with_allocs([0.0; 3]), &opts(ChartTheme::Light))
+            .unwrap();
+        assert!(f
+            .svg
+            .contains("1 row with constant values not drawn: allocs"));
+        assert!(f.svg.contains(">1 benchmark</text>") && f.svg.contains("1. Sort"));
+        assert!(f.alt.contains("1 constant row not drawn"), "{}", f.alt);
+        // lanes with different constants are not constant
+        let g = distribution_matrix_chart(
+            &matrix_with_allocs([0.0, 1.0, 0.0]),
+            &opts(ChartTheme::Light),
+        )
+        .unwrap();
+        assert!(!g.svg.contains("constant values"));
+        assert!(g.svg.contains(">2 benchmarks</text>"));
+        // every row constant
+        let mut all = matrix_with_allocs([0.0; 3]);
+        all.rows.retain(|r| r.label().contains("allocs"));
+        assert_eq!(
+            distribution_matrix_chart(&all, &opts(ChartTheme::Light)).unwrap_err(),
+            SkipReason::Empty
+        );
+    }
+
+    #[test]
+    fn distribution_text_table_should_follow_the_chart_and_mention_collapsed_rows() {
+        let m = matrix_with_allocs([0.0; 3]);
+        let md = super::super::render_text_table(
+            &SvgInput::Matrix(&m),
+            super::super::ChartKind::Distribution,
+            &opts(ChartTheme::Light),
+        )
+        .unwrap();
+        assert!(
+            md.contains("| 1 | Sort |") && !md.contains("allocs |"),
+            "{md}"
+        );
+        assert!(
+            md.contains("1 row with constant values not drawn: allocs"),
+            "{md}"
+        );
     }
 }

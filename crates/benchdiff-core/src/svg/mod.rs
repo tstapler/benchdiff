@@ -664,15 +664,17 @@ fn distribution_cell(values: &[f64], unit: &str) -> String {
     )
 }
 
+/// The cap notice plus the collapsed-constant-rows line, as the chart footer shows them.
+fn with_constants(
+    notice: Option<String>,
+    constants: &distribution::ConstantRows,
+) -> Option<String> {
+    let lines: Vec<String> = notice.into_iter().chain(constants.line()).collect();
+    (!lines.is_empty()).then(|| lines.join("\n\n"))
+}
+
 fn distribution_pair_table(report: &Report, opts: &SvgOptions) -> TextTable {
-    let both_sided = |row: &RowRef| match row {
-        RowRef::Pair(r) => {
-            r.samples.base.iter().any(|v| v.is_finite())
-                && r.samples.head.iter().any(|v| v.is_finite())
-        }
-        RowRef::Matrix(_) => false,
-    };
-    let selected = select_rows_where(&SvgInput::Pair(report), opts, &both_sided);
+    let (selected, constants) = distribution::pair_selection(report, opts);
     let rows = selected
         .rows
         .iter()
@@ -691,7 +693,7 @@ fn distribution_pair_table(report: &Report, opts: &SvgOptions) -> TextTable {
         columns: vec!["base".into(), "head".into()],
         rows,
         uncharted: 0,
-        notice: selected.notice(),
+        notice: with_constants(selected.notice(), &constants),
     }
 }
 
@@ -709,8 +711,7 @@ fn distribution_matrix_table(report: &MatrixReport, opts: &SvgOptions) -> TextTa
             .take(opts.max_series)
             .collect()
     };
-    let has_lanes = |row: &RowRef| matches!(row, RowRef::Matrix(r) if !lanes_of(r).is_empty());
-    let selected = select_rows_where(&SvgInput::Matrix(report), opts, &has_lanes);
+    let (selected, constants) = distribution::matrix_selection(report, opts);
     let lanes: Vec<_> = selected
         .rows
         .iter()
@@ -747,7 +748,7 @@ fn distribution_matrix_table(report: &MatrixReport, opts: &SvgOptions) -> TextTa
             .collect(),
         rows,
         uncharted: 0,
-        notice: selected.notice(),
+        notice: with_constants(selected.notice(), &constants),
     }
 }
 
