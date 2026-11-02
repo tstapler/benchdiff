@@ -166,6 +166,8 @@ const mkCtx = (extra = {}) => ({
   token: 'ghs_SECRET_TOKEN',
   repository: 'o/r',
   tag: 'default',
+  eventName: 'pull_request',
+  event: { repository: { private: false }, pull_request: { head: { repo: { full_name: 'o/r' } }, base: { repo: { full_name: 'o/r' } } } },
   apiUrl: 'https://api.github.com',
   rawBase: 'https://raw.githubusercontent.com',
   sleep: async () => {},
@@ -269,4 +271,72 @@ test('publishImages_should_use_hashed_tag_path_and_honour_api_url_and_raw_base_w
 test('publishImages_should_stay_disabled_without_token_or_repository', async () => {
   const r = await publishImages(FILES, { fetch: async () => { throw new Error('no network'); } });
   assert.equal(r.reason, 'disabled');
+});
+
+// ---- 4.1.2b: gating and reason mapping (no network before the decision) ----
+async function gated(extra, expectedReason) {
+  let fetches = 0;
+  const r = await publishImages(FILES, mkCtx({ fetch: async () => { fetches += 1; throw new Error('must not be called'); }, ...extra }));
+  assert.deepEqual(r, { error: ERRORS[expectedReason], reason: expectedReason });
+  assert.equal(fetches, 0, 'zero fetch calls');
+  assert.ok(!JSON.stringify(r).includes('SECRET'));
+}
+const prEvent = (head, base, priv = false) => ({ repository: { private: priv }, pull_request: { head: { repo: head && { full_name: head } }, base: { repo: { full_name: base } } } });
+
+test('publishImages_should_return_private_without_network_when_repository_private', async () => {
+  await gated({ event: prEvent('o/r', 'o/r', true) }, 'private');
+  await gated({ eventName: 'push', event: { repository: { private: true } } }, 'private');
+});
+
+test('publishImages_should_return_fork_without_network_when_head_repo_differs_from_base', async () => {
+  await gated({ event: prEvent('x/r', 'o/r') }, 'fork');
+  await gated({ event: prEvent(null, 'o/r') }, 'fork');
+});
+
+test('publishImages_should_return_unsupported_host_without_network_when_server_url_not_github_com', async () => {
+  await gated({ serverUrl: 'https://ghe.example.com' }, 'unsupported-host');
+  await gated({ serverUrl: 'https://github.com.evil.example' }, 'unsupported-host');
+});
+
+test('publishImages_should_return_no_event_without_network_when_payload_missing_or_unparseable', async () => {
+  await gated({ event: undefined }, 'no-event');
+  await gated({ event: '{not json' }, 'no-event');
+  await gated({ event: undefined, eventPath: path.join(root, 'does-not-exist.json') }, 'no-event');
+});
+
+test('publishImages_should_return_disabled_without_network_when_publish_images_false', async () => {
+  await gated({ enabled: false }, 'disabled');
+});
+
+test('publishImages_should_read_event_from_path_or_json_string_when_given', async () => {
+  const f = path.join(require('node:os').tmpdir(), `bd-event-${process.pid}.json`);
+  fs.writeFileSync(f, JSON.stringify({ repository: { private: true } }));
+  try {
+    await gated({ event: undefined, eventPath: f, eventName: 'push' }, 'private');
+  } finally { fs.rmSync(f, { force: true }); }
+  await gated({ event: JSON.stringify(prEvent('x/r', 'o/r')) }, 'fork');
+});
+
+test('publishImages_should_publish_when_non_pr_event_on_public_repo', async () => {
+  for (const eventName of ['push', 'workflow_dispatch', 'release']) {
+    const gh = fakeGitHub();
+    const r = await publishImages(FILES, mkCtx({ fetch: gh.fetch, eventName, event: { repository: { private: false } }, serverUrl: 'https://github.com' }));
+    assert.ok(r.urls, `${eventName}: ${JSON.stringify(r)}`);
+  }
+});
+
+test('publishImages_should_publish_when_same_repo_pr_on_public_repo', async () => {
+  const gh = fakeGitHub();
+  assert.ok((await publishImages(FILES, mkCtx({ fetch: gh.fetch }))).urls);
+});
+
+test('publishImages_should_return_permission_when_write_responds_403', async () => {
+  const mk = (failOn) => {
+    const gh = fakeGitHub();
+    return (u, i) => (failOn(u, i) ? { ok: false, status: 403, json: async () => ({ message: 'ghs_SECRET_TOKEN' }), text: async () => '' } : gh.fetch(u, i));
+  };
+  for (const failOn of [(u) => u.endsWith('/git/blobs'), (u, i) => i?.method === 'PATCH']) {
+    const r = await publishImages(FILES, mkCtx({ fetch: mk(failOn) }));
+    assert.deepEqual(r, { error: ERRORS.permission, reason: 'permission' });
+  }
 });
