@@ -59,11 +59,10 @@ on:
         type: string
         required: true
 
-permissions:
-  contents: write
-
 jobs:
   benchmarks:
+    permissions:
+      contents: write
     runs-on: ${{ inputs.runs-on }}
     timeout-minutes: 90
     env:
@@ -122,8 +121,9 @@ jobs:
           tag: release
           comment: 'false'
           charts: ${{ inputs.charts }}
-          # The release uploads the SVG files as assets, so skip embedding/hosting on the benchdiff-assets branch.
-          svg-embed: ${{ inputs.charts != '' && 'false' || '' }}
+          # The release uploads the SVG files as assets, so never embed/host on the benchdiff-assets branch
+          # (a config file could enable charts while inputs.charts is empty).
+          svg-embed: 'false'
           config: ${{ inputs.config }}
       - name: Attach to the release
         env:

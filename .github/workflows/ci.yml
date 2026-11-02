@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
 
 permissions:
@@ -75,9 +76,12 @@ jobs:
           fetch-depth: 0
       - name: touched dist/ or release tag
         id: gate
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          EVENT: ${{ github.event_name }}
         run: |
-          if [ "${{ github.event_name }}" = pull_request ]; then
-            git diff --name-only "origin/${{ github.base_ref }}...HEAD" | grep -qx 'dist/benchdiff.wasm' && echo run=true >> "$GITHUB_OUTPUT" || echo run=false >> "$GITHUB_OUTPUT"
+          if [ "$EVENT" = pull_request ]; then
+            git diff --name-only "origin/$BASE_REF...HEAD" | grep -qx 'dist/benchdiff.wasm' && echo run=true >> "$GITHUB_OUTPUT" || echo run=false >> "$GITHUB_OUTPUT"
           else
             echo run=true >> "$GITHUB_OUTPUT"
           fi
