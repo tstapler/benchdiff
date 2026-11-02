@@ -50,8 +50,6 @@ pub struct Dimensioned {
 }
 
 impl Dimensioned {
-    // First non-test caller is `dimensions::apply` (1.1.2d); drop this allow then.
-    #[allow(dead_code)]
     pub(crate) fn from_parts(entries: Vec<(Metric, Residual)>, skipped: Skipped) -> Self {
         Self { entries, skipped }
     }

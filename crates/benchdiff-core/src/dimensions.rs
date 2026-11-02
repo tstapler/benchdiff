@@ -1,6 +1,11 @@
 //! Dimension extraction from benchmark names (ADR-004).
 
-use crate::model::Dims;
+use std::collections::HashMap;
+use std::fmt;
+
+use crate::dimensioned::{Dimensioned, Residual};
+use crate::model::{Dims, Metric, MetricSet};
+use crate::notice::{Notice, NoticeClass};
 
 /// Result of extracting dimensions from one benchmark name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +74,7 @@ const REGEX_NEST_LIMIT: u32 = 32;
 #[derive(Debug, Clone)]
 pub struct Rule {
     dim: String,
+    pattern: String,
     re: regex_lite::Regex,
 }
 
@@ -102,6 +108,7 @@ impl Rule {
         }
         Ok(Rule {
             dim: dim.to_string(),
+            pattern: pattern.to_string(),
             re,
         })
     }
@@ -153,6 +160,156 @@ pub fn extract_with_rules(rules: &[Rule], name: &str) -> Extracted {
         }
     }
     out
+}
+
+/// Most unmatched names listed in diagnostics and strict errors.
+const MAX_LISTED: usize = 10;
+
+/// A data-dependent problem found by [`apply`] when not strict.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Diagnostic(pub String);
+
+impl Diagnostic {
+    /// The `⚠️` notice this diagnostic is shown as.
+    pub fn to_notice(&self) -> Notice {
+        Notice {
+            class: NoticeClass::Degradation,
+            text: self.0.clone(),
+        }
+    }
+}
+
+/// What [`apply`] noticed without failing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Diagnostics {
+    /// Zero-match rules and dropped collisions, in discovery order.
+    pub entries: Vec<Diagnostic>,
+    /// Names that carry no dimension, first 10 only.
+    pub unmatched: Vec<String>,
+}
+
+impl Diagnostics {
+    pub fn notices(&self) -> Vec<Notice> {
+        self.entries.iter().map(Diagnostic::to_notice).collect()
+    }
+}
+
+/// A data-dependent problem promoted to an error by `dimensions-strict`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DimError(pub String);
+
+impl fmt::Display for DimError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for DimError {}
+
+/// Splits every name of `set` into dims and a residual (ADR-004). With no
+/// `rules` the default extractor runs; with rules, names the rules leave
+/// without dims fall back to it. Zero-match rules and collisions on
+/// `(group, residual, measure, dims)` are diagnostics, or errors when `strict`
+/// (which also errors on any name left without dims). A collision keeps the
+/// first metric in input order. `set.skipped` is carried through unchanged.
+pub fn apply(
+    set: MetricSet,
+    rules: &[Rule],
+    strict: bool,
+) -> Result<(Dimensioned, Diagnostics), DimError> {
+    let mut diag = Diagnostics::default();
+    let extracted: Vec<Extracted> = set
+        .metrics
+        .iter()
+        .map(|m| extract_one(rules, &m.name))
+        .collect();
+
+    for rule in rules {
+        if let Some(text) = zero_match_text(rule, &set.metrics) {
+            if strict {
+                return Err(DimError(text));
+            }
+            diag.entries.push(Diagnostic(format!(
+                "{text}; rule skipped (set dimensions-strict to fail)"
+            )));
+        }
+    }
+
+    let mut entries: Vec<(Metric, Residual)> = Vec::with_capacity(set.metrics.len());
+    let mut seen: HashMap<(String, String, String, Dims), String> = HashMap::new();
+    let mut unmatched_total = 0usize;
+    for (mut metric, e) in set.metrics.into_iter().zip(extracted) {
+        if e.dims.is_empty() {
+            unmatched_total += 1;
+            if diag.unmatched.len() < MAX_LISTED {
+                diag.unmatched.push(metric.name.clone());
+            }
+        }
+        let identity = (
+            metric.group.clone(),
+            e.residual.clone(),
+            metric.measure.clone(),
+            e.dims.clone(),
+        );
+        if let Some(first) = seen.get(&identity) {
+            let (kept, dropped) = (first.as_str(), metric.name.as_str());
+            if strict {
+                return Err(DimError(format!(
+                    "benchmark names '{kept}' and '{dropped}' both reduce to '{}' with the same dimensions",
+                    e.residual
+                )));
+            }
+            diag.entries.push(Diagnostic(format!(
+                "kept '{kept}', dropped '{dropped}' (both reduce to '{}' with the same dimensions)",
+                e.residual
+            )));
+            continue;
+        }
+        seen.insert(identity, metric.name.clone());
+        metric.dims = e.dims;
+        entries.push((metric, Residual::new(e.residual)));
+    }
+
+    if strict && unmatched_total > 0 {
+        let more = unmatched_total.saturating_sub(diag.unmatched.len());
+        let tail = if more > 0 {
+            format!(" (and {more} more)")
+        } else {
+            String::new()
+        };
+        return Err(DimError(format!(
+            "dimensions-strict: {unmatched_total} benchmark names carry no dimension: {}{tail}",
+            diag.unmatched.join(", ")
+        )));
+    }
+    Ok((Dimensioned::from_parts(entries, set.skipped), diag))
+}
+
+fn extract_one(rules: &[Rule], name: &str) -> Extracted {
+    if rules.is_empty() {
+        return extract_defaults(name);
+    }
+    let e = extract_with_rules(rules, name);
+    if e.dims.is_empty() {
+        extract_defaults(name)
+    } else {
+        e
+    }
+}
+
+/// `Some(text)` when `rule` matches none of the raw names.
+fn zero_match_text(rule: &Rule, metrics: &[Metric]) -> Option<String> {
+    let any = metrics.iter().any(|m| rule.re.is_match(&m.name));
+    if any || metrics.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "dimension \"{}\": pattern {} matched 0 of {} benchmark names (example: \"{}\")",
+        rule.dim,
+        rule.pattern,
+        metrics.len(),
+        metrics[0].name
+    ))
 }
 
 /// Collapses doubled separators and whitespace left behind by span removal.
@@ -380,5 +537,115 @@ mod tests {
         let e = extract_with_rules(&rules, "Plain");
         assert!(e.dims.is_empty());
         assert_eq!(e.residual, "Plain");
+    }
+
+    fn set(names: &[&str]) -> MetricSet {
+        MetricSet {
+            metrics: names
+                .iter()
+                .map(|n| Metric::new("", n, "", "ns", 1.0, crate::Better::Lower))
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn residuals(d: &Dimensioned) -> Vec<&str> {
+        d.entries().map(|(_, r)| r.as_str()).collect()
+    }
+
+    #[test]
+    fn apply_should_set_dims_and_residuals_when_default_rules() {
+        let (d, diag) = apply(set(&["Sort/impl=quick/size=10", "Setup"]), &[], false).unwrap();
+        assert_eq!(residuals(&d), ["Sort", "Setup"]);
+        let metrics: Vec<_> = d.entries().map(|(m, _)| m).collect();
+        assert_eq!(metrics[0].dims, dims(&[("impl", "quick"), ("size", "10")]));
+        assert_eq!(metrics[0].name, "Sort/impl=quick/size=10");
+        assert_eq!(diag.unmatched, ["Setup"]);
+        assert!(diag.entries.is_empty());
+        assert_eq!(d.unmatched(), 1);
+    }
+
+    #[test]
+    fn apply_should_fall_back_to_defaults_when_rules_leave_name_without_dims() {
+        let rules = [Rule::parse(r"impl=-(?P<impl>\w+)$").unwrap()];
+        let (d, _) = apply(set(&["Sort-heap", "Sort/size=3"]), &rules, false).unwrap();
+        let dims_seen: Vec<_> = d.entries().map(|(m, _)| m.dims.clone()).collect();
+        assert_eq!(
+            dims_seen,
+            [dims(&[("impl", "heap")]), dims(&[("size", "3")])]
+        );
+    }
+
+    #[test]
+    fn apply_should_note_zero_match_rule_when_not_strict() {
+        let names: Vec<String> = (0..48).map(|i| format!("BenchmarkSort/size={i}")).collect();
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        let rules = [Rule::parse(r"impl=impl=(?P<impl>\w+)").unwrap()];
+        let (_, diag) = apply(set(&refs), &rules, false).unwrap();
+        let want = r#"dimension "impl": pattern impl=(?P<impl>\w+) matched 0 of 48 benchmark names (example: "BenchmarkSort/size=0"); rule skipped (set dimensions-strict to fail)"#;
+        assert_eq!(diag.entries, [Diagnostic(want.to_string())]);
+        let notice = diag.notices().remove(0);
+        assert_eq!(notice.class, NoticeClass::Degradation);
+        assert_eq!(notice.text, want);
+    }
+
+    #[test]
+    fn apply_should_error_on_zero_match_rule_when_strict() {
+        let rules = [Rule::parse(r"impl=impl=(?P<impl>\w+)").unwrap()];
+        let err = apply(set(&["BenchmarkSort/size=100"]), &rules, true).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            r#"dimension "impl": pattern impl=(?P<impl>\w+) matched 0 of 1 benchmark names (example: "BenchmarkSort/size=100")"#
+        );
+    }
+
+    #[test]
+    fn apply_should_error_naming_both_originals_when_collision_and_strict() {
+        let err = apply(set(&["Sort/impl=1", "Sort[impl=1]"]), &[], true).unwrap_err();
+        assert!(err.0.contains("'Sort/impl=1'"), "{err}");
+        assert!(err.0.contains("'Sort[impl=1]'"), "{err}");
+    }
+
+    #[test]
+    fn apply_should_keep_first_and_note_both_originals_when_collision_and_not_strict() {
+        let (d, diag) = apply(
+            set(&["Sort/impl=1", "Sort[impl=1]", "Sort/impl=2"]),
+            &[],
+            false,
+        )
+        .unwrap();
+        let names: Vec<_> = d.entries().map(|(m, _)| m.name.as_str()).collect();
+        assert_eq!(names, ["Sort/impl=1", "Sort/impl=2"]);
+        assert_eq!(diag.entries.len(), 1);
+        assert!(
+            diag.entries[0]
+                .0
+                .starts_with("kept 'Sort/impl=1', dropped 'Sort[impl=1]'"),
+            "{:?}",
+            diag.entries[0]
+        );
+    }
+
+    #[test]
+    fn apply_should_error_listing_unmatched_names_when_strict() {
+        let err = apply(set(&["Sort/impl=a", "Foo"]), &[], true).unwrap_err();
+        assert!(err.0.contains("Foo"), "{err}");
+        assert!(!err.0.contains("Sort"), "{err}");
+    }
+
+    #[test]
+    fn apply_should_list_only_first_ten_unmatched_names_when_not_strict() {
+        let names: Vec<String> = (0..15).map(|i| format!("n{i}")).collect();
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        let (_, diag) = apply(set(&refs), &[], false).unwrap();
+        assert_eq!(diag.unmatched.len(), 10);
+        assert_eq!(diag.unmatched[0], "n0");
+    }
+
+    #[test]
+    fn apply_should_keep_same_residual_apart_when_dims_differ() {
+        let (d, diag) = apply(set(&["A/impl=1", "A/impl=2"]), &[], false).unwrap();
+        assert_eq!(d.entries().count(), 2);
+        assert!(diag.entries.is_empty());
     }
 }
