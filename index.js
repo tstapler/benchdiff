@@ -8,6 +8,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { WASI } = require('node:wasi');
 
+const { PLACEHOLDER_SCHEME, publishImages, rewritePlaceholders } = require('./lib/images');
+
 const WASM_PATH = path.join(__dirname, 'dist', 'benchdiff.wasm');
 const COMMENT_LIMIT = 60000; // GitHub rejects comment bodies over 65536 characters.
 
@@ -157,7 +159,13 @@ function validateTag(tag) {
 function setOutputs(values) {
   const file = process.env.GITHUB_OUTPUT;
   if (!file) return;
-  fs.appendFileSync(file, Object.entries(values).map(([k, v]) => `${k}=${v}\n`).join(''));
+  const line = ([k, v]) => {
+    const text = String(v);
+    if (!text.includes('\n')) return `${k}=${text}\n`;
+    const delim = `benchdiff_${require('node:crypto').randomBytes(8).toString('hex')}`;
+    return `${k}<<${delim}\n${text}\n${delim}\n`;
+  };
+  fs.appendFileSync(file, Object.entries(values).map(line).join(''));
 }
 
 function pullRequestNumber() {
@@ -231,7 +239,87 @@ async function upsertComment({ token, marker, body, fetchImpl = fetch, env = pro
   }
 }
 
-async function main() {
+
+// User-facing chart and hosting messages (design/ux.md). Each names its exit path (AC-X-1);
+// test/ux_messages.test.js asserts that.
+const PERMISSIONS_SNIPPET = 'permissions:\n  contents: write        # host chart images on the benchdiff-assets branch\n  pull-requests: write   # sticky comment';
+const MESSAGES = Object.freeze({
+  publishing: 'images: publishing to branch benchdiff-assets (needs contents: write; commits are kept; see README "Hosting images")',
+  published: (n, sha) => `images: published ${n} file${n === 1 ? '' : 's'} to benchdiff-assets@${sha}`,
+  notHosted: (why) => `images: not hosted (${why}); falling back to Markdown`,
+  permissionSnippet: `images: to host charts, add this to the job or workflow (README "Hosting images"):\n${PERMISSIONS_SNIPPET}`,
+  chartsLine: (requested, produced, skipped, reasons) => `charts: requested=${requested} produced=${produced} skipped=${skipped}${reasons.length ? ` (${reasons.join('; ')})` : ''}`,
+  copyFailed: (dir, cause, kept) => `charts: could not copy SVG files to ${dir} (${cause}); they remain in ${kept}; set svg-dir to a writable workspace path`,
+  chartsFailed: (cause) => `charts: could not finish the chart step (${cause}); the table is complete; check the charts input or set charts to none`,
+  cannotWrite: (detail) => `${detail}; the table is complete; set svg-dir to a writable path or leave charts unset`,
+});
+const HOST_LABELS = { fork: 'fork PR', private: 'private repository', permission: 'token lacks contents: write', disabled: 'publish-images is false' };
+
+const isPlaceholderRun = (markdown) => markdown.includes(PLACEHOLDER_SCHEME);
+const logLine = (msg) => process.stdout.write(`${msg}\n`);
+const tagOfMarker = (marker) => (/^<!-- benchdiff:(.*) -->$/.exec(marker) || [])[1] || '';
+
+/** Parses the binary's stderr: its own produced/skipped line and the "chart skipped" notices. */
+function chartSummary(stderr, fileCount) {
+  const own = /charts: produced=(\d+) skipped=(\d+)/.exec(stderr);
+  const reasons = stderr.split('\n').map((l) => l.replace(/^notice: /, '').trim()).filter((l) => /chart skipped/.test(l));
+  return { produced: own ? Number(own[1]) : fileCount, skipped: own ? Number(own[2]) : reasons.length, reasons };
+}
+
+/** Copies the produced SVGs where upload-artifact can reach them; returns {dir, paths}. */
+function exposeSvgs(workSvg, names, wanted) {
+  if (!names.length) return { dir: '', paths: [] };
+  if (wanted) {
+    const dest = path.resolve(process.env.GITHUB_WORKSPACE || process.cwd(), wanted);
+    try {
+      fs.mkdirSync(dest, { recursive: true });
+      for (const n of names) fs.copyFileSync(path.join(workSvg, n), path.join(dest, n));
+      return { dir: dest, paths: names.map((n) => path.join(dest, n)) };
+    } catch (e) {
+      warning(MESSAGES.copyFailed(wanted, e.code || e.message, workSvg));
+    }
+  }
+  return { dir: workSvg, paths: names.map((n) => path.join(workSvg, n)) };
+}
+
+/** Hosts the SVGs when the Markdown carries placeholders, then rewrites or strips them. Never throws. */
+async function embedCharts({ markdown, workSvg, names, svgDir, marker, fetchImpl }) {
+  let announced = false;
+  const announcingFetch = (...a) => {
+    if (!announced) { announced = true; logLine(MESSAGES.publishing); }
+    return fetchImpl(...a);
+  };
+  const env = process.env;
+  let result;
+  try {
+    const files = names.map((name) => ({ name: name.replace(/\.svg$/, '') + '.svg', bytes: fs.readFileSync(path.join(workSvg, name)) }));
+    result = await publishImages(files, {
+      token: input('github-token', env.GITHUB_TOKEN || ''),
+      repository: env.GITHUB_REPOSITORY,
+      tag: tagOfMarker(marker),
+      enabled: input('publish-images') !== 'false',
+      eventName: env.GITHUB_EVENT_NAME,
+      eventPath: env.GITHUB_EVENT_PATH,
+      serverUrl: env.GITHUB_SERVER_URL,
+      apiUrl: env.GITHUB_API_URL,
+      fetch: announcingFetch,
+    });
+  } catch (e) {
+    result = { error: `could not read the SVG files (${e.code || e.message})`, reason: 'push-failed' };
+  }
+  const rewritten = rewritePlaceholders(markdown, result, { svgDir });
+  if (result.urls) {
+    const sha = (Object.values(result.urls)[0] || '').split('/')[5] || 'unknown';
+    logLine(MESSAGES.published(Object.keys(result.urls).length, sha));
+  } else {
+    logLine(MESSAGES.notHosted(HOST_LABELS[result.reason] || result.error));
+    if (result.reason === 'permission') logLine(MESSAGES.permissionSnippet);
+  }
+  if (rewritten.warning) warning(rewritten.warning);
+  return rewritten.markdown;
+}
+
+async function main({ runWasm: run = runWasm, fetchImpl = fetch } = {}) {
   const head = expand(input('head'));
   if (!head.length) throw new Error(`no head files match ${JSON.stringify(input('head'))}`);
   const basePattern = input('base');
@@ -243,6 +331,11 @@ async function main() {
   const failOnRegression = parseFailOnRegression(input('fail-on-regression'));
   const configInput = input('config');
   const workDir = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'benchdiff-'));
+  // charts may also come from the config file, whose content is unknown here: treat a config as "maybe charts".
+  const chartsInput = input('charts');
+  const chartsActive = (chartsInput !== '' && chartsInput.toLowerCase() !== 'none') || configInput !== '';
+  // node:wasi cannot create_dir_all, so the directory must exist before the binary writes into it.
+  if (chartsActive) fs.mkdirSync(path.join(workDir, 'svg'), { recursive: true });
   const args = buildArgs({
     head: stage(head, workDir, 'head'),
     base: stage(base, workDir, 'base'),
@@ -257,20 +350,56 @@ async function main() {
     title: input('title'),
     tag,
     failOnRegression,
+    compareBy: input('compare-by'),
+    groupBy: input('group-by'),
+    dimensions: input('dimensions'),
+    dimensionsStrict: parseBoolInput('dimensions-strict', input('dimensions-strict')),
+    reference: input('reference'),
+    correction: input('correction'),
+    cellFormat: input('cell-format'),
+    charts: chartsInput,
+    chartRows: input('chart-rows'),
+    chartWidth: input('chart-width'),
+    chartTheme: input('chart-theme'),
+    svgDir: chartsActive ? '/work/svg' : '',
+    svgEmbed: chartsActive ? input('svg-embed') : undefined,
+    publishImages: input('publish-images'),
   });
 
-  const { code, stderr } = await runWasm(args, workDir);
-  if (code !== 0 && code !== 1) throw new Error(stderr.trim() || `benchdiff exited with code ${code}`);
+  const { code, stderr } = await run(args, workDir);
+  const reportWritten = fs.existsSync(path.join(workDir, 'report.md'));
+  const softChartError = code === 2 && reportWritten && /report printed without charts/.test(stderr);
+  if (softChartError) warning(MESSAGES.cannotWrite(stderr.trim().split('\n').pop()));
+  else if (code !== 0 && code !== 1) throw new Error(stderr.trim() || `benchdiff exited with code ${code}`);
 
-  const markdown = fs.readFileSync(path.join(workDir, 'report.md'), 'utf8');
+  let markdown = fs.readFileSync(path.join(workDir, 'report.md'), 'utf8');
   const report = JSON.parse(fs.readFileSync(path.join(workDir, 'report.json'), 'utf8'));
   // The binary owns the tag default and may take it from the config, so read it back from the report.
   const marker = markdown.split('\n', 1)[0];
 
+  const chartOutputs = {};
+  if (chartsActive) {
+    try {
+      const workSvg = path.join(workDir, 'svg');
+      const names = fs.existsSync(workSvg) ? fs.readdirSync(workSvg).filter((n) => n.endsWith('.svg')).sort() : [];
+      const summary = chartSummary(stderr, names.length);
+      logLine(MESSAGES.chartsLine(chartsInput || 'config', summary.produced, summary.skipped, summary.reasons));
+      const exposed = exposeSvgs(workSvg, names, input('svg-dir'));
+      if (isPlaceholderRun(markdown)) {
+        markdown = await embedCharts({ markdown, workSvg, names, svgDir: exposed.dir || workSvg, marker, fetchImpl });
+      }
+      chartOutputs['svg-dir'] = exposed.dir;
+      chartOutputs['svg-paths'] = exposed.paths.join('\n');
+    } catch (e) {
+      warning(MESSAGES.chartsFailed(e.message));
+      if (isPlaceholderRun(markdown)) markdown = rewritePlaceholders(markdown, { error: e.message, reason: 'push-failed' }).markdown;
+    }
+  }
+
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${markdown}\n`);
 
   if (input('comment', 'true') === 'true') {
-    const result = await upsertComment({ token: input('github-token', process.env.GITHUB_TOKEN || ''), marker, body: markdown });
+    const result = await upsertComment({ token: input('github-token', process.env.GITHUB_TOKEN || ''), marker, body: markdown, fetchImpl });
     if (result.status === 'failed') {
       warning(result.readOnly
         ? `Could not post the PR comment (${result.reason}): the token is read-only, as on pull requests from forks. The report is in the job summary.`
@@ -290,14 +419,13 @@ async function main() {
     'report-path': path.join(workDir, 'report.md'),
     'json-path': path.join(workDir, 'report.json'),
     'head-json-path': path.join(workDir, 'head.json'),
+    ...chartOutputs,
   });
 
   if (report.failed) throw new Error(`${report.counts.regressed} benchmark regression(s) exceed the fail-on-regression limit`);
 }
 
-const { publishImages, rewritePlaceholders } = require('./lib/images');
-
-module.exports = { publishImages, rewritePlaceholders, expand, runWasm, stage, buildArgs, stageConfig, parseFailOnRegression, validateTag, upsertComment, clip, main };
+module.exports = { MESSAGES, PERMISSIONS_SNIPPET, publishImages, rewritePlaceholders, expand, runWasm, stage, buildArgs, stageConfig, parseFailOnRegression, validateTag, upsertComment, clip, main };
 
 if (require.main === module) {
   main().catch((e) => {

@@ -100,17 +100,17 @@ outputs:
   svg-paths:
     description: Newline-separated paths of the generated SVG files.
   regressed:
-    description: Number of regressed benchmarks.
+    description: "Number of regressed benchmarks. N-way runs: cells vs the reference."
   improved:
-    description: Number of improved benchmarks.
+    description: "Number of improved benchmarks. N-way runs: cells vs the reference."
   unchanged:
-    description: Number of unchanged benchmarks.
+    description: "Number of unchanged benchmarks. N-way runs: cells vs the reference."
   new:
-    description: Number of benchmarks only in head.
+    description: "Number of benchmarks only in head. N-way runs: cells vs the reference."
   removed:
-    description: Number of benchmarks only in base.
+    description: "Number of benchmarks only in base. N-way runs: cells vs the reference."
   failed:
-    description: "'true' when fail-on-regression tripped."
+    description: "'true' when fail-on-regression tripped (the regression gate result; N-way runs: cells vs the reference). False when fail-on-regression is unset."
   report-path:
     description: Markdown report file.
   json-path:

@@ -311,3 +311,203 @@ test('buildArgs: dimensions-strict is a bare flag only when true (there is no ne
 test('buildArgs: sort accepts rank and passes it through', () => {
   assert.equal(flagValue(buildArgs({ ...base, sort: 'rank' }), '--sort'), 'rank');
 });
+
+// ---- Task 4.2.1b: chart pipeline in main() with an injected wasm runner and fetch ----
+
+const MARKER = '<!-- benchdiff:default -->';
+const SVG = '<svg xmlns="http://www.w3.org/2000/svg"><title>t</title></svg>';
+const CHART_MD = `${MARKER}\n## T\n\n![Delta chart](benchdiff-svg:delta.svg)\n\n<details>\n<summary>Chart data (text)</summary>\n\nrows\n\n</details>\n\n| a | b |\n`;
+
+/** Fake wasm: records argv, asserts svg/ exists, writes the report files and the given SVGs. */
+function fakeWasm({ markdown = CHART_MD, svgs = ['delta'], stderr = 'charts: produced=1 skipped=0\n', code = 0 } = {}) {
+  const calls = [];
+  const run = async (args, workDir) => {
+    calls.push({ args, svgExisted: fs.existsSync(path.join(workDir, 'svg')) });
+    fs.writeFileSync(path.join(workDir, 'report.md'), markdown);
+    fs.writeFileSync(path.join(workDir, 'report.json'), JSON.stringify({ counts: { regressed: 0, improved: 0, unchanged: 1, new: 0, removed: 0 }, failed: false }));
+    fs.writeFileSync(path.join(workDir, 'head.json'), '{}');
+    for (const n of svgs) fs.writeFileSync(path.join(workDir, 'svg', `${n}.svg`), SVG);
+    return { code, stderr, stdout: '' };
+  };
+  return { run, calls };
+}
+
+/** Recording fetch emulating just enough of the Git Data API for publishImages and the comment upsert. */
+function fakeGithub({ failStatus } = {}) {
+  const requests = [];
+  const fetchImpl = async (url, init = {}) => {
+    const method = init.method || 'GET';
+    requests.push({ method, url, body: init.body });
+    const json = (status, body) => ({ status, ok: status < 300, headers: { get: () => null }, json: async () => body });
+    if (url.includes('/issues/')) return method === 'GET' ? json(200, []) : json(201, { id: 9 });
+    if (failStatus) return json(failStatus, { message: 'Resource not accessible by integration' });
+    if (url.endsWith('/git/blobs')) return json(201, { sha: 'b'.repeat(40) });
+    if (url.includes('/git/ref/heads/')) return json(404, {});
+    if (url.endsWith('/git/trees')) return json(201, { sha: 't'.repeat(40) });
+    if (url.endsWith('/git/commits')) return json(201, { sha: 'c'.repeat(40) });
+    return json(201, {});
+  };
+  return { fetchImpl, requests, publishCalls: () => requests.filter((r) => r.url.includes('/git/')) };
+}
+
+function chartSetup(extra = {}, { event = 'same-repo' } = {}) {
+  const s = setup('');
+  const eventPath = path.join(path.dirname(s.output), 'event.json');
+  const repo = { full_name: 'o/r' };
+  fs.writeFileSync(eventPath, JSON.stringify({
+    repository: { private: false },
+    pull_request: { number: 7, head: { repo: event === 'fork' ? { full_name: 'x/r' } : repo }, base: { repo } },
+  }));
+  Object.assign(s.env, {
+    INPUT_COMMENT: 'true', GITHUB_TOKEN: 'ghs_secret', GITHUB_REPOSITORY: 'o/r', GITHUB_EVENT_NAME: 'pull_request',
+    GITHUB_EVENT_PATH: eventPath, GITHUB_SERVER_URL: 'https://github.com', GITHUB_WORKSPACE: path.dirname(s.output),
+    INPUT_CHARTS: 'delta', ...extra,
+  });
+  return s;
+}
+
+async function runCaptured(s, fake, gh) {
+  const logs = [];
+  const orig = process.stdout.write;
+  process.stdout.write = (c) => { logs.push(String(c)); return true; };
+  try {
+    await withEnv(s.env, () => main({ runWasm: fake.run, fetchImpl: gh.fetchImpl }));
+  } finally {
+    process.stdout.write = orig;
+  }
+  return logs.join('');
+}
+
+const outputOf = (s, key) => {
+  const text = fs.readFileSync(s.output, 'utf8');
+  const m = new RegExp(`^${key}=(.*)$|^${key}<<(\\S+)\\n([\\s\\S]*?)\\n\\2$`, 'm').exec(text);
+  return m ? (m[1] ?? m[3]) : undefined;
+};
+const commentBody = (gh) => JSON.parse(gh.requests.find((r) => r.method === 'POST' && r.url.includes('/issues/')).body).body;
+
+test('main_should_embed_hosted_url_in_summary_and_comment_and_list_svg_paths_when_charts_delta_alone', async () => {
+  const s = chartSetup();
+  const fake = fakeWasm();
+  const gh = fakeGithub();
+  const log = await runCaptured(s, fake, gh);
+  const args = fake.calls[0].args;
+  assert.ok(fake.calls[0].svgExisted, 'svg/ must exist before the wasm runs');
+  assert.equal(flagValue(args, '--svg-dir'), '/work/svg');
+  assert.equal(flagValue(args, '--charts'), 'delta');
+  assert.ok(args.includes('--svg-embed=auto'));
+  const url = `https://raw.githubusercontent.com/o/r/${'c'.repeat(40)}/`;
+  for (const body of [fs.readFileSync(s.summary, 'utf8'), commentBody(gh)]) {
+    assert.ok(body.startsWith(MARKER));
+    assert.ok(body.includes(url) && body.trimEnd().endsWith('| a | b |') && !body.includes('benchdiff-svg:'));
+  }
+  assert.match(outputOf(s, 'svg-paths'), /delta\.svg$/);
+  assert.ok(fs.existsSync(outputOf(s, 'svg-paths')));
+  assert.match(log, /^charts: requested=delta produced=1 skipped=0$/m);
+  assert.match(log, /^images: publishing to branch benchdiff-assets \(needs contents: write; commits are kept; see README "Hosting images"\)$/m);
+  assert.match(log, new RegExp(`^images: published 1 file to benchdiff-assets@${'c'.repeat(40)}$`, 'm'));
+  assert.ok(!log.includes('ghs_secret'));
+});
+
+test('main_should_log_skipped_reason_and_copy_svgs_to_svg_dir_when_kinds_are_skipped', async () => {
+  const s = chartSetup({ INPUT_CHARTS: 'delta,ranking', 'INPUT_SVG-DIR': 'out/svgs' });
+  const fake = fakeWasm({ stderr: 'charts: produced=1 skipped=1\nnotice: ranking chart skipped: ranking needs an N-way run\n' });
+  const log = await runCaptured(s, fake, fakeGithub());
+  assert.match(log, /^charts: requested=delta,ranking produced=1 skipped=1 \(ranking chart skipped: ranking needs an N-way run\)$/m);
+  const dir = path.join(s.env.GITHUB_WORKSPACE, 'out/svgs');
+  assert.equal(outputOf(s, 'svg-dir'), dir);
+  assert.equal(fs.readFileSync(path.join(dir, 'delta.svg'), 'utf8'), SVG);
+});
+
+test('main_should_make_zero_publish_calls_and_leave_markdown_alone_when_svg_embed_false', async () => {
+  const s = chartSetup({ 'INPUT_SVG-EMBED': 'false' });
+  const plain = `${MARKER}\n## T\n\n| a | b |\n`;
+  const gh = fakeGithub();
+  await runCaptured(s, fakeWasm({ markdown: plain }), gh);
+  assert.equal(gh.publishCalls().length, 0);
+  assert.equal(commentBody(gh), plain);
+  assert.match(outputOf(s, 'svg-paths'), /delta\.svg$/);
+});
+
+test('main_should_make_zero_publish_calls_when_publish_images_false_and_keep_core_markdown', async () => {
+  const s = chartSetup({ 'INPUT_PUBLISH-IMAGES': 'false' });
+  const md = `${MARKER}\n## T\n\ncharts not embedded: publish-images is false; SVGs written to /work/svg\n\n<details open>\n<summary>Chart data (text)</summary>\n\nrows\n\n</details>\n`;
+  const gh = fakeGithub();
+  await runCaptured(s, fakeWasm({ markdown: md }), gh);
+  assert.equal(gh.publishCalls().length, 0);
+  assert.equal(commentBody(gh), md);
+});
+
+test('main_should_not_error_and_embed_nothing_when_svg_embed_true_and_charts_empty', async () => {
+  const s = chartSetup({ INPUT_CHARTS: '', 'INPUT_SVG-EMBED': 'true' });
+  const plain = `${MARKER}\n## T\n`;
+  const fake = fakeWasm({ markdown: plain, svgs: [] });
+  const gh = fakeGithub();
+  await runCaptured(s, fake, gh);
+  assert.ok(!fake.calls[0].args.includes('--svg-dir'));
+  assert.equal(gh.publishCalls().length, 0);
+});
+
+test('main_should_post_permission_line_with_snippet_pointer_open_text_block_and_pass_when_charts_delta_alone_meets_read_only_token', async () => {
+  const s = chartSetup();
+  const gh = fakeGithub({ failStatus: 403 });
+  const log = await runCaptured(s, fakeWasm(), gh);
+  const body = commentBody(gh);
+  assert.ok(body.startsWith(MARKER));
+  assert.ok(body.includes('charts could not be hosted: token lacks contents: write (grant it to host images); add the permissions block from README "Hosting images"'));
+  assert.ok(body.includes('<details open>\n<summary>Chart data (text)'));
+  assert.ok(!body.includes('benchdiff-svg:') && !body.includes('raw.githubusercontent.com'));
+  assert.match(outputOf(s, 'svg-paths'), /delta\.svg$/);
+  assert.equal(log.split('contents: write        # host chart images').length - 1, 1, 'snippet printed once');
+  assert.match(log, /::warning::.*charts could not be hosted/);
+});
+
+test('main_should_fall_back_to_markdown_and_log_fork_line_when_pr_is_from_a_fork', async () => {
+  const s = chartSetup({}, { event: 'fork' });
+  const gh = fakeGithub();
+  const log = await runCaptured(s, fakeWasm(), gh);
+  assert.match(log, /^images: not hosted \(fork PR\); falling back to Markdown$/m);
+  assert.equal(gh.publishCalls().length, 0);
+  assert.ok(commentBody(gh).includes('read-only token on a fork PR'));
+});
+
+test('main_should_restore_original_golden_body_when_a_later_run_unsets_charts', async () => {
+  const plain = `${MARKER}\n## T\n\n| a | b |\n`;
+  const first = chartSetup();
+  const gh1 = fakeGithub();
+  await runCaptured(first, fakeWasm(), gh1);
+  const second = chartSetup({ INPUT_CHARTS: '' });
+  const gh2 = fakeGithub();
+  await runCaptured(second, fakeWasm({ markdown: plain, svgs: [] }), gh2);
+  const body = commentBody(gh2);
+  assert.equal(body, plain);
+  assert.ok(!body.includes('raw.githubusercontent.com') && !body.includes('benchdiff-svg:'));
+});
+
+test('main_should_pass_the_job_with_a_warning_when_the_binary_cannot_write_the_svg_dir', async () => {
+  const s = chartSetup();
+  const md = `${MARKER}\n## T\n\n| a | b |\n`;
+  const fake = fakeWasm({ markdown: md, svgs: [], code: 2, stderr: 'cannot write /work/svg: permission denied; report printed without charts\n' });
+  const log = await runCaptured(s, fake, fakeGithub());
+  assert.match(log, /::warning::cannot write \/work\/svg: permission denied; report printed without charts; the table is complete/);
+});
+
+test('main_should_still_fail_on_a_wasm_config_error', async () => {
+  const s = chartSetup();
+  const fake = { calls: [], run: async () => ({ code: 2, stderr: 'config: threshold: "x" is not a number', stdout: '' }) };
+  await assert.rejects(runCaptured(s, fake, fakeGithub()), /threshold/);
+});
+
+test('main_should_keep_no_chart_outputs_and_inputs_untouched_on_the_default_path', async () => {
+  const s = setup('50');
+  await withEnv(s.env, () => main());
+  const out = fs.readFileSync(s.output, 'utf8');
+  assert.ok(!/svg-/.test(out));
+  const golden = fs.readFileSync(path.join(root, 'testdata/golden/expected/action-default.md'), 'utf8');
+  assert.equal(fs.readFileSync(s.summary, 'utf8'), `${golden}\n`);
+});
+
+test('action.yml: count outputs say N-way runs compare cells vs the reference', () => {
+  const yml = fs.readFileSync(path.join(root, 'action.yml'), 'utf8');
+  const outputs = yml.slice(yml.indexOf('\noutputs:'));
+  assert.ok((outputs.match(/N-way runs: cells vs the reference/g) || []).length >= 5);
+});
