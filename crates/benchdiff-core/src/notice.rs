@@ -46,7 +46,7 @@ mod tests {
 
     #[test]
     fn mixed_notices_should_sort_by_class_and_stay_stable_within_class() {
-        let mut v = vec![
+        let mut v = [
             n(NoticeClass::Chart, "c1"),
             n(NoticeClass::Invalid, "i1"),
             n(NoticeClass::Degradation, "d1"),

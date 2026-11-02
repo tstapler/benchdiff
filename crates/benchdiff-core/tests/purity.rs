@@ -18,7 +18,11 @@ fn strip_cfg_test(src: &str) -> String {
         out.push_str(&rest[..pos]);
         let item = &rest[pos..];
         let end = item_end(item);
-        out.extend(item[..end].chars().map(|c| if c == '\n' { '\n' } else { ' ' }));
+        out.extend(
+            item[..end]
+                .chars()
+                .map(|c| if c == '\n' { '\n' } else { ' ' }),
+        );
         rest = &item[end..];
     }
     out.push_str(rest);
@@ -74,7 +78,11 @@ fn core_should_not_use_fs_net_process_env_when_sources_scanned() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
     rust_files(&src, &mut files);
-    assert!(!files.is_empty(), "no sources found under {}", src.display());
+    assert!(
+        !files.is_empty(),
+        "no sources found under {}",
+        src.display()
+    );
     let mut report = Vec::new();
     for file in &files {
         let text = fs::read_to_string(file).expect("read source");
@@ -82,7 +90,11 @@ fn core_should_not_use_fs_net_process_env_when_sources_scanned() {
             report.push(format!("{}:{line}: {pat}", file.display()));
         }
     }
-    assert!(report.is_empty(), "I/O in core production code:\n{}", report.join("\n"));
+    assert!(
+        report.is_empty(),
+        "I/O in core production code:\n{}",
+        report.join("\n")
+    );
 }
 
 #[test]
@@ -91,12 +103,16 @@ fn core_purity_scan_should_ignore_std_fs_inside_cfg_test_modules_and_fail_outsid
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/import");
     for name in ["mod.rs", "json_formats.rs"] {
         let text = fs::read_to_string(root.join(name)).expect("read source");
-        assert!(text.contains("std::fs"), "{name} no longer uses std::fs in tests; update this test");
+        assert!(
+            text.contains("std::fs"),
+            "{name} no longer uses std::fs in tests; update this test"
+        );
         assert_eq!(violations(&text), vec![], "{name}");
     }
 
     // The same call inside a test module passes; outside it, the scan reports file-relative line.
-    let in_test = "fn a() {}\n#[cfg(test)]\nmod tests {\n    fn t() { std::fs::read_to_string(\"x\"); }\n}\n";
+    let in_test =
+        "fn a() {}\n#[cfg(test)]\nmod tests {\n    fn t() { std::fs::read_to_string(\"x\"); }\n}\n";
     assert_eq!(violations(in_test), vec![]);
     let outside = "#[cfg(test)]\nmod tests {\n    fn t() {}\n}\nfn b() {\n    let _ = std::fs::read_to_string(\"x\");\n}\n";
     assert_eq!(violations(outside), vec![(6, "std::fs")]);
