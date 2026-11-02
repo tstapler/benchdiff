@@ -386,8 +386,8 @@ Verification multiplier x1.75 already included in CU. Size band: Large (3-15M CU
 ### Story 0.1.2: wasm size, freshness and purity gates
 **As a** maintainer, **I want** CI to fail when the wasm exceeds a budget or differs from its source, and when core gains I/O or the Action gains a dependency, **so that** growth and drift are conscious decisions.
 **Acceptance Criteria**:
-- Budget 480,000 bytes (baseline 330,650; stack projection 450-480 KB, INFERRED).
-  - *Given* `dist/benchdiff.wasm` of 330,650 bytes, *When* `scripts/check-wasm-size.sh` runs, *Then* it prints `330650 / 480000 bytes` and exits 0; *Given* a 500,000-byte file, *Then* it exits 1.
+- Budget 480,000 bytes, since raised to 820,000 (see `scripts/check-wasm-size.sh`, ADR-004 'Budget note') (baseline 330,650; stack projection 450-480 KB, INFERRED).
+  - *Given* `dist/benchdiff.wasm` of 330,650 bytes, *When* `scripts/check-wasm-size.sh` runs, *Then* it prints `330650 / 820000 bytes` (originally `330650 / 480000 bytes`; budget raised to 820,000, ADR-004 'Budget note') and exits 0; *Given* a 500,000-byte file, *Then* it exits 1.
 - Freshness (the Action runs the committed wasm, so a stale binary ships old behaviour under a new tag).
   - *Given* a PR that touches `dist/benchdiff.wasm` or a release tag, *When* CI job `wasm-fresh` rebuilds the wasm from source with the pinned toolchain, *Then* it fails if the rebuilt file differs from the committed one (byte comparison; if two clean builds are not byte-identical, it compares the export list plus size and the cause is recorded in ADR-004's note). Resolves the reproducibility question in W1.
 - Purity (requirement C-1).
@@ -1290,7 +1290,7 @@ Split by owner (round 2 size review): **(a)** task 4.2.3a (W17) is the pure side
 
 ### Story 5.1.2: Rebuild committed wasm
 **Acceptance Criteria**:
-- *Given* the final Rust tree, *When* `make wasm` runs, *Then* `dist/benchdiff.wasm` is updated, size < 480,000 bytes (script passes), `make golden` is green, the `wasm-fresh` job (0.1.2a) passes, and the 4.2.3c end-to-end test is re-run against it.
+- *Given* the final Rust tree, *When* `make wasm` runs, *Then* `dist/benchdiff.wasm` is updated, size within the budget in `scripts/check-wasm-size.sh` (now 820,000 bytes, ADR-004 'Budget note'; originally 480,000 bytes) (script passes), `make golden` is green, the `wasm-fresh` job (0.1.2a) passes, and the 4.2.3c end-to-end test is re-run against it.
 **Files**: `dist/benchdiff.wasm`
 
 ##### Task 5.1.2a: `make wasm`, size gate, commit (XS)

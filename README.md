@@ -136,6 +136,37 @@ Put shared settings in `benchdiff.config.json` and pass it explicitly with `conf
 
 Layering is defaults < config file < flags (inputs act as flags). Boolean-like settings have negative flags so a flag can undo the file: `--no-only-changed` and `--no-fail-on-regression` (the Action inputs `only-changed: false` and `fail-on-regression: false` do the same). `dimensions-strict` has none. Run `--print-config` to see each effective value and its source.
 
+### Concept map
+
+Each concept has the same kebab-case name as an Action input, a CLI flag and a config key. Sources use the labels `default|config|flag` (`--print-config` `sources`, and the Method note as `threshold=3 (config)`).
+
+| Concept | Action input | CLI flag | Config key |
+|---|---|---|---|
+| Noise threshold (percent) | `threshold` | `--threshold` | `threshold`, per-metric overrides in `thresholds` |
+| Input formats | `format`, `base-format` | `--format`, `--base-format` | `format`, `base-format` |
+| Heading and sticky-comment key | `title`, `tag` | `--title`, `--tag` | `title`, `tag` |
+| Absolute noise floor | `min-abs` | `--min-abs` | `min-abs` |
+| Hide unchanged rows | `only-changed` | `--only-changed` / `--no-only-changed` | `only-changed` |
+| Row order | `sort` | `--sort` | `sort` |
+| Row cap | `max-rows` | `--max-rows` | `max-rows` |
+| Gate | `fail-on-regression` | `--fail-on-regression` / `--no-fail-on-regression` | `fail-on-regression` |
+| N-way inputs | `variants` | `--variant` | (not a key) |
+| Pivot axis | `compare-by` | `--compare-by` | `compare-by` |
+| Row identity | `group-by` | `--group-by` | `group-by` |
+| Dimension rules | `dimensions` | `--dimensions` | `dimensions` |
+| Strict data problems | `dimensions-strict` | `--dimensions-strict` | `dimensions-strict` |
+| Reference | `reference` | `--reference` | `reference` |
+| Multiple-comparison correction | `correction` | `--correction` | `correction` |
+| Cell style | `cell-format` | `--cell-format` | `cell-format` |
+| Charts | `charts` | `--charts` | `charts` |
+| Chart rows / width / theme | `chart-rows`, `chart-width`, `chart-theme` | `--chart-rows`, `--chart-width`, `--chart-theme` | same |
+| SVG directory / embedding / hosting | `svg-dir`, `svg-embed`, `publish-images` | `--svg-dir`, `--svg-embed`, `--publish-images` | same |
+
+### Notices and the gate line
+
+* **Notices.** Data problems degrade with a notice instead of failing. After the verdict, reference and gate lines they appear in a fixed class order: degradation, skipped metrics, reference-absent, invalid cells, chart notices. The first 5 are inline; the rest collapse into `N more notices (see Method)`, and the Method note lists every notice.
+* **Gate line.** With `fail-on-regression` set, an N-way report prints `gate: fail-on-regression 10% vs quick: passed` or `FAILED (...)`. When cells fail, the line names up to 3 of them in table order, each `variant on row` cut to 40 characters, always shows the count, and is capped at 200 characters in all; the Method note has the full list.
+
 ## Charts
 
 `charts` renders SVG files: `delta` (change per benchmark), `ranking` (N-way ratio vs the reference) and `distribution` (samples). A non-empty `charts` embeds them in the comment and job summary and hosts them as images, unless you set `svg-embed: false` or `publish-images: false`. The CLI defaults are off: `--svg-embed` writes `benchdiff-svg:` placeholders into the Markdown, which are dangling links until something hosts the files.

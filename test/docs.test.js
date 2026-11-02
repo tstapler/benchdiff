@@ -119,3 +119,27 @@ test('N-way, config and gate semantics are stated', () => {
     assert.ok(readme.includes(needle), `README lacks "${needle}"`);
   }
 });
+
+test('concept map, source labels, notice rules and gate-line rules are documented', () => {
+  const sec = readme.split(/^### Concept map$/m)[1].split(/^## /m)[0];
+  assert.match(sec, /\| Concept \| Action input \| CLI flag \| Config key \|/);
+  for (const needle of [
+    '`default|config|flag`',
+    '`threshold=3 (config)`',
+    'fixed class order: degradation, skipped metrics, reference-absent, invalid cells, chart notices',
+    'The first 5 are inline',
+    '`N more notices (see Method)`',
+    'the Method note lists every notice',
+    'names up to 3 of them in table order',
+    'cut to 40 characters',
+    'capped at 200 characters',
+    'the Method note has the full list',
+  ]) {
+    assert.ok(squash(sec).includes(needle), `README lacks "${needle}"`);
+  }
+  // Every config key is on a concept-map row.
+  const schema = JSON.parse(fs.readFileSync(path.join(root, 'benchdiff.config.schema.json'), 'utf8'));
+  for (const key of Object.keys(schema.properties).filter((k) => !['$schema', 'version'].includes(k))) {
+    assert.ok(sec.includes('`' + key + '`'), `concept map lacks \`${key}\``);
+  }
+});
