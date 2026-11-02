@@ -49,3 +49,22 @@ Inputs for the geometry tests in `crates/benchdiff-core/tests/svg_geometry.rs`, 
 | `variants-8.txt`, `variants-10.txt` | 8 and 10 maximum-length (40-character) variant labels |
 
 The tests build 30 rows from these names (two-way, and 8 and 10 variants x 30 rows for the N-way charts) and render every chart at widths 480 and 1600 in both themes. They assert every coordinate lies inside the viewBox, every `<text>` (advance-table width plus the 10% margin) lies inside the card, and no two text boxes overlap. A deliberately overflowing fixture in the same file proves the assertions can fail. The rendered worst-case charts are reviewed as PNG in task 5.1.3a.
+
+## `nway/` N-way fixture
+
+| File | Content |
+|---|---|
+| `quick.txt`, `heap.txt`, `merge.txt` | Go-format results for three sort implementations (66 lines each); `quick` is the reference |
+| `impl.txt` | The same 180 benchmark lines in one file, derived from the three files by inserting `/impl=<label>` after the benchmark's base name (`BenchmarkSort/impl=heap/n=1000-8`), so values are identical; `--compare-by impl` splits it back into the three variants |
+| `baseline/` | Pairwise outputs and the falsifier questions Q1-Q3 (`baseline/QUESTIONS.md`) |
+| `expected/matrix.{md,json}` | Frozen N-way output with the Action's defaults (title `Benchmark comparison`, tag `default`) |
+| `expected/notice-only.md` | Frozen notice-only report |
+
+`expected/matrix.{md,json}` come from, run in `testdata/nway` after `cargo build --release -p benchdiff`:
+
+```sh
+../../target/release/benchdiff --variant quick=quick.txt --variant heap=heap.txt --variant merge=merge.txt \
+  --reference quick --markdown expected/matrix.md --json expected/matrix.json
+```
+
+`--head impl.txt --compare-by impl --reference quick` renders byte-identical Markdown and JSON (no documented differences). `crates/benchdiff-core/tests/nway_fixture.rs` checks both against the expected files through the library and asserts Q1-Q3 in the JSON (heap significantly faster on 4 `ns/op` rows, merge significantly slower on `Parse`, heap on `Parse` not significant); `test/golden.test.js` checks wasm and native against them (`UPDATE_GOLDEN=1` rewrites).

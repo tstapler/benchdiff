@@ -147,6 +147,38 @@ for (const [name, c] of Object.entries(expectedCases)) {
   });
 }
 
+// N-way matrix (testdata/nway): the labelled-files invocation and `--compare-by impl` on impl.txt both
+// freeze to expected/matrix.{md,json}; wasm and native must each reproduce them byte for byte.
+const nwayDir = td('nway', 'expected');
+const nwayLabels = ['quick', 'heap', 'merge'];
+const nwayCases = {
+  'matrix (three --variant files, --reference quick)': (stageFile) => nwayLabels.flatMap((l) => ['--variant', `${l}=${stageFile(td('nway', `${l}.txt`), `${l}.txt`)}`]).concat(['--reference', 'quick']),
+  'matrix (--compare-by impl on impl.txt)': (stageFile) => ['--head', stageFile(td('nway', 'impl.txt'), 'impl.txt'), '--compare-by', 'impl', '--reference', 'quick'],
+};
+function assertNway(ext, actual) {
+  const file = path.join(nwayDir, `matrix.${ext}`);
+  if (update) fs.writeFileSync(file, actual);
+  else assert.equal(actual, fs.readFileSync(file, 'utf8'), `matrix.${ext} differs from testdata/nway/expected (UPDATE_GOLDEN=1 to refresh)`);
+}
+for (const [name, build] of Object.entries(nwayCases)) {
+  test(`wasm matches expected files: ${name}`, async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-nway-wasm-'));
+    const stageFile = (src, base) => { fs.copyFileSync(src, path.join(dir, base)); return `/work/${base}`; };
+    const r = await runWasm([...build(stageFile), '--markdown', '/work/report.md', '--json', '/work/report.json'], dir);
+    assert.equal(r.code, 0, r.stderr);
+    assertNway('md', fs.readFileSync(path.join(dir, 'report.md'), 'utf8'));
+    assertNway('json', fs.readFileSync(path.join(dir, 'report.json'), 'utf8'));
+  });
+  test(`native matches expected files: ${name}`, () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-nway-native-'));
+    const stageFile = (src) => src;
+    const code = runNative([...build(stageFile), '--markdown', path.join(dir, 'report.md'), '--json', path.join(dir, 'report.json')], root);
+    assert.equal(code, 0);
+    assertNway('md', fs.readFileSync(path.join(dir, 'report.md'), 'utf8'));
+    assertNway('json', fs.readFileSync(path.join(dir, 'report.json'), 'utf8'));
+  });
+}
+
 // Action level: main() through the real wasm with default inputs and a mocked GitHub API.
 // action-default.md is the sticky-comment body; action-default.json holds everything else observable.
 test('action-default: main() comment body, report files and outputs match expected files', async () => {
