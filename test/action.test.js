@@ -664,3 +664,106 @@ test('action.yml: declares an optional variants input and head is no longer requ
   assert.match(block('variants'), /label=path/);
   assert.match(block('head'), /required: false/);
 });
+
+// ---- Task 4.2.3b: `variants` data errors and matrix outputs ----
+
+const { renderNoticeReport } = require('../index.js');
+const NOTICE_GOLDEN = path.join(root, 'testdata/nway/expected/notice-only.md');
+const REF_LOST = "reference 'quick' produced no data; no comparison made";
+
+test('renderNoticeReport: equals the committed notice-only golden the Rust snapshot also asserts', () => {
+  const got = renderNoticeReport({ title: 'Benchmark comparison', tag: 'default', notices: [REF_LOST] });
+  assert.equal(got, fs.readFileSync(NOTICE_GOLDEN, 'utf8'));
+});
+
+test('renderNoticeReport: escapes like the Rust renderer and falls back to the benchdiff title', () => {
+  const got = renderNoticeReport({ title: '  ', tag: 'a b', notices: ['x_y <z> `c`'] });
+  assert.equal(got, '<!-- benchdiff:a_b -->\n### benchdiff\n\n\u26a0\ufe0f x\\_y &lt;z&gt; \\`c\\`\n\n');
+});
+
+async function runNoticeOnly(variants, extra = {}) {
+  const s = variantSetup(variants, { INPUT_COMMENT: 'true', GITHUB_TOKEN: 't', GITHUB_REPOSITORY: 'o/r', ...extra });
+  const eventPath = path.join(path.dirname(s.output), 'event.json');
+  fs.writeFileSync(eventPath, JSON.stringify({ pull_request: { number: 7 } }));
+  s.env.GITHUB_EVENT_PATH = eventPath;
+  const fake = fakeWasm();
+  const gh = fakeGithub();
+  await withEnv(s.env, () => main({ runWasm: fake.run, fetchImpl: gh.fetchImpl }));
+  return { s, fake, gh };
+}
+
+test('main: a missing reference file posts the notice-only report without running the binary and passes', async () => {
+  const src = variantDir({ 'heap.txt': 'h' });
+  const { s, fake, gh } = await runNoticeOnly(`quick=${path.join(src, 'gone.txt')}\nheap=${path.join(src, 'heap.txt')}`, { INPUT_REFERENCE: 'quick', 'INPUT_FAIL-ON-REGRESSION': '5' });
+  const golden = fs.readFileSync(NOTICE_GOLDEN, 'utf8');
+  assert.equal(fake.calls.length, 0);
+  assert.equal(commentBody(gh), golden);
+  assert.equal(fs.readFileSync(s.summary, 'utf8'), `${golden}\n`);
+  assert.equal(fs.readFileSync(outputOf(s, 'report-path'), 'utf8'), golden);
+  for (const k of ['regressed', 'improved', 'unchanged', 'new', 'removed']) assert.equal(outputOf(s, k), '0', k);
+  assert.equal(outputOf(s, 'failed'), 'false');
+});
+
+test('main: the first variant is the reference when none is given', async () => {
+  const src = variantDir({ 'heap.txt': 'h' });
+  const { fake, gh } = await runNoticeOnly(`quick=${path.join(src, 'gone.txt')}\nheap=${path.join(src, 'heap.txt')}`);
+  assert.equal(fake.calls.length, 0);
+  assert.equal(commentBody(gh), fs.readFileSync(NOTICE_GOLDEN, 'utf8'));
+});
+
+test('main: fewer than two variants left names the dropped variant and the reason, without a binary run', async () => {
+  const src = variantDir({ 'quick.txt': 'q' });
+  const gone = path.join(src, 'gone.txt');
+  const { fake, gh } = await runNoticeOnly(`quick=${path.join(src, 'quick.txt')}\nheap=${gone}`, { INPUT_REFERENCE: 'quick' });
+  assert.equal(fake.calls.length, 0);
+  assert.ok(!/[\\`*_[\]|@]/.test(gone), 'tmp path needs no escaping');
+  assert.equal(commentBody(gh), `<!-- benchdiff:default -->\n### Benchmark comparison\n\n\u26a0\ufe0f variant 'heap' produced no data (${gone}); comparing quick\n\n\u26a0\ufe0f only quick has data; a matrix needs at least 2 variants; no comparison made\n\n`);
+});
+
+test('main: a missing non-reference variant stays in the run as an empty placeholder so the binary reports its own notice', async () => {
+  const src = variantDir({ 'quick.txt': 'q', 'merge.txt': 'm' });
+  const s = variantSetup(`quick=${path.join(src, 'quick.txt')}\nheap=${path.join(src, 'gone.txt')}\nmerge=${path.join(src, 'merge.txt')}`, { INPUT_REFERENCE: 'quick' });
+  const seen = {};
+  const fake = fakeWasm({ markdown: `${MARKER}\n## T\n`, svgs: [], stderr: '' });
+  const run = async (args, workDir) => {
+    for (const a of args) if (a.includes('=/work/variant-')) seen[a.split('=')[0]] = fs.readFileSync(path.join(workDir, a.split('=/work/')[1]), 'utf8');
+    return fake.run(args, workDir);
+  };
+  await withEnv(s.env, () => main({ runWasm: run }));
+  assert.deepEqual(seen, { quick: 'q', heap: '', merge: 'm' });
+});
+
+test('main: dimensions-strict turns each missing-variant case into the exit-2 text', async () => {
+  const src = variantDir({ 'heap.txt': 'h' });
+  const heap = path.join(src, 'heap.txt');
+  const gone = path.join(src, 'gone.txt');
+  for (const [variants, message] of [
+    [`quick=${gone}\nheap=${heap}`, REF_LOST],
+    [`quick=${heap}\nheap=${gone}`, `variant 'heap' produced no data (${gone})`],
+  ]) {
+    const s = variantSetup(variants, { INPUT_REFERENCE: 'quick', 'INPUT_DIMENSIONS-STRICT': 'true' });
+    const fake = fakeWasm();
+    await withEnv(s.env, async () => {
+      await assert.rejects(main({ runWasm: fake.run }), { message });
+    });
+    assert.equal(fake.calls.length, 0);
+  }
+});
+
+test('main: matrix JSON counts and failed reach the outputs unchanged and the gate still trips', async () => {
+  const src = variantDir({ 'quick.txt': 'q', 'heap.txt': 'h' });
+  const s = variantSetup(`quick=${path.join(src, 'quick.txt')}\nheap=${path.join(src, 'heap.txt')}`, { INPUT_REFERENCE: 'quick', 'INPUT_FAIL-ON-REGRESSION': '5' });
+  const run = async (args, workDir) => {
+    fs.writeFileSync(path.join(workDir, 'report.md'), `${MARKER}\n## T\n`);
+    fs.writeFileSync(path.join(workDir, 'report.json'), JSON.stringify({
+      counts: { regressed: 2, improved: 3, unchanged: 4, new: 1, removed: 5, incomparable: 6, invalid: 7 }, failed: true,
+    }));
+    return { code: 1, stderr: '', stdout: '' };
+  };
+  await withEnv(s.env, async () => {
+    await assert.rejects(main({ runWasm: run }), /2 benchmark regression/);
+  });
+  const want = { regressed: '2', improved: '3', unchanged: '4', new: '1', removed: '5', failed: 'true' };
+  for (const [k, v] of Object.entries(want)) assert.equal(outputOf(s, k), v, k);
+  assert.equal(outputOf(s, 'head-json-path'), '');
+});

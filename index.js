@@ -73,13 +73,18 @@ function resolveVariants(variants, cwd = process.cwd()) {
   });
 }
 
-/** Copies each resolved variant file to `variant-<line index>-<safe basename>`; returns `label=/work/...` args (files that are missing are skipped). */
+/**
+ * Copies each resolved variant file to `variant-<line index>-<safe basename>`; returns `label=/work/...` args.
+ * A variant that has a `path` but no file gets an empty placeholder, so the binary reports its own
+ * `variant 'x' produced no data` notice; one without a `path` is skipped.
+ */
 function stageVariants(variants, dir) {
   const staged = [];
   variants.forEach((v, i) => {
-    if (!v.file) return;
-    const name = `variant-${i}-${path.basename(v.file).replace(/[^A-Za-z0-9._-]/g, '_')}`;
-    fs.copyFileSync(v.file, path.join(dir, name));
+    if (!v.file && !v.path) return;
+    const name = `variant-${i}-${path.basename(v.file || v.path).replace(/[^A-Za-z0-9._-]/g, '_')}`;
+    if (v.file) fs.copyFileSync(v.file, path.join(dir, name));
+    else fs.writeFileSync(path.join(dir, name), '');
     staged.push(`${v.label}=/work/${name}`);
   });
   return staged;
@@ -172,6 +177,40 @@ function buildArgs({ head, base, config, format, baseFormat, threshold, minAbs, 
   // The binary rejects --head-json with --variant: a matrix has no single head set to cache.
   if (!variants.length) args.push('--head-json', '/work/head.json');
   return args;
+}
+
+// Mirrors `flatten`/`esc`/`esc_notice` in crates/benchdiff-core/src/markdown_matrix.rs.
+const flattenText = (t) => [...String(t)].map((c) => (/\p{Cc}/u.test(c) ? ' ' : c)).join('').replaceAll('<!--', '<!\u200b--').replaceAll('-->', '--\u200b>');
+const escapeWith = (set) => (t) => [...flattenText(t)].map((c) => (c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '&' ? '&amp;' : set.includes(c) ? `\\${c}` : c)).join('');
+const escTitle = escapeWith('\\`*_[]()#|!@~');
+const escNotice = escapeWith('\\`*_[]|@');
+
+/** Byte-for-byte the Rust `render_notice_report` (sticky marker, title, one line per notice), for runs where no binary run is possible. */
+function renderNoticeReport({ title, tag, notices }) {
+  const safeTag = [...tag].map((c) => (/[\p{L}\p{N}]/u.test(c) || '-_.:/'.includes(c) ? c : '_')).join('');
+  const heading = escTitle(title);
+  return `<!-- benchdiff:${safeTag} -->\n### ${heading.trim() === '' ? 'benchdiff' : heading}\n\n${notices.map((n) => `\u26a0\ufe0f ${escNotice(n)}\n\n`).join('')}`;
+}
+
+/**
+ * Data-dependent `variants` problems the Action can settle without the binary (same texts as the CLI's run_matrix):
+ * returns {notices} when the reference has no file or fewer than two variants remain, else undefined.
+ * With `strict` the first problem becomes the exit-2 error instead.
+ */
+function variantsDegradation(variants, reference, strict) {
+  const missing = variants.filter((v) => !v.file);
+  if (!missing.length) return undefined;
+  const refLabel = reference || variants[0].label;
+  const refMissing = missing.find((v) => v.label === refLabel);
+  const have = variants.filter((v) => v.file).map((v) => v.label);
+  const dropped = (v) => `variant '${v.label}' produced no data (${v.path})`;
+  if (strict) {
+    if (refMissing) throw new Error(`reference '${refMissing.label}' produced no data; no comparison made`);
+    throw new Error(dropped(missing[0]));
+  }
+  if (refMissing) return { notices: [`reference '${refMissing.label}' produced no data; no comparison made`] };
+  if (have.length >= 2) return undefined;
+  return { notices: [...missing.map((v) => `${dropped(v)}; comparing ${have.join(' and ')}`), `only ${have.join(', ') || 'none'} has data; a matrix needs at least 2 variants; no comparison made`] };
 }
 
 /** Copies the explicit config file to `<dir>/config/<its own base name>` so errors name the file the user wrote. */
@@ -377,6 +416,7 @@ async function main({ runWasm: run = runWasm, fetchImpl = fetch } = {}) {
   if (variantsInput && (input('head') || input('base'))) throw new Error('variants cannot be combined with head/base');
   if (variantsInput && input('base-format')) throw new Error('base-format cannot be combined with variants');
   const variants = variantsInput ? resolveVariants(parseVariants(variantsInput)) : [];
+  const degraded = variantsInput ? variantsDegradation(variants, input('reference'), parseBoolInput('dimensions-strict', input('dimensions-strict')) === 'true') : undefined;
   const head = variantsInput ? [] : expand(input('head'));
   if (!variantsInput && !head.length) throw new Error(`no head files match ${JSON.stringify(input('head'))}`);
   const basePattern = input('base');
@@ -393,7 +433,7 @@ async function main({ runWasm: run = runWasm, fetchImpl = fetch } = {}) {
   const chartsActive = (chartsInput !== '' && chartsInput.toLowerCase() !== 'none') || configInput !== '';
   // node:wasi cannot create_dir_all, so the directory must exist before the binary writes into it.
   if (chartsActive) fs.mkdirSync(path.join(workDir, 'svg'), { recursive: true });
-  const args = buildArgs({
+  const args = degraded ? [] : buildArgs({
     head: stage(head, workDir, 'head'),
     base: stage(base, workDir, 'base'),
     config: configInput ? stageConfig(configInput, workDir) : '',
@@ -424,7 +464,14 @@ async function main({ runWasm: run = runWasm, fetchImpl = fetch } = {}) {
     publishImages: input('publish-images'),
   });
 
-  const { code, stderr } = await run(args, workDir);
+  if (degraded) {
+    // Nothing to compare: post the notice-only report and skip the gate (the regression counts are all zero).
+    const title = input('title', 'Benchmark comparison');
+    fs.writeFileSync(path.join(workDir, 'report.md'), renderNoticeReport({ title, tag: tag || 'default', notices: degraded.notices }));
+    const zero = { regressed: 0, improved: 0, unchanged: 0, new: 0, removed: 0 };
+    fs.writeFileSync(path.join(workDir, 'report.json'), JSON.stringify({ counts: zero, failed: false }));
+  }
+  const { code, stderr } = degraded ? { code: 0, stderr: '' } : await run(args, workDir);
   const reportWritten = fs.existsSync(path.join(workDir, 'report.md'));
   const softChartError = code === 2 && reportWritten && /report printed without charts/.test(stderr);
   if (softChartError) warning(MESSAGES.cannotWrite(stderr.trim().split('\n').pop()));
@@ -483,7 +530,7 @@ async function main({ runWasm: run = runWasm, fetchImpl = fetch } = {}) {
   if (report.failed) throw new Error(`${report.counts.regressed} benchmark regression(s) exceed the fail-on-regression limit`);
 }
 
-module.exports = { MESSAGES, PERMISSIONS_SNIPPET, publishImages, rewritePlaceholders, expand, resolveOne, parseVariants, resolveVariants, stageVariants, runWasm, stage, buildArgs, stageConfig, parseFailOnRegression, validateTag, upsertComment, clip, main };
+module.exports = { MESSAGES, PERMISSIONS_SNIPPET, publishImages, rewritePlaceholders, expand, resolveOne, parseVariants, resolveVariants, stageVariants, renderNoticeReport, variantsDegradation, runWasm, stage, buildArgs, stageConfig, parseFailOnRegression, validateTag, upsertComment, clip, main };
 
 if (require.main === module) {
   main().catch((e) => {
