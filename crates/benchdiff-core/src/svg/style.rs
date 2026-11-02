@@ -38,13 +38,15 @@ pub const LIGHT: Palette = Palette {
     ],
 };
 
+// Dark values from the dataviz skill's references/palette.md (Chart chrome & ink,
+// Status palette critical/good, Categorical dark column); unchanged = its muted ink.
 pub const DARK: Palette = Palette {
     card: "#1a1a19",
-    ink: "#f5f5f4",
-    secondary: "#b8b7b2",
-    regressed: "#e5605f",
-    improved: "#3cb83c",
-    unchanged: "#8a8a86",
+    ink: "#f0efec",
+    secondary: "#c3c2b7",
+    regressed: "#d03b3b",
+    improved: "#0ca30c",
+    unchanged: "#898781",
     series: [
         "#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#9085e9",
     ],
