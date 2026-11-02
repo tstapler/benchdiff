@@ -25,7 +25,7 @@ inputs:
     description: Changes smaller than this many units (in the metric's own unit) are treated as noise. Default 0.
     required: false
   only-changed:
-    description: Hide unchanged rows. Default false.
+    description: "Hide unchanged rows. 'true' hides them; an explicit 'false' overrides a true set in the config file. Leave unset to let the config file (or the default, false) decide."
     required: false
   sort:
     description: "Row order: delta (worst regression first), name, or input. Default delta."
@@ -40,7 +40,7 @@ inputs:
     description: Key of the sticky comment; use distinct tags for several reports on one PR. Default default.
     required: false
   fail-on-regression:
-    description: "'true' fails on any regression, a number fails on a regression of at least that many percent, 'false' never fails. Default false."
+    description: "'true' fails on any regression, a number fails on a regression of at least that many percent, 'false' never fails and explicitly overrides a limit set in the config file. Leave unset to let the config file (or the default, never fail) decide."
     required: false
   config:
     description: "Path to a benchdiff.config.json settings file. Only read when set (never auto-discovered); inputs you set override the file."

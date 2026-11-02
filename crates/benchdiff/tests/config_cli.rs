@@ -168,3 +168,71 @@ fn binary_defaults_should_equal_removed_action_yml_defaults_table_with_explicit_
     assert_eq!(c["fail-on-regression"], Value::Null);
     assert_eq!(c["max-rows"], Value::Null);
 }
+
+#[test]
+fn no_only_changed_should_override_config_true() {
+    let c = config_file("no-only", "c.json", r#"{"version":1,"only-changed":true}"#);
+    let v = print_config(&["--config", &c]);
+    assert_eq!(v["config"]["only-changed"], true);
+    let v = print_config(&["--config", &c, "--no-only-changed"]);
+    assert_eq!(v["config"]["only-changed"], false);
+    assert_eq!(v["sources"]["only-changed"], "flag");
+}
+
+#[test]
+fn no_fail_on_regression_should_override_config_limit() {
+    let c = config_file(
+        "no-fail",
+        "c.json",
+        r#"{"version":1,"fail-on-regression":9}"#,
+    );
+    let v = print_config(&["--config", &c]);
+    assert_eq!(v["config"]["fail-on-regression"], 9.0);
+    let v = print_config(&["--config", &c, "--no-fail-on-regression"]);
+    assert_eq!(v["config"]["fail-on-regression"], Value::Null);
+    assert_eq!(v["sources"]["fail-on-regression"], "flag");
+}
+
+#[test]
+fn no_fail_on_regression_should_not_fail_run_that_config_would_fail() {
+    let c = config_file(
+        "no-fail-run",
+        "c.json",
+        r#"{"version":1,"fail-on-regression":0}"#,
+    );
+    let failing = run(&["--config", &c, "--head", HEAD, "--base", BASE]);
+    assert_eq!(failing.status.code(), Some(1), "{}", stderr(&failing));
+    let off = run(&[
+        "--config",
+        &c,
+        "--no-fail-on-regression",
+        "--head",
+        HEAD,
+        "--base",
+        BASE,
+    ]);
+    assert!(off.status.success(), "{}", stderr(&off));
+}
+
+#[test]
+fn conflicting_positive_and_negative_flags_should_exit_2_naming_both() {
+    for (a, b) in [
+        ("--only-changed", "--no-only-changed"),
+        ("--fail-on-regression", "--no-fail-on-regression"),
+        ("--fail-on-regression=5", "--no-fail-on-regression"),
+    ] {
+        for pair in [[a, b], [b, a]] {
+            let out = run(&["--head", HEAD, pair[0], pair[1]]);
+            assert_eq!(out.status.code(), Some(2), "{pair:?}");
+            let e = stderr(&out);
+            let name = |f: &str| f.split('=').next().unwrap().to_string();
+            assert!(e.contains(&name(a)) && e.contains(&name(b)), "{e}");
+        }
+    }
+}
+
+#[test]
+fn negative_flags_should_reject_inline_values() {
+    let out = run(&["--head", HEAD, "--no-only-changed=true"]);
+    assert_eq!(out.status.code(), Some(2));
+}

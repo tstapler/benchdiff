@@ -19,6 +19,8 @@ pub struct OptionsOverlay {
     pub title: Option<String>,
     pub tag: Option<String>,
     pub fail_on_regression_pct: Option<f64>,
+    /// `--no-fail-on-regression`: clears any limit set by a lower layer.
+    pub fail_on_regression_off: bool,
     pub threshold_overrides: Option<BTreeMap<String, f64>>,
 }
 
@@ -55,6 +57,9 @@ impl OptionsOverlay {
         if let Some(v) = self.fail_on_regression_pct {
             opts.fail_on_regression_pct = Some(v);
         }
+        if self.fail_on_regression_off {
+            opts.fail_on_regression_pct = None;
+        }
         if let Some(v) = &self.threshold_overrides {
             opts.threshold_overrides = v.clone();
         }
@@ -78,6 +83,12 @@ impl OptionsOverlay {
             fail_on_regression_pct,
             threshold_overrides
         );
+        if later.fail_on_regression_off {
+            self.fail_on_regression_off = true;
+            self.fail_on_regression_pct = None;
+        } else if later.fail_on_regression_pct.is_some() {
+            self.fail_on_regression_off = false;
+        }
         self
     }
 }
@@ -204,6 +215,23 @@ mod tests {
         assert_eq!(opts.threshold_pct, 5.0);
         assert!(matches!(opts.sort, Sort::Name));
         assert_eq!(opts.max_rows, Some(2));
+    }
+
+    #[test]
+    fn fail_on_regression_off_should_clear_a_lower_layer_limit() {
+        let file = OptionsOverlay {
+            fail_on_regression_pct: Some(5.0),
+            ..Default::default()
+        };
+        let off = OptionsOverlay {
+            fail_on_regression_off: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            applied(&file.clone().merge(off.clone())).fail_on_regression_pct,
+            None
+        );
+        assert_eq!(applied(&off.merge(file)).fail_on_regression_pct, Some(5.0));
     }
 
     #[test]

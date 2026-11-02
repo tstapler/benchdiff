@@ -91,10 +91,12 @@ function buildArgs({ head, base, config, format, baseFormat, threshold, minAbs, 
   if (title) args.push(`--title=${title}`);
   if (tag) args.push(`--tag=${tag}`);
   if (baseFormat) args.push('--base-format', baseFormat);
-  if (onlyChanged) args.push('--only-changed');
+  if (onlyChanged === 'true') args.push('--only-changed');
+  else if (onlyChanged === 'false') args.push('--no-only-changed');
   if (maxRows) args.push('--max-rows', maxRows);
   if (failOnRegression === 'true') args.push('--fail-on-regression');
-  else if (failOnRegression && failOnRegression !== 'false') args.push(`--fail-on-regression=${failOnRegression}`);
+  else if (failOnRegression === 'false') args.push('--no-fail-on-regression');
+  else if (failOnRegression) args.push(`--fail-on-regression=${failOnRegression}`);
   args.push('--markdown', '/work/report.md', '--json', '/work/report.json', '--head-json', '/work/head.json');
   return args;
 }
@@ -109,13 +111,21 @@ function stageConfig(file, dir, cwd = process.cwd()) {
   return `/work/config/${name}`;
 }
 
-/** Normalizes the fail-on-regression input to 'true', 'false' or a non-negative number string. */
+/** Normalizes the fail-on-regression input to '' (unset), 'true', 'false' or a non-negative number string. */
 function parseFailOnRegression(raw) {
   const v = String(raw ?? '').trim().toLowerCase();
-  if (v === '' || v === 'false') return 'false';
+  if (v === '') return '';
+  if (v === 'false') return 'false';
   if (v === 'true') return 'true';
   if (!/^\d+(\.\d+)?$/.test(v)) throw new Error(`fail-on-regression must be true, false or a number >= 0, got ${JSON.stringify(raw)}`);
   return v;
+}
+
+/** Normalizes a boolean input to '' (unset), 'true' or 'false'. */
+function parseBoolInput(name, raw) {
+  const v = String(raw ?? '').trim().toLowerCase();
+  if (v === '' || v === 'true' || v === 'false') return v;
+  throw new Error(`${name} must be true or false, got ${JSON.stringify(raw)}`);
 }
 
 /** The tag is embedded in an HTML comment; the same charset as the Rust `marker()` keeps both markers identical. */
@@ -213,7 +223,7 @@ async function main() {
     baseFormat: input('base-format'),
     threshold: input('threshold'),
     minAbs: input('min-abs'),
-    onlyChanged: input('only-changed') === 'true',
+    onlyChanged: parseBoolInput('only-changed', input('only-changed')),
     sort: input('sort'),
     maxRows: input('max-rows'),
     title: input('title'),

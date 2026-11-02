@@ -30,12 +30,15 @@ OPTIONS:
     --alpha P              significance level for the Mann-Whitney test [0.05]
     --no-stats             skip the significance test; thresholds only
     --only-changed         hide unchanged rows
+    --no-only-changed      show unchanged rows even if the config file hides them
     --sort delta|name|input [delta]
     --max-rows N           show at most N changed rows
     --title TEXT           report heading [Benchmark comparison]
     --tag TEXT             sticky-comment key [default]
     --fail-on-regression[=PCT]
                            exit 1 if a regression of at least PCT percent exists [any, if bare]
+    --no-fail-on-regression
+                           never exit 1 on regressions, even if the config file sets a limit
     --markdown FILE        write the Markdown report here [stdout]
     --json FILE            also write the machine-readable report
     --head-json FILE       also write the merged head results as canonical benchdiff JSON
@@ -180,7 +183,9 @@ fn layer_values(
     if let Some(x) = o.only_changed {
         v.push(("only-changed", x.to_string()));
     }
-    if let Some(x) = o.fail_on_regression_pct {
+    if o.fail_on_regression_off {
+        v.push(("fail-on-regression", "off".into()));
+    } else if let Some(x) = o.fail_on_regression_pct {
         v.push(("fail-on-regression", x.to_string()));
     }
     if let Some(x) = &o.title {
@@ -348,6 +353,7 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
         svg_flags: SvgOptionsOverlay::default(),
     };
     let mut raw = raw.peekable();
+    let (mut saw_only_changed, mut saw_no_only_changed) = (false, false);
     while let Some(arg) = raw.next() {
         let (flag, inline) = match arg.split_once('=') {
             Some((f, v)) if f.starts_with("--") => (f.to_string(), Some(v.to_string())),
@@ -401,6 +407,12 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
             "--only-changed" => {
                 reject_inline("--only-changed")?;
                 a.flags.only_changed = Some(true);
+                saw_only_changed = true;
+            }
+            "--no-only-changed" => {
+                reject_inline("--no-only-changed")?;
+                a.flags.only_changed = Some(false);
+                saw_no_only_changed = true;
             }
             "--sort" => a.flags.sort = Some(Sort::from_name(&value("--sort")?)?),
             "--max-rows" => {
@@ -418,6 +430,10 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
                     Some(v) => number("--fail-on-regression", v)?,
                     None => 0.0,
                 })
+            }
+            "--no-fail-on-regression" => {
+                reject_inline("--no-fail-on-regression")?;
+                a.flags.fail_on_regression_off = true;
             }
             "--charts" => {
                 let v = value("--charts")?;
@@ -472,6 +488,12 @@ fn parse_args(raw: impl Iterator<Item = String>) -> Result<Option<Args>, String>
             "--head-json" => a.head_json = Some(value("--head-json")?),
             other => return Err(format!("unknown argument {other:?}; try --help")),
         }
+    }
+    if saw_only_changed && saw_no_only_changed {
+        return Err("--only-changed conflicts with --no-only-changed; use one".into());
+    }
+    if a.flags.fail_on_regression_pct.is_some() && a.flags.fail_on_regression_off {
+        return Err("--fail-on-regression conflicts with --no-fail-on-regression; use one".into());
     }
     if a.head.is_empty() && !a.print_config {
         return Err("--head is required; try --help".into());

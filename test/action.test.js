@@ -10,19 +10,30 @@ const path = require('node:path');
 const { buildArgs, stageConfig, parseFailOnRegression, validateTag, main } = require('../index.js');
 
 const root = path.resolve(__dirname, '..');
-const base = { head: ['/work/h'], base: ['/work/b'], format: 'auto', threshold: '5', minAbs: '0', sort: 'delta', title: 'T', tag: 'default', failOnRegression: 'false' };
+const base = { head: ['/work/h'], base: ['/work/b'], format: 'auto', threshold: '5', minAbs: '0', sort: 'delta', title: 'T', tag: 'default', failOnRegression: '' };
 const flagValue = (args, flag) => args[args.indexOf(flag) + 1];
 
 test('buildArgs: fail-on-regression true is a bare flag, a number is =N, false/empty add nothing', () => {
   assert.ok(buildArgs({ ...base, failOnRegression: 'true' }).includes('--fail-on-regression'));
   assert.ok(buildArgs({ ...base, failOnRegression: '10' }).includes('--fail-on-regression=10'));
-  for (const v of ['false', '']) assert.ok(!buildArgs({ ...base, failOnRegression: v }).some((a) => a.startsWith('--fail-on-regression')));
+  assert.ok(!buildArgs({ ...base, failOnRegression: '' }).some((a) => a.includes('fail-on-regression')));
+});
+
+test('buildArgs: explicit false emits the negative flags so it overrides a config file; empty emits nothing', () => {
+  const fail = (v) => buildArgs({ ...base, failOnRegression: v }).filter((a) => a.includes('fail-on-regression'));
+  assert.deepEqual(fail('false'), ['--no-fail-on-regression']);
+  assert.deepEqual(fail(''), []);
+  const only = (v) => buildArgs({ ...base, onlyChanged: v }).filter((a) => a.includes('only-changed'));
+  assert.deepEqual(only('true'), ['--only-changed']);
+  assert.deepEqual(only('false'), ['--no-only-changed']);
+  assert.deepEqual(only(''), []);
+  assert.deepEqual(only(undefined), []);
 });
 
 test('buildArgs: only-changed, max-rows and base-format pass through', () => {
   const none = buildArgs(base);
   for (const f of ['--only-changed', '--max-rows', '--base-format']) assert.ok(!none.includes(f));
-  const args = buildArgs({ ...base, onlyChanged: true, maxRows: '3', baseFormat: 'benchdiff' });
+  const args = buildArgs({ ...base, onlyChanged: 'true', maxRows: '3', baseFormat: 'benchdiff' });
   assert.ok(args.includes('--only-changed'));
   assert.equal(flagValue(args, '--max-rows'), '3');
   assert.equal(flagValue(args, '--base-format'), 'benchdiff');
@@ -31,6 +42,8 @@ test('buildArgs: only-changed, max-rows and base-format pass through', () => {
 test('parseFailOnRegression normalizes case/space and rejects junk', () => {
   assert.equal(parseFailOnRegression(' TRUE '), 'true');
   assert.equal(parseFailOnRegression('False'), 'false');
+  assert.equal(parseFailOnRegression(''), '');
+  assert.equal(parseFailOnRegression(undefined), '');
   assert.equal(parseFailOnRegression('12.5'), '12.5');
   for (const bad of ['abc', '-1', 'NaN', 'Infinity']) assert.throws(() => parseFailOnRegression(bad), /fail-on-regression/);
 });
@@ -84,7 +97,7 @@ test('main() passes when the regression is under the limit', async () => {
 });
 
 test('main() rejects when no head file matches', async () => {
-  const s = setup('false', path.join(os.tmpdir(), 'bd-does-not-exist.txt'));
+  const s = setup('', path.join(os.tmpdir(), 'bd-does-not-exist.txt'));
   await withEnv(s.env, async () => {
     await assert.rejects(main(), /no head files match/);
   });
@@ -116,12 +129,12 @@ const TAIL = ['--markdown', '/work/report.md', '--json', '/work/report.json', '-
 // (or a --config file) owns them. The diff against the 0.1.3a snapshot is exactly the dropped
 // `--format auto --threshold 5 --min-abs 0 --sort delta --title=Benchmark comparison --tag=default`.
 test('buildArgs snapshot: all-empty inputs emit no config-governed flags', () => {
-  const args = buildArgs({ head: ['h.txt'], base: ['b.txt'], format: '', threshold: '', minAbs: '', sort: '', title: '', tag: '', failOnRegression: 'false' });
+  const args = buildArgs({ head: ['h.txt'], base: ['b.txt'], format: '', threshold: '', minAbs: '', sort: '', title: '', tag: '', failOnRegression: '' });
   assert.deepEqual(args, ['--head', 'h.txt', '--base', 'b.txt', ...TAIL]);
 });
 
 test('buildArgs: explicitly set defaults are still emitted (inputs override the config file)', () => {
-  const args = buildArgs({ head: ['h.txt'], base: ['b.txt'], format: 'auto', threshold: '5', minAbs: '0', sort: 'delta', title: 'Benchmark comparison', tag: 'default', failOnRegression: 'false' });
+  const args = buildArgs({ head: ['h.txt'], base: ['b.txt'], format: 'auto', threshold: '5', minAbs: '0', sort: 'delta', title: 'Benchmark comparison', tag: 'default', failOnRegression: '' });
   assert.deepEqual(args, [
     '--head', 'h.txt', '--base', 'b.txt',
     '--format', 'auto', '--threshold', '5', '--min-abs', '0', '--sort', 'delta',
@@ -163,7 +176,7 @@ test('main() output is identical with a stray benchdiff.json in the workspace an
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-stray-'));
   fs.writeFileSync(path.join(ws, 'benchdiff.json'), '{"schema":1,"metrics":[]}');
   const run = async (cwd) => {
-    const s = setup('false');
+    const s = setup('');
     const before = process.cwd();
     process.chdir(cwd);
     try {
@@ -179,7 +192,7 @@ test('main() output is identical with a stray benchdiff.json in the workspace an
 test('buildArgs snapshot: every input set yields the exact current argv', () => {
   const args = buildArgs({
     head: ['h1', 'h2'], base: ['b1'], format: 'go', baseFormat: 'benchdiff', threshold: '7.5', minAbs: '2',
-    onlyChanged: true, sort: 'name', maxRows: '9', title: 'My title', tag: 'perf', failOnRegression: '10',
+    onlyChanged: 'true', sort: 'name', maxRows: '9', title: 'My title', tag: 'perf', failOnRegression: '10',
   });
   assert.deepEqual(args, [
     '--head', 'h1', '--head', 'h2', '--base', 'b1',
@@ -192,8 +205,10 @@ test('buildArgs snapshot: every input set yields the exact current argv', () => 
 
 test('buildArgs snapshot: onlyChanged and failOnRegression forms', () => {
   const tail = (o) => buildArgs({ ...base, ...o }).slice(-TAIL.length - 1, -TAIL.length);
-  assert.deepEqual(buildArgs({ ...base, onlyChanged: true }).filter((a) => a === '--only-changed'), ['--only-changed']);
-  assert.deepEqual(buildArgs({ ...base, onlyChanged: false }).filter((a) => a === '--only-changed'), []);
+  assert.deepEqual(buildArgs({ ...base, onlyChanged: 'true' }).filter((a) => a === '--only-changed'), ['--only-changed']);
+  assert.deepEqual(buildArgs({ ...base, onlyChanged: 'false' }).filter((a) => a === '--only-changed'), []);
+  assert.deepEqual(buildArgs({ ...base, onlyChanged: 'false' }).filter((a) => a === '--no-only-changed'), ['--no-only-changed']);
+  assert.deepEqual(tail({ failOnRegression: 'false' }), ['--no-fail-on-regression']);
   assert.deepEqual(tail({ failOnRegression: 'true' }), ['--fail-on-regression']);
   assert.deepEqual(tail({ failOnRegression: '0' }), ['--fail-on-regression=0']);
   assert.deepEqual(tail({ failOnRegression: '12.5' }), ['--fail-on-regression=12.5']);
