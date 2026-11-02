@@ -1542,4 +1542,90 @@ mod tests {
             "delta chart: + 1 more not shown (chart-rows: 1)"
         );
     }
+
+    fn title_text(svg: &str) -> &str {
+        let start = svg.find("<title id=\"t\">").expect("title") + "<title id=\"t\">".len();
+        &svg[start..start + svg[start..].find("</title>").expect("title end")]
+    }
+
+    fn pair_report_with_samples() -> Report {
+        use crate::import::{parse, Format};
+        let side = |a: f64, b: f64| {
+            let mut text = String::new();
+            for i in 0..6 {
+                let d = f64::from(i);
+                text += &format!(
+                    "BenchmarkA-8 100 {} ns/op\nBenchmarkB-8 100 {} ns/op\n",
+                    a + d,
+                    b + d
+                );
+            }
+            parse(Format::Go, &text).unwrap()
+        };
+        crate::compare(
+            Some(&side(100.0, 100.0)),
+            &side(130.0, 70.0),
+            &crate::Options {
+                keep_samples: true,
+                ..crate::Options::default()
+            },
+        )
+    }
+
+    #[test]
+    fn render_svgs_should_use_the_title_text_as_alt_when_delta_ranking_or_distribution() {
+        let pair = pair_report_with_samples();
+        let r = render_svgs(
+            SvgInput::Pair(&pair),
+            &kinds(&[ChartKind::Delta, ChartKind::Distribution]),
+        );
+        assert_eq!(r.files.len(), 2, "{:?}", r.skipped);
+        let matrix = ranking_fixture();
+        let m = render_svgs(SvgInput::Matrix(&matrix), &kinds(&[ChartKind::Ranking]));
+        assert_eq!(m.files.len(), 1, "{:?}", m.skipped);
+        for f in r.files.iter().chain(&m.files) {
+            assert!(!f.alt.is_empty(), "{}", f.name);
+            assert_eq!(
+                title_text(&f.svg),
+                f.alt,
+                "{}: <title> differs from alt",
+                f.name
+            );
+        }
+    }
+
+    #[test]
+    fn select_rows_should_rank_by_delta_not_table_order_when_sort_is_name() {
+        // Name order (n00..n46) is the reverse of the delta rank, so the largest |delta| row is last in the table.
+        let mut rows: Vec<Row> = (0..47)
+            .map(|i| prow(&format!("n{i:02}"), 1.0 + f64::from(i), Verdict::Regressed))
+            .collect();
+        rows.sort_by(|a, b| a.name.cmp(&b.name));
+        let report = preport(rows, None);
+        let input = SvgInput::Pair(&report);
+        let sel = select_rows(&input, &opts_rows(30));
+        let table_first = &report.rows[0];
+        assert_eq!(table_first.name, "n00");
+        let largest = report
+            .rows
+            .iter()
+            .max_by(|a, b| a.delta_pct.unwrap().total_cmp(&b.delta_pct.unwrap()))
+            .unwrap();
+        assert_eq!(largest.name, "n46");
+        assert_eq!(
+            report.rows.last().unwrap().name,
+            "n46",
+            "largest delta is late in table order"
+        );
+        assert_eq!(sel.rows[0].label, "1. n46");
+        assert_ne!(sel.rows[0].label, format!("1. {}", table_first.name));
+
+        let text = chart_text_table(&input, ChartKind::Delta, &opts_rows(30));
+        assert_eq!(text.len(), sel.rows.len());
+        for (t, s) in text.iter().zip(&sel.rows) {
+            assert_eq!(s.label, format!("{}. {}", t.index, t.label));
+            assert_eq!(t.index, s.index);
+        }
+        assert_eq!(text[0].label, "n46");
+    }
 }
