@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { buildArgs, stageConfig, parseFailOnRegression, validateTag, main } = require('../index.js');
+const { buildArgs, stageConfig, parseFailOnRegression, validateTag, clip, main } = require('../index.js');
 
 const root = path.resolve(__dirname, '..');
 const base = { head: ['/work/h'], base: ['/work/b'], format: 'auto', threshold: '5', minAbs: '0', sort: 'delta', title: 'T', tag: 'default', failOnRegression: '' };
@@ -236,4 +236,33 @@ test('package_json_should_be_absent_or_have_no_dependencies_and_index_and_lib_sh
       assert.ok(spec.startsWith('node:') || spec.startsWith('./') || spec.startsWith('../'), `${path.basename(file)} requires non-builtin "${spec}"`);
     }
   }
+});
+
+test('clip_should_move_cut_before_image_or_picture_markup_when_cut_inside', () => {
+  const marker = '<!-- benchdiff:test -->';
+  const url = 'https://raw.githubusercontent.com/o/r/benchdiff-assets/a.svg';
+  const notice = '_Report truncated';
+  const check = (out, bad) => {
+    assert.ok(out.length < 65536);
+    assert.ok(!out.includes(bad), `kept ${bad}`);
+    assert.ok(out.includes(notice));
+    assert.ok(out.trimEnd().endsWith(marker));
+  };
+
+  // Image on one long line with no newline near the limit: raw cut would land inside it.
+  const img = `![chart](${url})`;
+  const imgBody = `${marker}\n${'x'.repeat(59990 - marker.length - 1)}${img}\n${'row\n'.repeat(3000)}`;
+  assert.ok(imgBody.indexOf(img) < 60000 && imgBody.indexOf(img) + img.length > 60000);
+  check(clip(imgBody, marker), '![');
+
+  // Multi-line <picture> block straddling the limit.
+  const pic = `<picture>\n<source media="(prefers-color-scheme: dark)" srcset="${url}">\n<img alt="c" src="${url}">\n</picture>`;
+  const pad = 'x'.repeat(59990 - marker.length - 1) + '\n';
+  const picBody = `${marker}\n${pad}${pic}\n${'row\n'.repeat(3000)}`;
+  check(clip(picBody, marker), '<picture>');
+
+  // Closed details around a cut-before-picture stays balanced.
+  const out = clip(`${marker}\n<details>\n${pad.slice(0, -1)}\n${pic}\n${'row\n'.repeat(3000)}</details>\n`, marker);
+  assert.equal((out.match(/<details>/g) || []).length, (out.match(/<\/details>/g) || []).length);
+  assert.ok(!out.includes('<picture>'));
 });

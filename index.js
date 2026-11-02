@@ -151,10 +151,20 @@ function pullRequestNumber() {
   }
 }
 
+// Moves `cut` before any image or <picture> span it would split, so no broken markup is posted.
+function beforeImageMarkup(body, cut) {
+  const spans = /<picture>[\s\S]*?<\/picture>|!\[(?:\\.|[^\]\\])*\]\([^)\s]*\)/g;
+  for (const m of body.matchAll(spans)) {
+    if (m.index >= cut) break;
+    if (m.index + m[0].length > cut) return m.index;
+  }
+  return cut;
+}
+
 function clip(body, marker) {
   if (body.length <= COMMENT_LIMIT) return body;
   const cut = body.lastIndexOf('\n', COMMENT_LIMIT);
-  const kept = body.slice(0, cut > 0 ? cut : COMMENT_LIMIT);
+  const kept = body.slice(0, beforeImageMarkup(body, cut > 0 ? cut : COMMENT_LIMIT));
   // A cut inside <details> would swallow the footer and marker into the collapsed block.
   const open = Math.max(0, (kept.match(/<details>/g) || []).length - (kept.match(/<\/details>/g) || []).length);
   const closers = '\n</details>'.repeat(open);
