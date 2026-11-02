@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="220" viewBox="0 0 760 220" role="img" aria-labelledby="t d" font-family="Helvetica, Arial, sans-serif">
+<title id="t">Benchmark change, head vs base: 4 improved; top: Sort/n=1000 [ns/op] -30.6%</title>
+<desc id="d">0 regressed, 4 improved, 0 unchanged. Largest changes: Sort/n=1000 [ns/op] -30.6%; Join [ns/op] -28.8%; Hash [ns/op] -28.3%; Sort/n=100000 [ns/op] -25.1%. Bars clip at 100%; value labels show the true change.</desc>
+<rect x="0" y="0" width="760" height="220" rx="8" fill="#fcfcfb"/>
+<text x="16" y="24" text-anchor="start" font-size="13" fill="#0b0b0b">Benchmark change, head vs base</text>
+<text x="16" y="42" text-anchor="start" font-size="12" fill="#52514e">0 regressed · 4 improved · 0 unchanged</text>
+<text x="482" y="52" text-anchor="middle" font-size="11" fill="#52514e">0%</text>
+<line x1="482" y1="56" x2="482" y2="168" stroke="#52514e" stroke-width="1"/>
+<g>
+<title>1. Sort/n=1000 [ns/op]: -30.6%</title>
+<text x="16" y="74" text-anchor="start" font-size="12" fill="#0b0b0b">1. Sort/n=1000 [ns/op]</text>
+<rect x="427.57" y="62" width="54.43" height="16" rx="0" fill="#0ca30c"/>
+<path d="M419.57 76L425.57 65.2L413.57 65.2Z" fill="#0ca30c" stroke="#0ca30c" stroke-width="1.5"/>
+<text x="407.57" y="74" text-anchor="end" font-size="12" fill="#0b0b0b">-30.6%</text>
+</g>
+<g>
+<title>2. Join [ns/op]: -28.8%</title>
+<text x="16" y="102" text-anchor="start" font-size="12" fill="#0b0b0b">2. Join [ns/op]</text>
+<rect x="430.78" y="90" width="51.22" height="16" rx="0" fill="#0ca30c"/>
+<path d="M422.78 104L428.78 93.2L416.78 93.2Z" fill="#0ca30c" stroke="#0ca30c" stroke-width="1.5"/>
+<text x="410.78" y="102" text-anchor="end" font-size="12" fill="#0b0b0b">-28.8%</text>
+</g>
+<g>
+<title>3. Hash [ns/op]: -28.3%</title>
+<text x="16" y="130" text-anchor="start" font-size="12" fill="#0b0b0b">3. Hash [ns/op]</text>
+<rect x="431.58" y="118" width="50.42" height="16" rx="0" fill="#0ca30c"/>
+<path d="M423.58 132L429.58 121.2L417.58 121.2Z" fill="#0ca30c" stroke="#0ca30c" stroke-width="1.5"/>
+<text x="411.58" y="130" text-anchor="end" font-size="12" fill="#0b0b0b">-28.3%</text>
+</g>
+<g>
+<title>4. Sort/n=100000 [ns/op]: -25.1%</title>
+<text x="16" y="158" text-anchor="start" font-size="12" fill="#0b0b0b">4. Sort/n=100000 [ns/op]</text>
+<rect x="437.32" y="146" width="44.68" height="16" rx="0" fill="#0ca30c"/>
+<path d="M429.32 160L435.32 149.2L423.32 149.2Z" fill="#0ca30c" stroke="#0ca30c" stroke-width="1.5"/>
+<text x="417.32" y="158" text-anchor="end" font-size="12" fill="#0b0b0b">-25.1%</text>
+</g>
+<path d="M22 180L28 190.8L16 190.8Z" fill="#d03b3b" stroke="#d03b3b" stroke-width="1.5"/>
+<text x="34" y="190" text-anchor="start" font-size="12" fill="#52514e">regressed</text>
+<path d="M114.69 192L120.69 181.2L108.69 181.2Z" fill="#0ca30c" stroke="#0ca30c" stroke-width="1.5"/>
+<text x="126.69" y="190" text-anchor="start" font-size="12" fill="#52514e">improved</text>
+<path d="M196.97 186A6 6 0 1 0 208.97 186A6 6 0 1 0 196.97 186Z" fill="none" stroke="#8a8a86" stroke-width="1.5"/>
+<text x="214.97" y="190" text-anchor="start" font-size="12" fill="#52514e">no significant change</text>
+<text x="16" y="208" text-anchor="start" font-size="12" fill="#52514e">Largest change first. Bars clip at 100%; labels show the true change.</text>
+</svg>

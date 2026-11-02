@@ -1,0 +1,408 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="2160" viewBox="0 0 760 2160" role="img" aria-labelledby="t d" font-family="Helvetica, Arial, sans-serif">
+<title id="t">Sample distributions per variant, 18 benchmarks; first: Sort [n=1000]</title>
+<desc id="d">Each dot is one sample; the tick marks the median. Largest change first: Sort [n=1000] (quick: median 8916 ns/op (8750-9082, n=10); heap: median 6190 ns/op (6133-6440, n=10); merge: median 8076 ns/op (7938-8277, n=10)) | Parse (quick: median 4150 ns/op (3980-4389, n=10); heap: median 4154 ns/op (3927-4298, n=10); merge: median 5417 ns/op (5302-5530, n=10)) | Join (quick: median 25686 ns/op (25293-26743, n=10); heap: median 18296 ns/op (17950-18599, n=10); merge: median 25908 ns/op (25069-26556, n=10)) | Hash (quick: median 783 ns/op (758-803, n=10); heap: median 561 ns/op (544-576, n=10); merge: median 780 ns/op (752-797, n=10)) | Sort [n=100000] (quick: median 944904 ns/op (925482-975519, n=10); heap: median 707743 ns/op (685339-719225, n=10); merge: median 914741 ns/op (874565-926186, n=10)).</desc>
+<rect x="0" y="0" width="760" height="2160" rx="8" fill="#fcfcfb"/>
+<text x="16" y="24" text-anchor="start" font-size="13" fill="#0b0b0b">Sample distributions per variant</text>
+<text x="16" y="42" text-anchor="start" font-size="12" fill="#52514e">18 benchmarks</text>
+<text x="16" y="70" text-anchor="start" font-size="12" fill="#0b0b0b">1. Sort [n=1000]</text>
+<g>
+<title>1. Sort [n=1000] quick: median 8916 ns/op (8750-9082, n=10)</title>
+<text x="132" y="91" text-anchor="end" font-size="11" fill="#52514e">quick</text>
+<path d="M699.54 89A3 3 0 1 0 705.54 89A3 3 0 1 0 699.54 89ZM680.78 83A3 3 0 1 0 686.78 83A3 3 0 1 0 680.78 83ZM735 87A3 3 0 1 0 741 87A3 3 0 1 0 735 87ZM672.27 91A3 3 0 1 0 678.27 91A3 3 0 1 0 672.27 91ZM722.53 85A3 3 0 1 0 728.53 85A3 3 0 1 0 722.53 85ZM704.08 89A3 3 0 1 0 710.08 89A3 3 0 1 0 704.08 89ZM670.7 83A3 3 0 1 0 676.7 83A3 3 0 1 0 670.7 83ZM719.44 87A3 3 0 1 0 725.44 87A3 3 0 1 0 719.44 87ZM668.47 91A3 3 0 1 0 674.47 91A3 3 0 1 0 668.47 91ZM711.45 85A3 3 0 1 0 717.45 85A3 3 0 1 0 711.45 85Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<line x1="704.81" y1="78" x2="704.81" y2="96" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>1. Sort [n=1000] heap: median 6190 ns/op (6133-6440, n=10)</title>
+<text x="132" y="113" text-anchor="end" font-size="11" fill="#52514e">heap</text>
+<path d="M151.27 111A3 3 0 1 0 157.27 111A3 3 0 1 0 151.27 111ZM147.42 105A3 3 0 1 0 153.42 105A3 3 0 1 0 147.42 105ZM143 109A3 3 0 1 0 149 109A3 3 0 1 0 143 109ZM196.83 113A3 3 0 1 0 202.83 113A3 3 0 1 0 196.83 113ZM148.34 107A3 3 0 1 0 154.34 107A3 3 0 1 0 148.34 107ZM157.32 111A3 3 0 1 0 163.32 111A3 3 0 1 0 157.32 111ZM168.2 105A3 3 0 1 0 174.2 105A3 3 0 1 0 168.2 105ZM204.67 109A3 3 0 1 0 210.67 109A3 3 0 1 0 204.67 109ZM144.65 113A3 3 0 1 0 150.65 113A3 3 0 1 0 144.65 113ZM172.62 107A3 3 0 1 0 178.62 107A3 3 0 1 0 172.62 107Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="157.3" y1="100" x2="157.3" y2="118" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>1. Sort [n=1000] merge: median 8076 ns/op (7938-8277, n=10)</title>
+<text x="132" y="135" text-anchor="end" font-size="11" fill="#52514e">merge</text>
+<path d="M573.38 133A3 3 0 1 0 579.38 133A3 3 0 1 0 573.38 133ZM557.07 127A3 3 0 1 0 563.07 127A3 3 0 1 0 557.07 127ZM514.6 131A3 3 0 1 0 520.6 131A3 3 0 1 0 514.6 131ZM524.9 135A3 3 0 1 0 530.9 135A3 3 0 1 0 524.9 135ZM505.42 129A3 3 0 1 0 511.42 129A3 3 0 1 0 505.42 129ZM564.46 133A3 3 0 1 0 570.46 133A3 3 0 1 0 564.46 133ZM541.09 127A3 3 0 1 0 547.09 127A3 3 0 1 0 541.09 127ZM565.14 131A3 3 0 1 0 571.14 131A3 3 0 1 0 565.14 131ZM521.29 135A3 3 0 1 0 527.29 135A3 3 0 1 0 521.29 135ZM510.89 129A3 3 0 1 0 516.89 129A3 3 0 1 0 510.89 129Z" fill="#1baf7a" stroke="#52514e" stroke-width="1"/>
+<line x1="535.99" y1="122" x2="535.99" y2="140" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="142" x2="744" y2="142" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="155" text-anchor="start" font-size="11" fill="#52514e">6133</text>
+<text x="744" y="155" text-anchor="end" font-size="11" fill="#52514e">9082 ns/op</text>
+<text x="16" y="184" text-anchor="start" font-size="12" fill="#0b0b0b">2. Parse</text>
+<g>
+<title>2. Parse quick: median 4150 ns/op (3980-4389, n=10)</title>
+<text x="132" y="205" text-anchor="end" font-size="11" fill="#52514e">quick</text>
+<path d="M220.02 203A3 3 0 1 0 226.02 203A3 3 0 1 0 220.02 203ZM162.36 197A3 3 0 1 0 168.36 197A3 3 0 1 0 162.36 197ZM189.03 201A3 3 0 1 0 195.03 201A3 3 0 1 0 189.03 201ZM230.29 205A3 3 0 1 0 236.29 205A3 3 0 1 0 230.29 205ZM259.7 199A3 3 0 1 0 265.7 199A3 3 0 1 0 259.7 199ZM206.5 203A3 3 0 1 0 212.5 203A3 3 0 1 0 206.5 203ZM280.83 197A3 3 0 1 0 286.83 197A3 3 0 1 0 280.83 197ZM257.63 201A3 3 0 1 0 263.63 201A3 3 0 1 0 257.63 201ZM313.64 205A3 3 0 1 0 319.64 205A3 3 0 1 0 313.64 205ZM204.29 199A3 3 0 1 0 210.29 199A3 3 0 1 0 204.29 199Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<line x1="228.16" y1="192" x2="228.16" y2="210" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>2. Parse heap: median 4154 ns/op (3927-4298, n=10)</title>
+<text x="132" y="227" text-anchor="end" font-size="11" fill="#52514e">heap</text>
+<path d="M260.37 225A3 3 0 1 0 266.37 225A3 3 0 1 0 260.37 225ZM246.96 219A3 3 0 1 0 252.96 219A3 3 0 1 0 246.96 219ZM143.26 223A3 3 0 1 0 149.26 223A3 3 0 1 0 143.26 223ZM276.8 227A3 3 0 1 0 282.8 227A3 3 0 1 0 276.8 227ZM280.09 221A3 3 0 1 0 286.09 221A3 3 0 1 0 280.09 221ZM206.73 225A3 3 0 1 0 212.73 225A3 3 0 1 0 206.73 225ZM250.02 219A3 3 0 1 0 256.02 219A3 3 0 1 0 250.02 219ZM145.7 223A3 3 0 1 0 151.7 223A3 3 0 1 0 145.7 223ZM163.17 227A3 3 0 1 0 169.17 227A3 3 0 1 0 163.17 227ZM143 221A3 3 0 1 0 149 221A3 3 0 1 0 143 221Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="229.84" y1="214" x2="229.84" y2="232" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>2. Parse merge: median 5417 ns/op (5302-5530, n=10)</title>
+<text x="132" y="249" text-anchor="end" font-size="11" fill="#52514e">merge</text>
+<path d="M653.62 247A3 3 0 1 0 659.62 247A3 3 0 1 0 653.62 247ZM654.39 241A3 3 0 1 0 660.39 241A3 3 0 1 0 654.39 241ZM650.77 245A3 3 0 1 0 656.77 245A3 3 0 1 0 650.77 245ZM651.7 249A3 3 0 1 0 657.7 249A3 3 0 1 0 651.7 249ZM701.94 243A3 3 0 1 0 707.94 243A3 3 0 1 0 701.94 243ZM735 247A3 3 0 1 0 741 247A3 3 0 1 0 735 247ZM727.83 241A3 3 0 1 0 733.83 241A3 3 0 1 0 727.83 241ZM684.61 245A3 3 0 1 0 690.61 245A3 3 0 1 0 684.61 245ZM705.41 249A3 3 0 1 0 711.41 249A3 3 0 1 0 705.41 249ZM722.96 243A3 3 0 1 0 728.96 243A3 3 0 1 0 722.96 243Z" fill="#1baf7a" stroke="#52514e" stroke-width="1"/>
+<line x1="696.27" y1="236" x2="696.27" y2="254" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="256" x2="744" y2="256" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="269" text-anchor="start" font-size="11" fill="#52514e">3927</text>
+<text x="744" y="269" text-anchor="end" font-size="11" fill="#52514e">5530 ns/op</text>
+<text x="16" y="298" text-anchor="start" font-size="12" fill="#0b0b0b">3. Join</text>
+<g>
+<title>3. Join quick: median 25686 ns/op (25293-26743, n=10)</title>
+<text x="132" y="319" text-anchor="end" font-size="11" fill="#52514e">quick</text>
+<path d="M735 317A3 3 0 1 0 741 317A3 3 0 1 0 735 317ZM637.36 311A3 3 0 1 0 643.36 311A3 3 0 1 0 637.36 311ZM722.63 315A3 3 0 1 0 728.63 315A3 3 0 1 0 722.63 315ZM662.88 319A3 3 0 1 0 668.88 319A3 3 0 1 0 662.88 319ZM647.62 313A3 3 0 1 0 653.62 313A3 3 0 1 0 647.62 313ZM644.84 317A3 3 0 1 0 650.84 317A3 3 0 1 0 644.84 317ZM664.86 311A3 3 0 1 0 670.86 311A3 3 0 1 0 664.86 311ZM718.18 315A3 3 0 1 0 724.18 315A3 3 0 1 0 718.18 315ZM651.45 319A3 3 0 1 0 657.45 319A3 3 0 1 0 651.45 319ZM693.55 313A3 3 0 1 0 699.55 313A3 3 0 1 0 693.55 313Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<line x1="666.87" y1="306" x2="666.87" y2="324" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>3. Join heap: median 18296 ns/op (17950-18599, n=10)</title>
+<text x="132" y="341" text-anchor="end" font-size="11" fill="#52514e">heap</text>
+<path d="M155.87 339A3 3 0 1 0 161.87 339A3 3 0 1 0 155.87 339ZM160.03 333A3 3 0 1 0 166.03 333A3 3 0 1 0 160.03 333ZM160.13 337A3 3 0 1 0 166.13 337A3 3 0 1 0 160.13 337ZM178.94 341A3 3 0 1 0 184.94 341A3 3 0 1 0 178.94 341ZM186.72 335A3 3 0 1 0 192.72 335A3 3 0 1 0 186.72 335ZM162.33 339A3 3 0 1 0 168.33 339A3 3 0 1 0 162.33 339ZM143 333A3 3 0 1 0 149 333A3 3 0 1 0 143 333ZM174 337A3 3 0 1 0 180 337A3 3 0 1 0 174 337ZM170.29 341A3 3 0 1 0 176.29 341A3 3 0 1 0 170.29 341ZM185.02 335A3 3 0 1 0 191.02 335A3 3 0 1 0 185.02 335Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="169.31" y1="328" x2="169.31" y2="346" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>3. Join merge: median 25908 ns/op (25069-26556, n=10)</title>
+<text x="132" y="363" text-anchor="end" font-size="11" fill="#52514e">merge</text>
+<path d="M622.32 361A3 3 0 1 0 628.32 361A3 3 0 1 0 622.32 361ZM648.52 355A3 3 0 1 0 654.52 355A3 3 0 1 0 648.52 355ZM646.42 359A3 3 0 1 0 652.42 359A3 3 0 1 0 646.42 359ZM691.58 363A3 3 0 1 0 697.58 363A3 3 0 1 0 691.58 363ZM719.09 357A3 3 0 1 0 725.09 357A3 3 0 1 0 719.09 357ZM666.01 361A3 3 0 1 0 672.01 361A3 3 0 1 0 666.01 361ZM717.06 355A3 3 0 1 0 723.06 355A3 3 0 1 0 717.06 355ZM722.38 359A3 3 0 1 0 728.38 359A3 3 0 1 0 722.38 359ZM718.93 363A3 3 0 1 0 724.93 363A3 3 0 1 0 718.93 363ZM657.41 357A3 3 0 1 0 663.41 357A3 3 0 1 0 657.41 357Z" fill="#1baf7a" stroke="#52514e" stroke-width="1"/>
+<line x1="681.8" y1="350" x2="681.8" y2="368" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="370" x2="744" y2="370" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="383" text-anchor="start" font-size="11" fill="#52514e">17950</text>
+<text x="744" y="383" text-anchor="end" font-size="11" fill="#52514e">26743 ns/op</text>
+<text x="16" y="412" text-anchor="start" font-size="12" fill="#0b0b0b">4. Hash</text>
+<g>
+<title>4. Hash quick: median 783 ns/op (758-803, n=10)</title>
+<text x="132" y="433" text-anchor="end" font-size="11" fill="#52514e">quick</text>
+<path d="M635.15 431A3 3 0 1 0 641.15 431A3 3 0 1 0 635.15 431ZM703.7 425A3 3 0 1 0 709.7 425A3 3 0 1 0 703.7 425ZM697.99 429A3 3 0 1 0 703.99 429A3 3 0 1 0 697.99 429ZM735 433A3 3 0 1 0 741 433A3 3 0 1 0 735 433ZM716.72 427A3 3 0 1 0 722.72 427A3 3 0 1 0 716.72 427ZM659.14 431A3 3 0 1 0 665.14 431A3 3 0 1 0 659.14 431ZM670.11 425A3 3 0 1 0 676.11 425A3 3 0 1 0 670.11 425ZM700.27 429A3 3 0 1 0 706.27 429A3 3 0 1 0 700.27 429ZM631.27 433A3 3 0 1 0 637.27 433A3 3 0 1 0 631.27 433ZM678.11 427A3 3 0 1 0 684.11 427A3 3 0 1 0 678.11 427Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<line x1="691.05" y1="420" x2="691.05" y2="438" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>4. Hash heap: median 561 ns/op (544-576, n=10)</title>
+<text x="132" y="455" text-anchor="end" font-size="11" fill="#52514e">heap</text>
+<path d="M204.69 453A3 3 0 1 0 210.69 453A3 3 0 1 0 204.69 453ZM153.51 447A3 3 0 1 0 159.51 447A3 3 0 1 0 153.51 447ZM143 451A3 3 0 1 0 149 451A3 3 0 1 0 143 451ZM214.29 455A3 3 0 1 0 220.29 455A3 3 0 1 0 214.29 455ZM181.61 449A3 3 0 1 0 187.61 449A3 3 0 1 0 181.61 449ZM152.37 453A3 3 0 1 0 158.37 453A3 3 0 1 0 152.37 453ZM182.98 447A3 3 0 1 0 188.98 447A3 3 0 1 0 182.98 447ZM143.23 451A3 3 0 1 0 149.23 451A3 3 0 1 0 143.23 451ZM181.61 455A3 3 0 1 0 187.61 455A3 3 0 1 0 181.61 455ZM216.34 449A3 3 0 1 0 222.34 449A3 3 0 1 0 216.34 449Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="184.61" y1="442" x2="184.61" y2="460" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>4. Hash merge: median 780 ns/op (752-797, n=10)</title>
+<text x="132" y="477" text-anchor="end" font-size="11" fill="#52514e">merge</text>
+<path d="M633.1 475A3 3 0 1 0 639.1 475A3 3 0 1 0 633.1 475ZM705.53 469A3 3 0 1 0 711.53 469A3 3 0 1 0 705.53 469ZM721.75 473A3 3 0 1 0 727.75 473A3 3 0 1 0 721.75 473ZM687.48 477A3 3 0 1 0 693.48 477A3 3 0 1 0 687.48 477ZM654.8 471A3 3 0 1 0 660.8 471A3 3 0 1 0 654.8 471ZM676.05 475A3 3 0 1 0 682.05 475A3 3 0 1 0 676.05 475ZM631.5 469A3 3 0 1 0 637.5 469A3 3 0 1 0 631.5 469ZM619.16 473A3 3 0 1 0 625.16 473A3 3 0 1 0 619.16 473ZM720.83 477A3 3 0 1 0 726.83 477A3 3 0 1 0 720.83 477ZM686.79 471A3 3 0 1 0 692.79 471A3 3 0 1 0 686.79 471Z" fill="#1baf7a" stroke="#52514e" stroke-width="1"/>
+<line x1="684.42" y1="464" x2="684.42" y2="482" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="484" x2="744" y2="484" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="497" text-anchor="start" font-size="11" fill="#52514e">544</text>
+<text x="744" y="497" text-anchor="end" font-size="11" fill="#52514e">803 ns/op</text>
+<text x="16" y="526" text-anchor="start" font-size="12" fill="#0b0b0b">5. Sort [n=100000]</text>
+<g>
+<title>5. Sort [n=100000] quick: median 944904 ns/op (925482-975519, n=10)</title>
+<text x="132" y="547" text-anchor="end" font-size="11" fill="#52514e">quick</text>
+<path d="M632.92 545A3 3 0 1 0 638.92 545A3 3 0 1 0 632.92 545ZM635.34 539A3 3 0 1 0 641.34 539A3 3 0 1 0 635.34 539ZM674.16 543A3 3 0 1 0 680.16 543A3 3 0 1 0 674.16 543ZM720.95 547A3 3 0 1 0 726.95 547A3 3 0 1 0 720.95 547ZM639.19 541A3 3 0 1 0 645.19 541A3 3 0 1 0 639.19 541ZM650.75 545A3 3 0 1 0 656.75 545A3 3 0 1 0 650.75 545ZM697.76 539A3 3 0 1 0 703.76 539A3 3 0 1 0 697.76 539ZM735 543A3 3 0 1 0 741 543A3 3 0 1 0 735 543ZM691.9 547A3 3 0 1 0 697.9 547A3 3 0 1 0 691.9 547ZM670.92 541A3 3 0 1 0 676.92 541A3 3 0 1 0 670.92 541Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<line x1="675.54" y1="534" x2="675.54" y2="552" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>5. Sort [n=100000] heap: median 707743 ns/op (685339-719225, n=10)</title>
+<text x="132" y="569" text-anchor="end" font-size="11" fill="#52514e">heap</text>
+<path d="M177.15 567A3 3 0 1 0 183.15 567A3 3 0 1 0 177.15 567ZM205.76 561A3 3 0 1 0 211.76 561A3 3 0 1 0 205.76 561ZM200.27 565A3 3 0 1 0 206.27 565A3 3 0 1 0 200.27 565ZM204.1 569A3 3 0 1 0 210.1 569A3 3 0 1 0 204.1 569ZM153.92 563A3 3 0 1 0 159.92 563A3 3 0 1 0 153.92 563ZM165.65 567A3 3 0 1 0 171.65 567A3 3 0 1 0 165.65 567ZM160.81 561A3 3 0 1 0 166.81 561A3 3 0 1 0 160.81 561ZM205.83 565A3 3 0 1 0 211.83 565A3 3 0 1 0 205.83 565ZM212.13 569A3 3 0 1 0 218.13 569A3 3 0 1 0 212.13 569ZM143 563A3 3 0 1 0 149 563A3 3 0 1 0 143 563Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="191.71" y1="556" x2="191.71" y2="574" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>5. Sort [n=100000] merge: median 914741 ns/op (874565-926186, n=10)</title>
+<text x="132" y="591" text-anchor="end" font-size="11" fill="#52514e">merge</text>
+<path d="M615.25 589A3 3 0 1 0 621.25 589A3 3 0 1 0 615.25 589ZM634.35 583A3 3 0 1 0 640.35 583A3 3 0 1 0 634.35 583ZM619.78 587A3 3 0 1 0 625.78 587A3 3 0 1 0 619.78 587ZM614.65 591A3 3 0 1 0 620.65 591A3 3 0 1 0 614.65 591ZM616 585A3 3 0 1 0 622 585A3 3 0 1 0 616 585ZM607.36 589A3 3 0 1 0 613.36 589A3 3 0 1 0 607.36 589ZM550.83 583A3 3 0 1 0 556.83 583A3 3 0 1 0 550.83 583ZM582.88 587A3 3 0 1 0 588.88 587A3 3 0 1 0 582.88 587ZM565.02 591A3 3 0 1 0 571.02 591A3 3 0 1 0 565.02 591ZM529.04 585A3 3 0 1 0 535.04 585A3 3 0 1 0 529.04 585Z" fill="#1baf7a" stroke="#52514e" stroke-width="1"/>
+<line x1="614" y1="578" x2="614" y2="596" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="598" x2="744" y2="598" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="611" text-anchor="start" font-size="11" fill="#52514e">685339</text>
+<text x="744" y="611" text-anchor="end" font-size="11" fill="#52514e">975519 ns/op</text>
+<text x="16" y="640" text-anchor="start" font-size="12" fill="#0b0b0b">6. Encode</text>
+<g>
+<title>6. Encode quick: median 313 ns/op (296-326, n=10)</title>
+<text x="132" y="661" text-anchor="end" font-size="11" fill="#52514e">quick</text>
+<path d="M187.58 659A3 3 0 1 0 193.58 659A3 3 0 1 0 187.58 659ZM611.96 653A3 3 0 1 0 617.96 653A3 3 0 1 0 611.96 653ZM433.65 657A3 3 0 1 0 439.65 657A3 3 0 1 0 433.65 657ZM553.12 661A3 3 0 1 0 559.12 661A3 3 0 1 0 553.12 661ZM488.93 655A3 3 0 1 0 494.93 655A3 3 0 1 0 488.93 655ZM317.75 659A3 3 0 1 0 323.75 659A3 3 0 1 0 317.75 659ZM503.19 653A3 3 0 1 0 509.19 653A3 3 0 1 0 503.19 653ZM412.25 657A3 3 0 1 0 418.25 657A3 3 0 1 0 412.25 657ZM735 661A3 3 0 1 0 741 661A3 3 0 1 0 735 661ZM549.55 655A3 3 0 1 0 555.55 655A3 3 0 1 0 549.55 655Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<line x1="499.06" y1="648" x2="499.06" y2="666" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>6. Encode heap: median 301 ns/op (293-326, n=10)</title>
+<text x="132" y="683" text-anchor="end" font-size="11" fill="#52514e">heap</text>
+<path d="M175.1 681A3 3 0 1 0 181.1 681A3 3 0 1 0 175.1 681ZM315.96 675A3 3 0 1 0 321.96 675A3 3 0 1 0 315.96 675ZM651.19 679A3 3 0 1 0 657.19 679A3 3 0 1 0 651.19 679ZM173.31 683A3 3 0 1 0 179.31 683A3 3 0 1 0 173.31 683ZM305.27 677A3 3 0 1 0 311.27 677A3 3 0 1 0 305.27 677ZM157.27 681A3 3 0 1 0 163.27 681A3 3 0 1 0 157.27 681ZM729.65 675A3 3 0 1 0 735.65 675A3 3 0 1 0 729.65 675ZM394.42 679A3 3 0 1 0 400.42 679A3 3 0 1 0 394.42 679ZM143 683A3 3 0 1 0 149 683A3 3 0 1 0 143 683ZM249.99 677A3 3 0 1 0 255.99 677A3 3 0 1 0 249.99 677Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="280.63" y1="670" x2="280.63" y2="688" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>6. Encode merge: median 317 ns/op (296-326, n=10)</title>
+<text x="132" y="705" text-anchor="end" font-size="11" fill="#52514e">merge</text>
+<path d="M529.94 703A3 3 0 1 0 535.94 703A3 3 0 1 0 529.94 703ZM610.18 697A3 3 0 1 0 616.18 697A3 3 0 1 0 610.18 697ZM408.69 701A3 3 0 1 0 414.69 701A3 3 0 1 0 408.69 701ZM613.75 705A3 3 0 1 0 619.75 705A3 3 0 1 0 613.75 705ZM622.66 699A3 3 0 1 0 628.66 699A3 3 0 1 0 622.66 699ZM353.41 703A3 3 0 1 0 359.41 703A3 3 0 1 0 353.41 703ZM718.95 697A3 3 0 1 0 724.95 697A3 3 0 1 0 718.95 697ZM205.41 701A3 3 0 1 0 211.41 701A3 3 0 1 0 205.41 701ZM192.93 705A3 3 0 1 0 198.93 705A3 3 0 1 0 192.93 705ZM626.23 699A3 3 0 1 0 632.23 699A3 3 0 1 0 626.23 699Z" fill="#1baf7a" stroke="#52514e" stroke-width="1"/>
+<line x1="573.06" y1="692" x2="573.06" y2="710" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="712" x2="744" y2="712" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="725" text-anchor="start" font-size="11" fill="#52514e">293</text>
+<text x="744" y="725" text-anchor="end" font-size="11" fill="#52514e">326 ns/op</text>
+<text x="16" y="754" text-anchor="start" font-size="12" fill="#0b0b0b">7. Sort [n=1000]</text>
+<g>
+<title>7. Sort [n=1000] quick: median 0 B/op (0-0, n=10)</title>
+<text x="132" y="775" text-anchor="end" font-size="11" fill="#52514e">quick</text>
+<path d="M439 773A3 3 0 1 0 445 773A3 3 0 1 0 439 773ZM439 767A3 3 0 1 0 445 767A3 3 0 1 0 439 767ZM439 771A3 3 0 1 0 445 771A3 3 0 1 0 439 771ZM439 775A3 3 0 1 0 445 775A3 3 0 1 0 439 775ZM439 769A3 3 0 1 0 445 769A3 3 0 1 0 439 769ZM439 773A3 3 0 1 0 445 773A3 3 0 1 0 439 773ZM439 767A3 3 0 1 0 445 767A3 3 0 1 0 439 767ZM439 771A3 3 0 1 0 445 771A3 3 0 1 0 439 771ZM439 775A3 3 0 1 0 445 775A3 3 0 1 0 439 775ZM439 769A3 3 0 1 0 445 769A3 3 0 1 0 439 769Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<line x1="442" y1="762" x2="442" y2="780" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>7. Sort [n=1000] heap: median 0 B/op (0-0, n=10)</title>
+<text x="132" y="797" text-anchor="end" font-size="11" fill="#52514e">heap</text>
+<path d="M439 795A3 3 0 1 0 445 795A3 3 0 1 0 439 795ZM439 789A3 3 0 1 0 445 789A3 3 0 1 0 439 789ZM439 793A3 3 0 1 0 445 793A3 3 0 1 0 439 793ZM439 797A3 3 0 1 0 445 797A3 3 0 1 0 439 797ZM439 791A3 3 0 1 0 445 791A3 3 0 1 0 439 791ZM439 795A3 3 0 1 0 445 795A3 3 0 1 0 439 795ZM439 789A3 3 0 1 0 445 789A3 3 0 1 0 439 789ZM439 793A3 3 0 1 0 445 793A3 3 0 1 0 439 793ZM439 797A3 3 0 1 0 445 797A3 3 0 1 0 439 797ZM439 791A3 3 0 1 0 445 791A3 3 0 1 0 439 791Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="442" y1="784" x2="442" y2="802" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>7. Sort [n=1000] merge: median 0 B/op (0-0, n=10)</title>
+<text x="132" y="819" text-anchor="end" font-size="11" fill="#52514e">merge</text>
+<path d="M439 817A3 3 0 1 0 445 817A3 3 0 1 0 439 817ZM439 811A3 3 0 1 0 445 811A3 3 0 1 0 439 811ZM439 815A3 3 0 1 0 445 815A3 3 0 1 0 439 815ZM439 819A3 3 0 1 0 445 819A3 3 0 1 0 439 819ZM439 813A3 3 0 1 0 445 813A3 3 0 1 0 439 813ZM439 817A3 3 0 1 0 445 817A3 3 0 1 0 439 817ZM439 811A3 3 0 1 0 445 811A3 3 0 1 0 439 811ZM439 815A3 3 0 1 0 445 815A3 3 0 1 0 439 815ZM439 819A3 3 0 1 0 445 819A3 3 0 1 0 439 819ZM439 813A3 3 0 1 0 445 813A3 3 0 1 0 439 813Z" fill="#1baf7a" stroke="#52514e" stroke-width="1"/>
+<line x1="442" y1="806" x2="442" y2="824" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="826" x2="744" y2="826" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="839" text-anchor="start" font-size="11" fill="#52514e">0</text>
+<text x="744" y="839" text-anchor="end" font-size="11" fill="#52514e">0 B/op</text>
+<text x="16" y="868" text-anchor="start" font-size="12" fill="#0b0b0b">8. Sort [n=1000]</text>
+<g>
+<title>8. Sort [n=1000] quick: median 0 allocs/op (0-0, n=10)</title>
+<text x="132" y="889" text-anchor="end" font-size="11" fill="#52514e">quick</text>
+<path d="M439 887A3 3 0 1 0 445 887A3 3 0 1 0 439 887ZM439 881A3 3 0 1 0 445 881A3 3 0 1 0 439 881ZM439 885A3 3 0 1 0 445 885A3 3 0 1 0 439 885ZM439 889A3 3 0 1 0 445 889A3 3 0 1 0 439 889ZM439 883A3 3 0 1 0 445 883A3 3 0 1 0 439 883ZM439 887A3 3 0 1 0 445 887A3 3 0 1 0 439 887ZM439 881A3 3 0 1 0 445 881A3 3 0 1 0 439 881ZM439 885A3 3 0 1 0 445 885A3 3 0 1 0 439 885ZM439 889A3 3 0 1 0 445 889A3 3 0 1 0 439 889ZM439 883A3 3 0 1 0 445 883A3 3 0 1 0 439 883Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<line x1="442" y1="876" x2="442" y2="894" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>8. Sort [n=1000] heap: median 0 allocs/op (0-0, n=10)</title>
+<text x="132" y="911" text-anchor="end" font-size="11" fill="#52514e">heap</text>
+<path d="M439 909A3 3 0 1 0 445 909A3 3 0 1 0 439 909ZM439 903A3 3 0 1 0 445 903A3 3 0 1 0 439 903ZM439 907A3 3 0 1 0 445 907A3 3 0 1 0 439 907ZM439 911A3 3 0 1 0 445 911A3 3 0 1 0 439 911ZM439 905A3 3 0 1 0 445 905A3 3 0 1 0 439 905ZM439 909A3 3 0 1 0 445 909A3 3 0 1 0 439 909ZM439 903A3 3 0 1 0 445 903A3 3 0 1 0 439 903ZM439 907A3 3 0 1 0 445 907A3 3 0 1 0 439 907ZM439 911A3 3 0 1 0 445 911A3 3 0 1 0 439 911ZM439 905A3 3 0 1 0 445 905A3 3 0 1 0 439 905Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="442" y1="898" x2="442" y2="916" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>8. Sort [n=1000] merge: median 0 allocs/op (0-0, n=10)</title>
+<text x="132" y="933" text-anchor="end" font-size="11" fill="#52514e">merge</text>
+<path d="M439 931A3 3 0 1 0 445 931A3 3 0 1 0 439 931ZM439 925A3 3 0 1 0 445 925A3 3 0 1 0 439 925ZM439 929A3 3 0 1 0 445 929A3 3 0 1 0 439 929ZM439 933A3 3 0 1 0 445 933A3 3 0 1 0 439 933ZM439 927A3 3 0 1 0 445 927A3 3 0 1 0 439 927ZM439 931A3 3 0 1 0 445 931A3 3 0 1 0 439 931ZM439 925A3 3 0 1 0 445 925A3 3 0 1 0 439 925ZM439 929A3 3 0 1 0 445 929A3 3 0 1 0 439 929ZM439 933A3 3 0 1 0 445 933A3 3 0 1 0 439 933ZM439 927A3 3 0 1 0 445 927A3 3 0 1 0 439 927Z" fill="#1baf7a" stroke="#52514e" stroke-width="1"/>
+<line x1="442" y1="920" x2="442" y2="938" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="940" x2="744" y2="940" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="953" text-anchor="start" font-size="11" fill="#52514e">0</text>
+<text x="744" y="953" text-anchor="end" font-size="11" fill="#52514e">0 allocs/op</text>
+<text x="16" y="982" text-anchor="start" font-size="12" fill="#0b0b0b">9. Sort [n=100000]</text>
+<g>
+<title>9. Sort [n=100000] quick: median 0 B/op (0-0, n=10)</title>
+<text x="132" y="1003" text-anchor="end" font-size="11" fill="#52514e">quick</text>
+<path d="M439 1001A3 3 0 1 0 445 1001A3 3 0 1 0 439 1001ZM439 995A3 3 0 1 0 445 995A3 3 0 1 0 439 995ZM439 999A3 3 0 1 0 445 999A3 3 0 1 0 439 999ZM439 1003A3 3 0 1 0 445 1003A3 3 0 1 0 439 1003ZM439 997A3 3 0 1 0 445 997A3 3 0 1 0 439 997ZM439 1001A3 3 0 1 0 445 1001A3 3 0 1 0 439 1001ZM439 995A3 3 0 1 0 445 995A3 3 0 1 0 439 995ZM439 999A3 3 0 1 0 445 999A3 3 0 1 0 439 999ZM439 1003A3 3 0 1 0 445 1003A3 3 0 1 0 439 1003ZM439 997A3 3 0 1 0 445 997A3 3 0 1 0 439 997Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<line x1="442" y1="990" x2="442" y2="1008" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>9. Sort [n=100000] heap: median 0 B/op (0-0, n=10)</title>
+<text x="132" y="1025" text-anchor="end" font-size="11" fill="#52514e">heap</text>
+<path d="M439 1023A3 3 0 1 0 445 1023A3 3 0 1 0 439 1023ZM439 1017A3 3 0 1 0 445 1017A3 3 0 1 0 439 1017ZM439 1021A3 3 0 1 0 445 1021A3 3 0 1 0 439 1021ZM439 1025A3 3 0 1 0 445 1025A3 3 0 1 0 439 1025ZM439 1019A3 3 0 1 0 445 1019A3 3 0 1 0 439 1019ZM439 1023A3 3 0 1 0 445 1023A3 3 0 1 0 439 1023ZM439 1017A3 3 0 1 0 445 1017A3 3 0 1 0 439 1017ZM439 1021A3 3 0 1 0 445 1021A3 3 0 1 0 439 1021ZM439 1025A3 3 0 1 0 445 1025A3 3 0 1 0 439 1025ZM439 1019A3 3 0 1 0 445 1019A3 3 0 1 0 439 1019Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="442" y1="1012" x2="442" y2="1030" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>9. Sort [n=100000] merge: median 0 B/op (0-0, n=10)</title>
+<text x="132" y="1047" text-anchor="end" font-size="11" fill="#52514e">merge</text>
+<path d="M439 1045A3 3 0 1 0 445 1045A3 3 0 1 0 439 1045ZM439 1039A3 3 0 1 0 445 1039A3 3 0 1 0 439 1039ZM439 1043A3 3 0 1 0 445 1043A3 3 0 1 0 439 1043ZM439 1047A3 3 0 1 0 445 1047A3 3 0 1 0 439 1047ZM439 1041A3 3 0 1 0 445 1041A3 3 0 1 0 439 1041ZM439 1045A3 3 0 1 0 445 1045A3 3 0 1 0 439 1045ZM439 1039A3 3 0 1 0 445 1039A3 3 0 1 0 439 1039ZM439 1043A3 3 0 1 0 445 1043A3 3 0 1 0 439 1043ZM439 1047A3 3 0 1 0 445 1047A3 3 0 1 0 439 1047ZM439 1041A3 3 0 1 0 445 1041A3 3 0 1 0 439 1041Z" fill="#1baf7a" stroke="#52514e" stroke-width="1"/>
+<line x1="442" y1="1034" x2="442" y2="1052" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="1054" x2="744" y2="1054" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="1067" text-anchor="start" font-size="11" fill="#52514e">0</text>
+<text x="744" y="1067" text-anchor="end" font-size="11" fill="#52514e">0 B/op</text>
+<text x="16" y="1096" text-anchor="start" font-size="12" fill="#0b0b0b">10. Sort [n=100000]</text>
+<g>
+<title>10. Sort [n=100000] quick: median 0 allocs/op (0-0, n=10)</title>
+<text x="132" y="1117" text-anchor="end" font-size="11" fill="#52514e">quick</text>
+<path d="M439 1115A3 3 0 1 0 445 1115A3 3 0 1 0 439 1115ZM439 1109A3 3 0 1 0 445 1109A3 3 0 1 0 439 1109ZM439 1113A3 3 0 1 0 445 1113A3 3 0 1 0 439 1113ZM439 1117A3 3 0 1 0 445 1117A3 3 0 1 0 439 1117ZM439 1111A3 3 0 1 0 445 1111A3 3 0 1 0 439 1111ZM439 1115A3 3 0 1 0 445 1115A3 3 0 1 0 439 1115ZM439 1109A3 3 0 1 0 445 1109A3 3 0 1 0 439 1109ZM439 1113A3 3 0 1 0 445 1113A3 3 0 1 0 439 1113ZM439 1117A3 3 0 1 0 445 1117A3 3 0 1 0 439 1117ZM439 1111A3 3 0 1 0 445 1111A3 3 0 1 0 439 1111Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<line x1="442" y1="1104" x2="442" y2="1122" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>10. Sort [n=100000] heap: median 0 allocs/op (0-0, n=10)</title>
+<text x="132" y="1139" text-anchor="end" font-size="11" fill="#52514e">heap</text>
+<path d="M439 1137A3 3 0 1 0 445 1137A3 3 0 1 0 439 1137ZM439 1131A3 3 0 1 0 445 1131A3 3 0 1 0 439 1131ZM439 1135A3 3 0 1 0 445 1135A3 3 0 1 0 439 1135ZM439 1139A3 3 0 1 0 445 1139A3 3 0 1 0 439 1139ZM439 1133A3 3 0 1 0 445 1133A3 3 0 1 0 439 1133ZM439 1137A3 3 0 1 0 445 1137A3 3 0 1 0 439 1137ZM439 1131A3 3 0 1 0 445 1131A3 3 0 1 0 439 1131ZM439 1135A3 3 0 1 0 445 1135A3 3 0 1 0 439 1135ZM439 1139A3 3 0 1 0 445 1139A3 3 0 1 0 439 1139ZM439 1133A3 3 0 1 0 445 1133A3 3 0 1 0 439 1133Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="442" y1="1126" x2="442" y2="1144" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>10. Sort [n=100000] merge: median 0 allocs/op (0-0, n=10)</title>
+<text x="132" y="1161" text-anchor="end" font-size="11" fill="#52514e">merge</text>
+<path d="M439 1159A3 3 0 1 0 445 1159A3 3 0 1 0 439 1159ZM439 1153A3 3 0 1 0 445 1153A3 3 0 1 0 439 1153ZM439 1157A3 3 0 1 0 445 1157A3 3 0 1 0 439 1157ZM439 1161A3 3 0 1 0 445 1161A3 3 0 1 0 439 1161ZM439 1155A3 3 0 1 0 445 1155A3 3 0 1 0 439 1155ZM439 1159A3 3 0 1 0 445 1159A3 3 0 1 0 439 1159ZM439 1153A3 3 0 1 0 445 1153A3 3 0 1 0 439 1153ZM439 1157A3 3 0 1 0 445 1157A3 3 0 1 0 439 1157ZM439 1161A3 3 0 1 0 445 1161A3 3 0 1 0 439 1161ZM439 1155A3 3 0 1 0 445 1155A3 3 0 1 0 439 1155Z" fill="#1baf7a" stroke="#52514e" stroke-width="1"/>
+<line x1="442" y1="1148" x2="442" y2="1166" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="1168" x2="744" y2="1168" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="1181" text-anchor="start" font-size="11" fill="#52514e">0</text>
+<text x="744" y="1181" text-anchor="end" font-size="11" fill="#52514e">0 allocs/op</text>
+<text x="16" y="1210" text-anchor="start" font-size="12" fill="#0b0b0b">11. Join</text>
+<g>
+<title>11. Join quick: median 0 B/op (0-0, n=10)</title>
+<text x="132" y="1231" text-anchor="end" font-size="11" fill="#52514e">quick</text>
+<path d="M439 1229A3 3 0 1 0 445 1229A3 3 0 1 0 439 1229ZM439 1223A3 3 0 1 0 445 1223A3 3 0 1 0 439 1223ZM439 1227A3 3 0 1 0 445 1227A3 3 0 1 0 439 1227ZM439 1231A3 3 0 1 0 445 1231A3 3 0 1 0 439 1231ZM439 1225A3 3 0 1 0 445 1225A3 3 0 1 0 439 1225ZM439 1229A3 3 0 1 0 445 1229A3 3 0 1 0 439 1229ZM439 1223A3 3 0 1 0 445 1223A3 3 0 1 0 439 1223ZM439 1227A3 3 0 1 0 445 1227A3 3 0 1 0 439 1227ZM439 1231A3 3 0 1 0 445 1231A3 3 0 1 0 439 1231ZM439 1225A3 3 0 1 0 445 1225A3 3 0 1 0 439 1225Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<line x1="442" y1="1218" x2="442" y2="1236" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>11. Join heap: median 0 B/op (0-0, n=10)</title>
+<text x="132" y="1253" text-anchor="end" font-size="11" fill="#52514e">heap</text>
+<path d="M439 1251A3 3 0 1 0 445 1251A3 3 0 1 0 439 1251ZM439 1245A3 3 0 1 0 445 1245A3 3 0 1 0 439 1245ZM439 1249A3 3 0 1 0 445 1249A3 3 0 1 0 439 1249ZM439 1253A3 3 0 1 0 445 1253A3 3 0 1 0 439 1253ZM439 1247A3 3 0 1 0 445 1247A3 3 0 1 0 439 1247ZM439 1251A3 3 0 1 0 445 1251A3 3 0 1 0 439 1251ZM439 1245A3 3 0 1 0 445 1245A3 3 0 1 0 439 1245ZM439 1249A3 3 0 1 0 445 1249A3 3 0 1 0 439 1249ZM439 1253A3 3 0 1 0 445 1253A3 3 0 1 0 439 1253ZM439 1247A3 3 0 1 0 445 1247A3 3 0 1 0 439 1247Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="442" y1="1240" x2="442" y2="1258" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>11. Join merge: median 0 B/op (0-0, n=10)</title>
+<text x="132" y="1275" text-anchor="end" font-size="11" fill="#52514e">merge</text>
+<path d="M439 1273A3 3 0 1 0 445 1273A3 3 0 1 0 439 1273ZM439 1267A3 3 0 1 0 445 1267A3 3 0 1 0 439 1267ZM439 1271A3 3 0 1 0 445 1271A3 3 0 1 0 439 1271ZM439 1275A3 3 0 1 0 445 1275A3 3 0 1 0 439 1275ZM439 1269A3 3 0 1 0 445 1269A3 3 0 1 0 439 1269ZM439 1273A3 3 0 1 0 445 1273A3 3 0 1 0 439 1273ZM439 1267A3 3 0 1 0 445 1267A3 3 0 1 0 439 1267ZM439 1271A3 3 0 1 0 445 1271A3 3 0 1 0 439 1271ZM439 1275A3 3 0 1 0 445 1275A3 3 0 1 0 439 1275ZM439 1269A3 3 0 1 0 445 1269A3 3 0 1 0 439 1269Z" fill="#1baf7a" stroke="#52514e" stroke-width="1"/>
+<line x1="442" y1="1262" x2="442" y2="1280" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="1282" x2="744" y2="1282" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="1295" text-anchor="start" font-size="11" fill="#52514e">0</text>
+<text x="744" y="1295" text-anchor="end" font-size="11" fill="#52514e">0 B/op</text>
+<text x="16" y="1324" text-anchor="start" font-size="12" fill="#0b0b0b">12. Join</text>
+<g>
+<title>12. Join quick: median 0 allocs/op (0-0, n=10)</title>
+<text x="132" y="1345" text-anchor="end" font-size="11" fill="#52514e">quick</text>
+<path d="M439 1343A3 3 0 1 0 445 1343A3 3 0 1 0 439 1343ZM439 1337A3 3 0 1 0 445 1337A3 3 0 1 0 439 1337ZM439 1341A3 3 0 1 0 445 1341A3 3 0 1 0 439 1341ZM439 1345A3 3 0 1 0 445 1345A3 3 0 1 0 439 1345ZM439 1339A3 3 0 1 0 445 1339A3 3 0 1 0 439 1339ZM439 1343A3 3 0 1 0 445 1343A3 3 0 1 0 439 1343ZM439 1337A3 3 0 1 0 445 1337A3 3 0 1 0 439 1337ZM439 1341A3 3 0 1 0 445 1341A3 3 0 1 0 439 1341ZM439 1345A3 3 0 1 0 445 1345A3 3 0 1 0 439 1345ZM439 1339A3 3 0 1 0 445 1339A3 3 0 1 0 439 1339Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<line x1="442" y1="1332" x2="442" y2="1350" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>12. Join heap: median 0 allocs/op (0-0, n=10)</title>
+<text x="132" y="1367" text-anchor="end" font-size="11" fill="#52514e">heap</text>
+<path d="M439 1365A3 3 0 1 0 445 1365A3 3 0 1 0 439 1365ZM439 1359A3 3 0 1 0 445 1359A3 3 0 1 0 439 1359ZM439 1363A3 3 0 1 0 445 1363A3 3 0 1 0 439 1363ZM439 1367A3 3 0 1 0 445 1367A3 3 0 1 0 439 1367ZM439 1361A3 3 0 1 0 445 1361A3 3 0 1 0 439 1361ZM439 1365A3 3 0 1 0 445 1365A3 3 0 1 0 439 1365ZM439 1359A3 3 0 1 0 445 1359A3 3 0 1 0 439 1359ZM439 1363A3 3 0 1 0 445 1363A3 3 0 1 0 439 1363ZM439 1367A3 3 0 1 0 445 1367A3 3 0 1 0 439 1367ZM439 1361A3 3 0 1 0 445 1361A3 3 0 1 0 439 1361Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="442" y1="1354" x2="442" y2="1372" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>12. Join merge: median 0 allocs/op (0-0, n=10)</title>
+<text x="132" y="1389" text-anchor="end" font-size="11" fill="#52514e">merge</text>
+<path d="M439 1387A3 3 0 1 0 445 1387A3 3 0 1 0 439 1387ZM439 1381A3 3 0 1 0 445 1381A3 3 0 1 0 439 1381ZM439 1385A3 3 0 1 0 445 1385A3 3 0 1 0 439 1385ZM439 1389A3 3 0 1 0 445 1389A3 3 0 1 0 439 1389ZM439 1383A3 3 0 1 0 445 1383A3 3 0 1 0 439 1383ZM439 1387A3 3 0 1 0 445 1387A3 3 0 1 0 439 1387ZM439 1381A3 3 0 1 0 445 1381A3 3 0 1 0 439 1381ZM439 1385A3 3 0 1 0 445 1385A3 3 0 1 0 439 1385ZM439 1389A3 3 0 1 0 445 1389A3 3 0 1 0 439 1389ZM439 1383A3 3 0 1 0 445 1383A3 3 0 1 0 439 1383Z" fill="#1baf7a" stroke="#52514e" stroke-width="1"/>
+<line x1="442" y1="1376" x2="442" y2="1394" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="1396" x2="744" y2="1396" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="1409" text-anchor="start" font-size="11" fill="#52514e">0</text>
+<text x="744" y="1409" text-anchor="end" font-size="11" fill="#52514e">0 allocs/op</text>
+<text x="16" y="1438" text-anchor="start" font-size="12" fill="#0b0b0b">13. Parse</text>
+<g>
+<title>13. Parse quick: median 0 B/op (0-0, n=10)</title>
+<text x="132" y="1459" text-anchor="end" font-size="11" fill="#52514e">quick</text>
+<path d="M439 1457A3 3 0 1 0 445 1457A3 3 0 1 0 439 1457ZM439 1451A3 3 0 1 0 445 1451A3 3 0 1 0 439 1451ZM439 1455A3 3 0 1 0 445 1455A3 3 0 1 0 439 1455ZM439 1459A3 3 0 1 0 445 1459A3 3 0 1 0 439 1459ZM439 1453A3 3 0 1 0 445 1453A3 3 0 1 0 439 1453ZM439 1457A3 3 0 1 0 445 1457A3 3 0 1 0 439 1457ZM439 1451A3 3 0 1 0 445 1451A3 3 0 1 0 439 1451ZM439 1455A3 3 0 1 0 445 1455A3 3 0 1 0 439 1455ZM439 1459A3 3 0 1 0 445 1459A3 3 0 1 0 439 1459ZM439 1453A3 3 0 1 0 445 1453A3 3 0 1 0 439 1453Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<line x1="442" y1="1446" x2="442" y2="1464" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>13. Parse heap: median 0 B/op (0-0, n=10)</title>
+<text x="132" y="1481" text-anchor="end" font-size="11" fill="#52514e">heap</text>
+<path d="M439 1479A3 3 0 1 0 445 1479A3 3 0 1 0 439 1479ZM439 1473A3 3 0 1 0 445 1473A3 3 0 1 0 439 1473ZM439 1477A3 3 0 1 0 445 1477A3 3 0 1 0 439 1477ZM439 1481A3 3 0 1 0 445 1481A3 3 0 1 0 439 1481ZM439 1475A3 3 0 1 0 445 1475A3 3 0 1 0 439 1475ZM439 1479A3 3 0 1 0 445 1479A3 3 0 1 0 439 1479ZM439 1473A3 3 0 1 0 445 1473A3 3 0 1 0 439 1473ZM439 1477A3 3 0 1 0 445 1477A3 3 0 1 0 439 1477ZM439 1481A3 3 0 1 0 445 1481A3 3 0 1 0 439 1481ZM439 1475A3 3 0 1 0 445 1475A3 3 0 1 0 439 1475Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="442" y1="1468" x2="442" y2="1486" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>13. Parse merge: median 0 B/op (0-0, n=10)</title>
+<text x="132" y="1503" text-anchor="end" font-size="11" fill="#52514e">merge</text>
+<path d="M439 1501A3 3 0 1 0 445 1501A3 3 0 1 0 439 1501ZM439 1495A3 3 0 1 0 445 1495A3 3 0 1 0 439 1495ZM439 1499A3 3 0 1 0 445 1499A3 3 0 1 0 439 1499ZM439 1503A3 3 0 1 0 445 1503A3 3 0 1 0 439 1503ZM439 1497A3 3 0 1 0 445 1497A3 3 0 1 0 439 1497ZM439 1501A3 3 0 1 0 445 1501A3 3 0 1 0 439 1501ZM439 1495A3 3 0 1 0 445 1495A3 3 0 1 0 439 1495ZM439 1499A3 3 0 1 0 445 1499A3 3 0 1 0 439 1499ZM439 1503A3 3 0 1 0 445 1503A3 3 0 1 0 439 1503ZM439 1497A3 3 0 1 0 445 1497A3 3 0 1 0 439 1497Z" fill="#1baf7a" stroke="#52514e" stroke-width="1"/>
+<line x1="442" y1="1490" x2="442" y2="1508" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="1510" x2="744" y2="1510" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="1523" text-anchor="start" font-size="11" fill="#52514e">0</text>
+<text x="744" y="1523" text-anchor="end" font-size="11" fill="#52514e">0 B/op</text>
+<text x="16" y="1552" text-anchor="start" font-size="12" fill="#0b0b0b">14. Parse</text>
+<g>
+<title>14. Parse quick: median 0 allocs/op (0-0, n=10)</title>
+<text x="132" y="1573" text-anchor="end" font-size="11" fill="#52514e">quick</text>
+<path d="M439 1571A3 3 0 1 0 445 1571A3 3 0 1 0 439 1571ZM439 1565A3 3 0 1 0 445 1565A3 3 0 1 0 439 1565ZM439 1569A3 3 0 1 0 445 1569A3 3 0 1 0 439 1569ZM439 1573A3 3 0 1 0 445 1573A3 3 0 1 0 439 1573ZM439 1567A3 3 0 1 0 445 1567A3 3 0 1 0 439 1567ZM439 1571A3 3 0 1 0 445 1571A3 3 0 1 0 439 1571ZM439 1565A3 3 0 1 0 445 1565A3 3 0 1 0 439 1565ZM439 1569A3 3 0 1 0 445 1569A3 3 0 1 0 439 1569ZM439 1573A3 3 0 1 0 445 1573A3 3 0 1 0 439 1573ZM439 1567A3 3 0 1 0 445 1567A3 3 0 1 0 439 1567Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<line x1="442" y1="1560" x2="442" y2="1578" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>14. Parse heap: median 0 allocs/op (0-0, n=10)</title>
+<text x="132" y="1595" text-anchor="end" font-size="11" fill="#52514e">heap</text>
+<path d="M439 1593A3 3 0 1 0 445 1593A3 3 0 1 0 439 1593ZM439 1587A3 3 0 1 0 445 1587A3 3 0 1 0 439 1587ZM439 1591A3 3 0 1 0 445 1591A3 3 0 1 0 439 1591ZM439 1595A3 3 0 1 0 445 1595A3 3 0 1 0 439 1595ZM439 1589A3 3 0 1 0 445 1589A3 3 0 1 0 439 1589ZM439 1593A3 3 0 1 0 445 1593A3 3 0 1 0 439 1593ZM439 1587A3 3 0 1 0 445 1587A3 3 0 1 0 439 1587ZM439 1591A3 3 0 1 0 445 1591A3 3 0 1 0 439 1591ZM439 1595A3 3 0 1 0 445 1595A3 3 0 1 0 439 1595ZM439 1589A3 3 0 1 0 445 1589A3 3 0 1 0 439 1589Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="442" y1="1582" x2="442" y2="1600" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>14. Parse merge: median 0 allocs/op (0-0, n=10)</title>
+<text x="132" y="1617" text-anchor="end" font-size="11" fill="#52514e">merge</text>
+<path d="M439 1615A3 3 0 1 0 445 1615A3 3 0 1 0 439 1615ZM439 1609A3 3 0 1 0 445 1609A3 3 0 1 0 439 1609ZM439 1613A3 3 0 1 0 445 1613A3 3 0 1 0 439 1613ZM439 1617A3 3 0 1 0 445 1617A3 3 0 1 0 439 1617ZM439 1611A3 3 0 1 0 445 1611A3 3 0 1 0 439 1611ZM439 1615A3 3 0 1 0 445 1615A3 3 0 1 0 439 1615ZM439 1609A3 3 0 1 0 445 1609A3 3 0 1 0 439 1609ZM439 1613A3 3 0 1 0 445 1613A3 3 0 1 0 439 1613ZM439 1617A3 3 0 1 0 445 1617A3 3 0 1 0 439 1617ZM439 1611A3 3 0 1 0 445 1611A3 3 0 1 0 439 1611Z" fill="#1baf7a" stroke="#52514e" stroke-width="1"/>
+<line x1="442" y1="1604" x2="442" y2="1622" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="1624" x2="744" y2="1624" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="1637" text-anchor="start" font-size="11" fill="#52514e">0</text>
+<text x="744" y="1637" text-anchor="end" font-size="11" fill="#52514e">0 allocs/op</text>
+<text x="16" y="1666" text-anchor="start" font-size="12" fill="#0b0b0b">15. Encode</text>
+<g>
+<title>15. Encode quick: median 0 B/op (0-0, n=10)</title>
+<text x="132" y="1687" text-anchor="end" font-size="11" fill="#52514e">quick</text>
+<path d="M439 1685A3 3 0 1 0 445 1685A3 3 0 1 0 439 1685ZM439 1679A3 3 0 1 0 445 1679A3 3 0 1 0 439 1679ZM439 1683A3 3 0 1 0 445 1683A3 3 0 1 0 439 1683ZM439 1687A3 3 0 1 0 445 1687A3 3 0 1 0 439 1687ZM439 1681A3 3 0 1 0 445 1681A3 3 0 1 0 439 1681ZM439 1685A3 3 0 1 0 445 1685A3 3 0 1 0 439 1685ZM439 1679A3 3 0 1 0 445 1679A3 3 0 1 0 439 1679ZM439 1683A3 3 0 1 0 445 1683A3 3 0 1 0 439 1683ZM439 1687A3 3 0 1 0 445 1687A3 3 0 1 0 439 1687ZM439 1681A3 3 0 1 0 445 1681A3 3 0 1 0 439 1681Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<line x1="442" y1="1674" x2="442" y2="1692" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>15. Encode heap: median 0 B/op (0-0, n=10)</title>
+<text x="132" y="1709" text-anchor="end" font-size="11" fill="#52514e">heap</text>
+<path d="M439 1707A3 3 0 1 0 445 1707A3 3 0 1 0 439 1707ZM439 1701A3 3 0 1 0 445 1701A3 3 0 1 0 439 1701ZM439 1705A3 3 0 1 0 445 1705A3 3 0 1 0 439 1705ZM439 1709A3 3 0 1 0 445 1709A3 3 0 1 0 439 1709ZM439 1703A3 3 0 1 0 445 1703A3 3 0 1 0 439 1703ZM439 1707A3 3 0 1 0 445 1707A3 3 0 1 0 439 1707ZM439 1701A3 3 0 1 0 445 1701A3 3 0 1 0 439 1701ZM439 1705A3 3 0 1 0 445 1705A3 3 0 1 0 439 1705ZM439 1709A3 3 0 1 0 445 1709A3 3 0 1 0 439 1709ZM439 1703A3 3 0 1 0 445 1703A3 3 0 1 0 439 1703Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="442" y1="1696" x2="442" y2="1714" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>15. Encode merge: median 0 B/op (0-0, n=10)</title>
+<text x="132" y="1731" text-anchor="end" font-size="11" fill="#52514e">merge</text>
+<path d="M439 1729A3 3 0 1 0 445 1729A3 3 0 1 0 439 1729ZM439 1723A3 3 0 1 0 445 1723A3 3 0 1 0 439 1723ZM439 1727A3 3 0 1 0 445 1727A3 3 0 1 0 439 1727ZM439 1731A3 3 0 1 0 445 1731A3 3 0 1 0 439 1731ZM439 1725A3 3 0 1 0 445 1725A3 3 0 1 0 439 1725ZM439 1729A3 3 0 1 0 445 1729A3 3 0 1 0 439 1729ZM439 1723A3 3 0 1 0 445 1723A3 3 0 1 0 439 1723ZM439 1727A3 3 0 1 0 445 1727A3 3 0 1 0 439 1727ZM439 1731A3 3 0 1 0 445 1731A3 3 0 1 0 439 1731ZM439 1725A3 3 0 1 0 445 1725A3 3 0 1 0 439 1725Z" fill="#1baf7a" stroke="#52514e" stroke-width="1"/>
+<line x1="442" y1="1718" x2="442" y2="1736" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="1738" x2="744" y2="1738" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="1751" text-anchor="start" font-size="11" fill="#52514e">0</text>
+<text x="744" y="1751" text-anchor="end" font-size="11" fill="#52514e">0 B/op</text>
+<text x="16" y="1780" text-anchor="start" font-size="12" fill="#0b0b0b">16. Encode</text>
+<g>
+<title>16. Encode quick: median 0 allocs/op (0-0, n=10)</title>
+<text x="132" y="1801" text-anchor="end" font-size="11" fill="#52514e">quick</text>
+<path d="M439 1799A3 3 0 1 0 445 1799A3 3 0 1 0 439 1799ZM439 1793A3 3 0 1 0 445 1793A3 3 0 1 0 439 1793ZM439 1797A3 3 0 1 0 445 1797A3 3 0 1 0 439 1797ZM439 1801A3 3 0 1 0 445 1801A3 3 0 1 0 439 1801ZM439 1795A3 3 0 1 0 445 1795A3 3 0 1 0 439 1795ZM439 1799A3 3 0 1 0 445 1799A3 3 0 1 0 439 1799ZM439 1793A3 3 0 1 0 445 1793A3 3 0 1 0 439 1793ZM439 1797A3 3 0 1 0 445 1797A3 3 0 1 0 439 1797ZM439 1801A3 3 0 1 0 445 1801A3 3 0 1 0 439 1801ZM439 1795A3 3 0 1 0 445 1795A3 3 0 1 0 439 1795Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<line x1="442" y1="1788" x2="442" y2="1806" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>16. Encode heap: median 0 allocs/op (0-0, n=10)</title>
+<text x="132" y="1823" text-anchor="end" font-size="11" fill="#52514e">heap</text>
+<path d="M439 1821A3 3 0 1 0 445 1821A3 3 0 1 0 439 1821ZM439 1815A3 3 0 1 0 445 1815A3 3 0 1 0 439 1815ZM439 1819A3 3 0 1 0 445 1819A3 3 0 1 0 439 1819ZM439 1823A3 3 0 1 0 445 1823A3 3 0 1 0 439 1823ZM439 1817A3 3 0 1 0 445 1817A3 3 0 1 0 439 1817ZM439 1821A3 3 0 1 0 445 1821A3 3 0 1 0 439 1821ZM439 1815A3 3 0 1 0 445 1815A3 3 0 1 0 439 1815ZM439 1819A3 3 0 1 0 445 1819A3 3 0 1 0 439 1819ZM439 1823A3 3 0 1 0 445 1823A3 3 0 1 0 439 1823ZM439 1817A3 3 0 1 0 445 1817A3 3 0 1 0 439 1817Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="442" y1="1810" x2="442" y2="1828" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>16. Encode merge: median 0 allocs/op (0-0, n=10)</title>
+<text x="132" y="1845" text-anchor="end" font-size="11" fill="#52514e">merge</text>
+<path d="M439 1843A3 3 0 1 0 445 1843A3 3 0 1 0 439 1843ZM439 1837A3 3 0 1 0 445 1837A3 3 0 1 0 439 1837ZM439 1841A3 3 0 1 0 445 1841A3 3 0 1 0 439 1841ZM439 1845A3 3 0 1 0 445 1845A3 3 0 1 0 439 1845ZM439 1839A3 3 0 1 0 445 1839A3 3 0 1 0 439 1839ZM439 1843A3 3 0 1 0 445 1843A3 3 0 1 0 439 1843ZM439 1837A3 3 0 1 0 445 1837A3 3 0 1 0 439 1837ZM439 1841A3 3 0 1 0 445 1841A3 3 0 1 0 439 1841ZM439 1845A3 3 0 1 0 445 1845A3 3 0 1 0 439 1845ZM439 1839A3 3 0 1 0 445 1839A3 3 0 1 0 439 1839Z" fill="#1baf7a" stroke="#52514e" stroke-width="1"/>
+<line x1="442" y1="1832" x2="442" y2="1850" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="1852" x2="744" y2="1852" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="1865" text-anchor="start" font-size="11" fill="#52514e">0</text>
+<text x="744" y="1865" text-anchor="end" font-size="11" fill="#52514e">0 allocs/op</text>
+<text x="16" y="1894" text-anchor="start" font-size="12" fill="#0b0b0b">17. Hash</text>
+<g>
+<title>17. Hash quick: median 0 B/op (0-0, n=10)</title>
+<text x="132" y="1915" text-anchor="end" font-size="11" fill="#52514e">quick</text>
+<path d="M439 1913A3 3 0 1 0 445 1913A3 3 0 1 0 439 1913ZM439 1907A3 3 0 1 0 445 1907A3 3 0 1 0 439 1907ZM439 1911A3 3 0 1 0 445 1911A3 3 0 1 0 439 1911ZM439 1915A3 3 0 1 0 445 1915A3 3 0 1 0 439 1915ZM439 1909A3 3 0 1 0 445 1909A3 3 0 1 0 439 1909ZM439 1913A3 3 0 1 0 445 1913A3 3 0 1 0 439 1913ZM439 1907A3 3 0 1 0 445 1907A3 3 0 1 0 439 1907ZM439 1911A3 3 0 1 0 445 1911A3 3 0 1 0 439 1911ZM439 1915A3 3 0 1 0 445 1915A3 3 0 1 0 439 1915ZM439 1909A3 3 0 1 0 445 1909A3 3 0 1 0 439 1909Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<line x1="442" y1="1902" x2="442" y2="1920" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>17. Hash heap: median 0 B/op (0-0, n=10)</title>
+<text x="132" y="1937" text-anchor="end" font-size="11" fill="#52514e">heap</text>
+<path d="M439 1935A3 3 0 1 0 445 1935A3 3 0 1 0 439 1935ZM439 1929A3 3 0 1 0 445 1929A3 3 0 1 0 439 1929ZM439 1933A3 3 0 1 0 445 1933A3 3 0 1 0 439 1933ZM439 1937A3 3 0 1 0 445 1937A3 3 0 1 0 439 1937ZM439 1931A3 3 0 1 0 445 1931A3 3 0 1 0 439 1931ZM439 1935A3 3 0 1 0 445 1935A3 3 0 1 0 439 1935ZM439 1929A3 3 0 1 0 445 1929A3 3 0 1 0 439 1929ZM439 1933A3 3 0 1 0 445 1933A3 3 0 1 0 439 1933ZM439 1937A3 3 0 1 0 445 1937A3 3 0 1 0 439 1937ZM439 1931A3 3 0 1 0 445 1931A3 3 0 1 0 439 1931Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="442" y1="1924" x2="442" y2="1942" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>17. Hash merge: median 0 B/op (0-0, n=10)</title>
+<text x="132" y="1959" text-anchor="end" font-size="11" fill="#52514e">merge</text>
+<path d="M439 1957A3 3 0 1 0 445 1957A3 3 0 1 0 439 1957ZM439 1951A3 3 0 1 0 445 1951A3 3 0 1 0 439 1951ZM439 1955A3 3 0 1 0 445 1955A3 3 0 1 0 439 1955ZM439 1959A3 3 0 1 0 445 1959A3 3 0 1 0 439 1959ZM439 1953A3 3 0 1 0 445 1953A3 3 0 1 0 439 1953ZM439 1957A3 3 0 1 0 445 1957A3 3 0 1 0 439 1957ZM439 1951A3 3 0 1 0 445 1951A3 3 0 1 0 439 1951ZM439 1955A3 3 0 1 0 445 1955A3 3 0 1 0 439 1955ZM439 1959A3 3 0 1 0 445 1959A3 3 0 1 0 439 1959ZM439 1953A3 3 0 1 0 445 1953A3 3 0 1 0 439 1953Z" fill="#1baf7a" stroke="#52514e" stroke-width="1"/>
+<line x1="442" y1="1946" x2="442" y2="1964" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="1966" x2="744" y2="1966" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="1979" text-anchor="start" font-size="11" fill="#52514e">0</text>
+<text x="744" y="1979" text-anchor="end" font-size="11" fill="#52514e">0 B/op</text>
+<text x="16" y="2008" text-anchor="start" font-size="12" fill="#0b0b0b">18. Hash</text>
+<g>
+<title>18. Hash quick: median 0 allocs/op (0-0, n=10)</title>
+<text x="132" y="2029" text-anchor="end" font-size="11" fill="#52514e">quick</text>
+<path d="M439 2027A3 3 0 1 0 445 2027A3 3 0 1 0 439 2027ZM439 2021A3 3 0 1 0 445 2021A3 3 0 1 0 439 2021ZM439 2025A3 3 0 1 0 445 2025A3 3 0 1 0 439 2025ZM439 2029A3 3 0 1 0 445 2029A3 3 0 1 0 439 2029ZM439 2023A3 3 0 1 0 445 2023A3 3 0 1 0 439 2023ZM439 2027A3 3 0 1 0 445 2027A3 3 0 1 0 439 2027ZM439 2021A3 3 0 1 0 445 2021A3 3 0 1 0 439 2021ZM439 2025A3 3 0 1 0 445 2025A3 3 0 1 0 439 2025ZM439 2029A3 3 0 1 0 445 2029A3 3 0 1 0 439 2029ZM439 2023A3 3 0 1 0 445 2023A3 3 0 1 0 439 2023Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<line x1="442" y1="2016" x2="442" y2="2034" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>18. Hash heap: median 0 allocs/op (0-0, n=10)</title>
+<text x="132" y="2051" text-anchor="end" font-size="11" fill="#52514e">heap</text>
+<path d="M439 2049A3 3 0 1 0 445 2049A3 3 0 1 0 439 2049ZM439 2043A3 3 0 1 0 445 2043A3 3 0 1 0 439 2043ZM439 2047A3 3 0 1 0 445 2047A3 3 0 1 0 439 2047ZM439 2051A3 3 0 1 0 445 2051A3 3 0 1 0 439 2051ZM439 2045A3 3 0 1 0 445 2045A3 3 0 1 0 439 2045ZM439 2049A3 3 0 1 0 445 2049A3 3 0 1 0 439 2049ZM439 2043A3 3 0 1 0 445 2043A3 3 0 1 0 439 2043ZM439 2047A3 3 0 1 0 445 2047A3 3 0 1 0 439 2047ZM439 2051A3 3 0 1 0 445 2051A3 3 0 1 0 439 2051ZM439 2045A3 3 0 1 0 445 2045A3 3 0 1 0 439 2045Z" fill="#eb6834" stroke="#eb6834" stroke-width="1"/>
+<line x1="442" y1="2038" x2="442" y2="2056" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<g>
+<title>18. Hash merge: median 0 allocs/op (0-0, n=10)</title>
+<text x="132" y="2073" text-anchor="end" font-size="11" fill="#52514e">merge</text>
+<path d="M439 2071A3 3 0 1 0 445 2071A3 3 0 1 0 439 2071ZM439 2065A3 3 0 1 0 445 2065A3 3 0 1 0 439 2065ZM439 2069A3 3 0 1 0 445 2069A3 3 0 1 0 439 2069ZM439 2073A3 3 0 1 0 445 2073A3 3 0 1 0 439 2073ZM439 2067A3 3 0 1 0 445 2067A3 3 0 1 0 439 2067ZM439 2071A3 3 0 1 0 445 2071A3 3 0 1 0 439 2071ZM439 2065A3 3 0 1 0 445 2065A3 3 0 1 0 439 2065ZM439 2069A3 3 0 1 0 445 2069A3 3 0 1 0 439 2069ZM439 2073A3 3 0 1 0 445 2073A3 3 0 1 0 439 2073ZM439 2067A3 3 0 1 0 445 2067A3 3 0 1 0 439 2067Z" fill="#1baf7a" stroke="#52514e" stroke-width="1"/>
+<line x1="442" y1="2060" x2="442" y2="2078" stroke="#0b0b0b" stroke-width="2"/>
+</g>
+<line x1="140" y1="2080" x2="744" y2="2080" stroke="#52514e" stroke-width="1"/>
+<text x="140" y="2093" text-anchor="start" font-size="11" fill="#52514e">0</text>
+<text x="744" y="2093" text-anchor="end" font-size="11" fill="#52514e">0 allocs/op</text>
+<path d="M16 2126A3 3 0 1 0 22 2126A3 3 0 1 0 16 2126Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1"/>
+<text x="28" y="2130" text-anchor="start" font-size="12" fill="#52514e">one sample</text>
+<line x1="146" y1="2118" x2="146" y2="2132" stroke="#0b0b0b" stroke-width="2"/>
+<text x="154" y="2130" text-anchor="start" font-size="12" fill="#52514e">median</text>
+<text x="16" y="2148" text-anchor="start" font-size="12" fill="#52514e">Largest change first. Lanes in a benchmark share one axis.</text>
+</svg>

@@ -179,6 +179,58 @@ for (const [name, build] of Object.entries(nwayCases)) {
   });
 }
 
+// Golden SVG shim (testdata/nway/expected/svg): the same charts rendered natively (--svg-dir in a temp
+// dir) and under wasm (--svg-dir /work/svg, a WASI preopen) must be byte-identical and equal the
+// frozen files, as must the `<picture>` Markdown that embeds them. `--chart-theme both` gives the
+// light/dark twins. Review changed goldens as PNG (scripts/svg-to-png.sh, see testdata/README.md).
+const svgExpectedDir = td('nway', 'expected', 'svg');
+const nwayFile = (l) => td('nway', `${l}.txt`);
+const svgCases = {
+  matrix: {
+    args: (f) => nwayLabels.flatMap((l) => ['--variant', `${l}=${f(nwayFile(l), `${l}.txt`)}`]).concat(['--reference', 'quick', '--charts', 'ranking,distribution', '--chart-theme', 'both']),
+    files: ['ranking-light', 'ranking-dark', 'distribution-light', 'distribution-dark'],
+  },
+  'pairwise-heap': {
+    args: (f) => ['--base', f(nwayFile('quick'), 'quick.txt'), '--head', f(nwayFile('heap'), 'heap.txt'), '--charts', 'delta,distribution'],
+    files: ['delta', 'distribution'],
+  },
+  'pairwise-merge': {
+    args: (f) => ['--base', f(nwayFile('quick'), 'quick.txt'), '--head', f(nwayFile('merge'), 'merge.txt'), '--charts', 'delta,distribution'],
+    files: ['delta', 'distribution'],
+  },
+};
+function svgRun(name, c, kind) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `bd-svg-${kind}-`));
+  const isWasm = kind === 'wasm';
+  const stageFile = (src, base) => { fs.copyFileSync(src, path.join(dir, base)); return isWasm ? `/work/${base}` : path.join(dir, base); };
+  fs.mkdirSync(path.join(dir, 'svg'));
+  const where = (n) => (isWasm ? `/work/${n}` : path.join(dir, n));
+  const args = [...c.args(stageFile), '--svg-embed', 'true', '--svg-dir', where('svg'), '--markdown', where('report.md')];
+  return { dir, args };
+}
+for (const [name, c] of Object.entries(svgCases)) {
+  test(`wasm and native render byte-identical SVGs and <picture> Markdown equal to expected files: ${name}`, async () => {
+    const w = svgRun(name, c, 'wasm');
+    const n = svgRun(name, c, 'native');
+    const r = await runWasm(w.args, w.dir);
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(runNative(n.args, n.dir), 0);
+    const listing = (d) => fs.readdirSync(path.join(d, 'svg')).sort();
+    const expectedNames = c.files.map((f) => `${f}.svg`).sort();
+    assert.deepEqual(listing(w.dir), expectedNames);
+    assert.deepEqual(listing(n.dir), expectedNames);
+    assert.equal(fs.readFileSync(path.join(w.dir, 'report.md'), 'utf8'), fs.readFileSync(path.join(n.dir, 'report.md'), 'utf8'), 'embedded Markdown differs between wasm and native; rebuild dist/benchdiff.wasm (make wasm)');
+    if (c.files.some((f) => f.endsWith('-dark'))) assert.match(fs.readFileSync(path.join(n.dir, 'report.md'), 'utf8'), /<picture><source media="\(prefers-color-scheme: dark\)" srcset="benchdiff-svg:[^"]+-dark\.svg">/);
+    for (const f of c.files) {
+      const wasmBytes = fs.readFileSync(path.join(w.dir, 'svg', `${f}.svg`));
+      const nativeBytes = fs.readFileSync(path.join(n.dir, 'svg', `${f}.svg`));
+      assert.ok(wasmBytes.equals(nativeBytes), `${name}/${f}.svg differs between wasm and native; rebuild dist/benchdiff.wasm (make wasm)`);
+      const file = path.join(svgExpectedDir, `${name}-${f}.svg`);
+      if (update) { fs.mkdirSync(svgExpectedDir, { recursive: true }); fs.writeFileSync(file, nativeBytes); } else assert.ok(nativeBytes.equals(fs.readFileSync(file)), `${name}-${f}.svg differs from testdata/nway/expected/svg (UPDATE_GOLDEN=1 to refresh, then review the PNGs)`);
+    }
+  });
+}
+
 // Action level: main() through the real wasm with default inputs and a mocked GitHub API.
 // action-default.md is the sticky-comment body; action-default.json holds everything else observable.
 test('action-default: main() comment body, report files and outputs match expected files', async () => {

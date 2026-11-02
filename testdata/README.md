@@ -59,6 +59,7 @@ The tests build 30 rows from these names (two-way, and 8 and 10 variants x 30 ro
 | `baseline/` | Pairwise outputs and the falsifier questions Q1-Q3 (`baseline/QUESTIONS.md`) |
 | `expected/matrix.{md,json}` | Frozen N-way output with the Action's defaults (title `Benchmark comparison`, tag `default`) |
 | `expected/notice-only.md` | Frozen notice-only report |
+| `expected/svg/*.svg` | Frozen charts, see below |
 
 `expected/matrix.{md,json}` come from, run in `testdata/nway` after `cargo build --release -p benchdiff`:
 
@@ -68,3 +69,13 @@ The tests build 30 rows from these names (two-way, and 8 and 10 variants x 30 ro
 ```
 
 `--head impl.txt --compare-by impl --reference quick` renders byte-identical Markdown and JSON (no documented differences). `crates/benchdiff-core/tests/nway_fixture.rs` checks both against the expected files through the library and asserts Q1-Q3 in the JSON (heap significantly faster on 4 `ns/op` rows, merge significantly slower on `Parse`, heap on `Parse` not significant); `test/golden.test.js` checks wasm and native against them (`UPDATE_GOLDEN=1` rewrites).
+
+### `nway/expected/svg/`
+
+| File | Command (run in `testdata/nway`) |
+|---|---|
+| `matrix-{ranking,distribution}-{light,dark}.svg` | the three `--variant` files, `--reference quick --charts ranking,distribution --chart-theme both --svg-dir <dir>` |
+| `pairwise-heap-{delta,distribution}.svg` | `--base quick.txt --head heap.txt --charts delta,distribution --svg-dir <dir>` |
+| `pairwise-merge-{delta,distribution}.svg` | `--base quick.txt --head merge.txt --charts delta,distribution --svg-dir <dir>` |
+
+The CLI writes `ranking-light.svg`, `delta.svg` and so on; the golden test prefixes the case name. `test/golden.test.js` runs each case natively (temp `--svg-dir`) and under wasm (`--svg-dir /work/svg`, a WASI preopen) with `--svg-embed true`, and asserts the SVG bytes and the `<picture>` Markdown are identical between the two and the SVGs equal these files (`UPDATE_GOLDEN=1` rewrites). These goldens follow the PNG review rule above: `scripts/svg-to-png.sh -o <dir> testdata/nway/expected/svg` and open the PNGs before approving a change.
