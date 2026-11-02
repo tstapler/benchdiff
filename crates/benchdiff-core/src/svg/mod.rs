@@ -202,11 +202,16 @@ impl Default for SvgOptions {
 pub enum SkipReason {
     NothingToCompare,
     NoSamples,
-    CapExceeded { shown: usize, total: usize },
+    CapExceeded {
+        shown: usize,
+        total: usize,
+    },
     Empty,
     /// A coordinate was not finite, e.g. samples near the `f64` limits overflow the axis span.
     NonFinite,
-    NotApplicable { kind: ChartKind },
+    NotApplicable {
+        kind: ChartKind,
+    },
 }
 
 /// One rendered chart. Chart functions return `Result<SvgFile, SkipReason>` (`Err` = no file).
