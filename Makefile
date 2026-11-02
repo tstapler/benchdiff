@@ -12,7 +12,12 @@ perf:
 	node --disable-warning=ExperimentalWarning --test test/perf.test.js
 
 WASM ?= dist/benchdiff.wasm
-WASM_RUSTFLAGS := --remap-path-prefix=$(HOME)=/build --remap-path-prefix=$(CURDIR)=/src
+# With the rust-src component installed, rustc rewrites std paths from /rustc/<commit>/ to the sysroot; mapping
+# them back keeps the bytes identical whether or not the builder has rust-src (it is last, so it wins over the HOME remap).
+RUSTC_BIN := $(if $(wildcard $(RUSTUP_BIN)/rustc),$(RUSTUP_BIN)/rustc,rustc)
+RUSTC_COMMIT := $(shell $(RUSTC_BIN) -vV | sed -n 's/^commit-hash: //p')
+RUSTC_SYSROOT := $(shell $(RUSTC_BIN) --print sysroot)
+WASM_RUSTFLAGS := --remap-path-prefix=$(HOME)=/build --remap-path-prefix=$(CURDIR)=/src --remap-path-prefix=$(RUSTC_SYSROOT)/lib/rustlib/src/rust=/rustc/$(RUSTC_COMMIT)
 
 # The remap keeps the committed binary free of the builder's home directory (panic messages embed paths).
 wasm:
