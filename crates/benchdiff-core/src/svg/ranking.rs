@@ -6,7 +6,7 @@
 //! colour is never the only cue; a Missing cell is a hollow marker with `—`, never a bar.
 
 use super::style::{shape_for_series, Palette, Shape, Theme, SERIES_STROKE_WIDTH};
-use super::text::{shorten_middle, text_width, truncate_to_width};
+use super::text::{cut, shorten_middle, text_width, truncate_to_width, NAME_MAX_CHARS};
 use super::writer::{Anchor, NonFiniteError, PathBuilder, SvgWriter};
 use super::{select_rows_where, ChartTheme, RowRef, SkipReason, SvgFile, SvgInput, SvgOptions};
 use crate::matrix::{Cell, Comparison, MatrixReport, MatrixRow};
@@ -317,7 +317,7 @@ fn desc_text(plan: &Plan) -> String {
         plan.clusters.len(),
         plural(plan.clusters.len(), "benchmark"),
         plan.series.len(),
-        plan.reference
+        cut(plan.reference, NAME_MAX_CHARS)
     );
     if let Some(h) = headline(plan, 40, false) {
         out.push_str(&format!(" {h}."));
@@ -325,7 +325,14 @@ fn desc_text(plan: &Plan) -> String {
     let top: Vec<String> = gaps(plan)
         .iter()
         .take(DESC_TOP)
-        .map(|(k, c, r)| format!("{} {} on {}", plan.labels[*k], fmt_ratio(*r), c.row.label()))
+        .map(|(k, c, r)| {
+            format!(
+                "{} {} on {}",
+                plan.labels[*k],
+                fmt_ratio(*r),
+                cut(&c.row.label(), NAME_MAX_CHARS)
+            )
+        })
         .collect();
     if !top.is_empty() {
         out.push_str(&format!(" Largest gaps: {}.", top.join("; ")));
@@ -501,7 +508,11 @@ fn render(plan: &Plan, width: f64, pal: Palette) -> Result<String, NonFiniteErro
                 format!("{} {what}", plan.labels[k])
             })
             .collect();
-        d.open_titled_group(&format!("{label}: {}", parts.join(", ")));
+        d.open_titled_group(&format!(
+            "{}: {}",
+            cut(label, NAME_MAX_CHARS),
+            parts.join(", ")
+        ));
         let shown = truncate_to_width(label, FONT_PX, GUTTER - PAD - 8.0);
         d.text_styled(
             PAD,

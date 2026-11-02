@@ -4,7 +4,7 @@
 //! writer's attribute-based primitives (literal-hex `fill`/`stroke`), not its class ones.
 
 use super::style::{Palette, Theme};
-use super::text::{shorten_middle, text_width, truncate_to_width};
+use super::text::{cut, shorten_middle, text_width, truncate_to_width, NAME_MAX_CHARS};
 use super::writer::{Anchor, NonFiniteError, PathBuilder, SvgWriter};
 use super::{select_rows, ChartTheme, RowRef, Selected, SkipReason, SvgFile, SvgInput, SvgOptions};
 use crate::compare::{Report, Row, Verdict};
@@ -148,7 +148,7 @@ fn desc_text(bars: &[Bar]) -> String {
     let top: Vec<String> = bars
         .iter()
         .take(DESC_TOP)
-        .map(|b| format!("{} {}", b.row.label(), fmt_pct(b.pct)))
+        .map(|b| format!("{} {}", cut(&b.row.label(), NAME_MAX_CHARS), fmt_pct(b.pct)))
         .collect();
     format!(
         "{reg} regressed, {imp} improved, {unch} unchanged. Largest changes: {}. Bars clip at {CLIP_PCT:.0}%; value labels show the true change.",
@@ -241,7 +241,11 @@ fn render(
         let label = &bar.label;
         let shown = truncate_to_width(label, FONT_PX, GUTTER - PAD - 8.0);
 
-        d.open_titled_group(&format!("{label}: {}", fmt_pct(bar.pct)));
+        d.open_titled_group(&format!(
+            "{}: {}",
+            cut(label, NAME_MAX_CHARS),
+            fmt_pct(bar.pct)
+        ));
         d.text_styled(PAD, mid + 4.0, Anchor::Start, FONT_PX, pal.ink, &shown);
         if len > 0.0 {
             d.rect_fill(cx.min(end), mid - BAR_H / 2.0, len, BAR_H, 0.0, color);
@@ -527,15 +531,23 @@ mod tests {
     }
 
     #[test]
-    fn delta_chart_should_truncate_long_names_escaped_with_full_name_in_title() {
+    fn delta_chart_should_truncate_long_names_escaped_with_bounded_name_in_title() {
         let name = format!("Bench<&\"{}>/impl=quick", "x".repeat(80));
         let r = report(vec![row(&name, Some(8.0), Verdict::Regressed)]);
         let svg = light(&r).svg;
         assert!(svg.contains('…'), "{svg}");
         assert!(svg.contains("/impl=quick</text>"));
-        let esc = crate::svg::writer::xml_escape(&name);
-        assert!(svg.contains(&format!("<title>1. {esc}: +8.0%</title>")));
+        let bounded = crate::svg::writer::xml_escape(&cut(&format!("1. {name}"), NAME_MAX_CHARS));
+        assert!(svg.contains(&format!("<title>{bounded}: +8.0%</title>")));
         assert!(!svg.contains("<script") && !svg.contains("Bench<&"));
+    }
+
+    #[test]
+    fn delta_chart_should_bound_a_huge_name_in_title_and_desc() {
+        let name = format!("Z{}", "q".repeat(5000));
+        let f = light(&report(vec![row(&name, Some(8.0), Verdict::Regressed)]));
+        assert!(!f.svg.contains(&"q".repeat(NAME_MAX_CHARS + 1)));
+        assert!(f.svg.len() < 6000, "{}", f.svg.len());
     }
 
     #[test]
