@@ -75,18 +75,38 @@ function stage(files, dir, prefix) {
   });
 }
 
-function buildArgs({ head, base, format, baseFormat, threshold, minAbs, onlyChanged, sort, maxRows, title, tag, failOnRegression }) {
+/**
+ * Builds the CLI argv. Config-governed settings are emitted only when the raw input is
+ * non-empty, so a `--config` file (or the binary's own default) applies when the user set nothing.
+ */
+function buildArgs({ head, base, config, format, baseFormat, threshold, minAbs, onlyChanged, sort, maxRows, title, tag, failOnRegression }) {
   const args = [];
   head.forEach((f) => args.push('--head', f));
   base.forEach((f) => args.push('--base', f));
-  args.push('--format', format, '--threshold', threshold, '--min-abs', minAbs, '--sort', sort, `--title=${title}`, `--tag=${tag}`);
+  if (config) args.push('--config', config);
+  if (format) args.push('--format', format);
+  if (threshold) args.push('--threshold', threshold);
+  if (minAbs) args.push('--min-abs', minAbs);
+  if (sort) args.push('--sort', sort);
+  if (title) args.push(`--title=${title}`);
+  if (tag) args.push(`--tag=${tag}`);
   if (baseFormat) args.push('--base-format', baseFormat);
   if (onlyChanged) args.push('--only-changed');
   if (maxRows) args.push('--max-rows', maxRows);
   if (failOnRegression === 'true') args.push('--fail-on-regression');
-  else if (failOnRegression !== 'false' && failOnRegression !== '') args.push(`--fail-on-regression=${failOnRegression}`);
+  else if (failOnRegression && failOnRegression !== 'false') args.push(`--fail-on-regression=${failOnRegression}`);
   args.push('--markdown', '/work/report.md', '--json', '/work/report.json', '--head-json', '/work/head.json');
   return args;
+}
+
+/** Copies the explicit config file to `<dir>/config/<its own base name>` so errors name the file the user wrote. */
+function stageConfig(file, dir, cwd = process.cwd()) {
+  const source = path.resolve(cwd, file);
+  if (!fs.existsSync(source) || !fs.statSync(source).isFile()) throw new Error(`config file not found: ${file}`);
+  const name = path.basename(source).replace(/[^A-Za-z0-9._-]/g, '_');
+  fs.mkdirSync(path.join(dir, 'config'), { recursive: true });
+  fs.copyFileSync(source, path.join(dir, 'config', name));
+  return `/work/config/${name}`;
 }
 
 /** Normalizes the fail-on-regression input to 'true', 'false' or a non-negative number string. */
@@ -180,20 +200,23 @@ async function main() {
   const base = basePattern ? expand(basePattern) : [];
   if (basePattern && !base.length) warning(`no base files match ${JSON.stringify(basePattern)}; reporting head only`);
 
-  const tag = validateTag(input('tag', 'default'));
-  const failOnRegression = parseFailOnRegression(input('fail-on-regression', 'false'));
+  const tagInput = input('tag');
+  const tag = tagInput ? validateTag(tagInput) : '';
+  const failOnRegression = parseFailOnRegression(input('fail-on-regression'));
+  const configInput = input('config');
   const workDir = fs.mkdtempSync(path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'benchdiff-'));
   const args = buildArgs({
     head: stage(head, workDir, 'head'),
     base: stage(base, workDir, 'base'),
-    format: input('format', 'auto'),
+    config: configInput ? stageConfig(configInput, workDir) : '',
+    format: input('format'),
     baseFormat: input('base-format'),
-    threshold: input('threshold', '5'),
-    minAbs: input('min-abs', '0'),
-    onlyChanged: input('only-changed', 'false') === 'true',
-    sort: input('sort', 'delta'),
+    threshold: input('threshold'),
+    minAbs: input('min-abs'),
+    onlyChanged: input('only-changed') === 'true',
+    sort: input('sort'),
     maxRows: input('max-rows'),
-    title: input('title', 'Benchmark comparison'),
+    title: input('title'),
     tag,
     failOnRegression,
   });
@@ -203,7 +226,8 @@ async function main() {
 
   const markdown = fs.readFileSync(path.join(workDir, 'report.md'), 'utf8');
   const report = JSON.parse(fs.readFileSync(path.join(workDir, 'report.json'), 'utf8'));
-  const marker = `<!-- benchdiff:${tag} -->`;
+  // The binary owns the tag default and may take it from the config, so read it back from the report.
+  const marker = markdown.split('\n', 1)[0];
 
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${markdown}\n`);
 
@@ -233,7 +257,7 @@ async function main() {
   if (report.failed) throw new Error(`${report.counts.regressed} benchmark regression(s) exceed the fail-on-regression limit`);
 }
 
-module.exports = { expand, runWasm, stage, buildArgs, parseFailOnRegression, validateTag, upsertComment, clip, main };
+module.exports = { expand, runWasm, stage, buildArgs, stageConfig, parseFailOnRegression, validateTag, upsertComment, clip, main };
 
 if (require.main === module) {
   main().catch((e) => {

@@ -13,35 +13,38 @@ inputs:
     description: Benchmark result file(s) to compare against. Omit for a head-only report.
     required: false
   format:
-    description: "Input format: auto, benchdiff, go, criterion, cargo-bench, jmh, hyperfine, googlebench, gab-smaller, gab-bigger, bmf."
-    default: auto
+    description: "Input format: auto, benchdiff, go, criterion, cargo-bench, jmh, hyperfine, googlebench, gab-smaller, gab-bigger, bmf. Default auto."
+    required: false
   base-format:
     description: "Input format of the base files (same values as format). Defaults to the value of format; set `benchdiff` when the base is a previous release's canonical JSON."
     required: false
   threshold:
-    description: Changes smaller than this many percent are treated as noise.
-    default: '5'
+    description: Changes smaller than this many percent are treated as noise. Default 5.
+    required: false
   min-abs:
-    description: Changes smaller than this many units (in the metric's own unit) are treated as noise.
-    default: '0'
+    description: Changes smaller than this many units (in the metric's own unit) are treated as noise. Default 0.
+    required: false
   only-changed:
-    description: Hide unchanged rows.
-    default: 'false'
+    description: Hide unchanged rows. Default false.
+    required: false
   sort:
-    description: "Row order: delta (worst regression first), name, or input."
-    default: delta
+    description: "Row order: delta (worst regression first), name, or input. Default delta."
+    required: false
   max-rows:
     description: Show at most this many changed rows (the JSON report keeps all).
     required: false
   title:
-    description: Report heading.
-    default: Benchmark comparison
+    description: Report heading. Default Benchmark comparison.
+    required: false
   tag:
-    description: Key of the sticky comment; use distinct tags for several reports on one PR.
-    default: default
+    description: Key of the sticky comment; use distinct tags for several reports on one PR. Default default.
+    required: false
   fail-on-regression:
-    description: "'true' fails on any regression, a number fails on a regression of at least that many percent, 'false' never fails."
-    default: 'false'
+    description: "'true' fails on any regression, a number fails on a regression of at least that many percent, 'false' never fails. Default false."
+    required: false
+  config:
+    description: "Path to a benchdiff.config.json settings file. Only read when set (never auto-discovered); inputs you set override the file."
+    required: false
   comment:
     description: Post or update the sticky PR comment.
     default: 'true'

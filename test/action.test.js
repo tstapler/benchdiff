@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { buildArgs, parseFailOnRegression, validateTag, main } = require('../index.js');
+const { buildArgs, stageConfig, parseFailOnRegression, validateTag, main } = require('../index.js');
 
 const root = path.resolve(__dirname, '..');
 const base = { head: ['/work/h'], base: ['/work/b'], format: 'auto', threshold: '5', minAbs: '0', sort: 'delta', title: 'T', tag: 'default', failOnRegression: 'false' };
@@ -112,7 +112,15 @@ test('parseFailOnRegression rejects hex and other non-decimal numbers', () => {
 
 const TAIL = ['--markdown', '/work/report.md', '--json', '/work/report.json', '--head-json', '/work/head.json'];
 
-test('buildArgs snapshot: documented defaults produce the exact current argv', () => {
+// Intentional 1.2.4a change: unset inputs no longer inject the documented defaults; the binary
+// (or a --config file) owns them. The diff against the 0.1.3a snapshot is exactly the dropped
+// `--format auto --threshold 5 --min-abs 0 --sort delta --title=Benchmark comparison --tag=default`.
+test('buildArgs snapshot: all-empty inputs emit no config-governed flags', () => {
+  const args = buildArgs({ head: ['h.txt'], base: ['b.txt'], format: '', threshold: '', minAbs: '', sort: '', title: '', tag: '', failOnRegression: 'false' });
+  assert.deepEqual(args, ['--head', 'h.txt', '--base', 'b.txt', ...TAIL]);
+});
+
+test('buildArgs: explicitly set defaults are still emitted (inputs override the config file)', () => {
   const args = buildArgs({ head: ['h.txt'], base: ['b.txt'], format: 'auto', threshold: '5', minAbs: '0', sort: 'delta', title: 'Benchmark comparison', tag: 'default', failOnRegression: 'false' });
   assert.deepEqual(args, [
     '--head', 'h.txt', '--base', 'b.txt',
@@ -120,6 +128,52 @@ test('buildArgs snapshot: documented defaults produce the exact current argv', (
     '--title=Benchmark comparison', '--tag=default',
     ...TAIL,
   ]);
+});
+
+test('buildArgs: config is passed as --config and never invented', () => {
+  assert.ok(!buildArgs({ ...base, config: '' }).includes('--config'));
+  assert.equal(flagValue(buildArgs({ ...base, config: '/work/config/benchdiff.config.json' }), '--config'), '/work/config/benchdiff.config.json');
+});
+
+test('action.yml: config-governed inputs have no default and a config input exists', () => {
+  const yml = fs.readFileSync(path.join(root, 'action.yml'), 'utf8');
+  const block = (name) => yml.split(new RegExp(`^  ${name}:\\n`, 'm'))[1].split(/^  \S/m)[0];
+  for (const name of ['format', 'base-format', 'threshold', 'min-abs', 'only-changed', 'sort', 'max-rows', 'title', 'tag', 'fail-on-regression', 'config']) {
+    assert.ok(!/^    default:/m.test(block(name)), `${name} still has a default:`);
+  }
+  assert.match(block('threshold'), /default 5/i);
+  assert.match(block('min-abs'), /default 0/i);
+  assert.match(block('sort'), /default delta/i);
+  assert.match(yml, /^  config:$/m);
+});
+
+test('stageConfig copies the config byte for byte under its own sanitized base name', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-cfg-'));
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-ws-'));
+  const text = '{"version":1,\n "threshold":3}';
+  fs.writeFileSync(path.join(ws, 'benchdiff.config.json'), text);
+  fs.writeFileSync(path.join(ws, 'my config (1).json'), text);
+  assert.equal(stageConfig('benchdiff.config.json', dir, ws), '/work/config/benchdiff.config.json');
+  assert.equal(fs.readFileSync(path.join(dir, 'config', 'benchdiff.config.json'), 'utf8'), text);
+  assert.equal(stageConfig('my config (1).json', dir, ws), '/work/config/my_config__1_.json');
+  assert.throws(() => stageConfig('nope.json', dir, ws), /config file not found: nope\.json/);
+});
+
+test('main() output is identical with a stray benchdiff.json in the workspace and passes no --config', async () => {
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-stray-'));
+  fs.writeFileSync(path.join(ws, 'benchdiff.json'), '{"schema":1,"metrics":[]}');
+  const run = async (cwd) => {
+    const s = setup('false');
+    const before = process.cwd();
+    process.chdir(cwd);
+    try {
+      await withEnv(s.env, () => main());
+    } finally {
+      process.chdir(before);
+    }
+    return fs.readFileSync(s.summary, 'utf8');
+  };
+  assert.equal(await run(ws), await run(root));
 });
 
 test('buildArgs snapshot: every input set yields the exact current argv', () => {

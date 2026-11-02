@@ -151,3 +151,20 @@ fn report_should_be_unchanged_when_flags_only_and_no_config() {
     assert!(!stdout(&plain).contains("Settings not at their defaults"));
     assert!(!stdout(&flagged).contains("Settings not at their defaults"));
 }
+
+#[test]
+fn binary_defaults_should_equal_removed_action_yml_defaults_table_with_explicit_exceptions() {
+    // The pre-1.2.4a action.yml defaults; the Action no longer injects them, so the binary must.
+    // No exceptions: the CLI title and tag defaults match the old Action's.
+    let v = print_config(&[]);
+    let c = &v["config"];
+    assert_eq!(c["format"], "auto");
+    assert_eq!(c["threshold"], 5.0);
+    assert_eq!(c["min-abs"], 0.0);
+    assert_eq!(c["sort"], "delta");
+    assert_eq!(c["title"], "Benchmark comparison");
+    assert_eq!(c["tag"], "default");
+    assert_eq!(c["only-changed"], false);
+    assert_eq!(c["fail-on-regression"], Value::Null);
+    assert_eq!(c["max-rows"], Value::Null);
+}
