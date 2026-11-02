@@ -895,3 +895,107 @@ fn cli_should_write_ranking_svg_when_variants_are_charted_with_svg_dir() {
     );
     assert!(dir.join("ranking.svg").is_file(), "ranking.svg in {dir:?}");
 }
+
+fn run_with_outputs(test: &str, args: &[&str]) -> (Output, String) {
+    let js = tmp(test, "out.json", "");
+    let mut all = args.to_vec();
+    all.extend(["--json", &js]);
+    let out = run(&all);
+    (out, std::fs::read_to_string(&js).unwrap_or_default())
+}
+
+#[test]
+fn cli_should_accept_compare_by_run_equivalent_to_base_head_when_two_columns() {
+    let (axis, axis_json) = run_with_outputs(
+        "run-axis",
+        &["--base", BASE, "--head", HEAD, "--compare-by", "run"],
+    );
+    let (var, var_json) = run_with_outputs(
+        "run-variants",
+        &[
+            "--variant",
+            &labelled("base", BASE),
+            "--variant",
+            &labelled("head", HEAD),
+        ],
+    );
+    assert_eq!(axis.status.code(), Some(0), "{}", stderr(&axis));
+    assert_eq!(axis.status.code(), var.status.code());
+    assert_eq!(stdout(&axis), stdout(&var));
+    assert!(!axis_json.is_empty());
+    assert_eq!(axis_json, var_json);
+    let md = stdout(&axis);
+    let header = md.lines().find(|l| l.starts_with("| Benchmark")).unwrap();
+    let (b, h) = (header.find("base").unwrap(), header.find("head").unwrap());
+    assert!(b < h, "base is the first column: {header}");
+}
+
+#[test]
+fn cli_should_take_head_as_the_reference_when_compare_by_run_names_it() {
+    let out = run(&[
+        "--base",
+        BASE,
+        "--head",
+        HEAD,
+        "--compare-by",
+        "run",
+        "--reference",
+        "head",
+    ]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let md = stdout(&out);
+    let header = md.lines().find(|l| l.starts_with("| Benchmark")).unwrap();
+    assert!(
+        header.find("head").unwrap() < header.find("base").unwrap(),
+        "{header}"
+    );
+}
+
+#[test]
+fn cli_should_reject_compare_by_run_without_base_or_head() {
+    let want = "compare-by 'run' needs --base and --head";
+    rejects(&["--head", HEAD, "--compare-by", "run"], want);
+    rejects(
+        &[
+            "--base",
+            BASE,
+            "--head",
+            HEAD,
+            "--head",
+            HEAD,
+            "--compare-by",
+            "run",
+        ],
+        "compare-by 'run' takes one --base and one --head file",
+    );
+}
+
+#[test]
+fn cli_should_reject_compare_by_run_with_variant_and_an_unknown_reference() {
+    rejects(
+        &[
+            "--variant",
+            "a=x.txt",
+            "--base",
+            BASE,
+            "--head",
+            HEAD,
+            "--compare-by",
+            "run",
+        ],
+        "--variant cannot be combined with --base/--head",
+    );
+    rejects(
+        &[
+            "--base",
+            BASE,
+            "--head",
+            HEAD,
+            "--compare-by",
+            "run",
+            "--reference",
+            "nope",
+        ],
+        "unknown reference 'nope'; valid: base, head",
+    );
+}

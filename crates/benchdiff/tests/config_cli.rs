@@ -497,3 +497,16 @@ fn thresholds_should_affect_only_the_named_group_when_two_way_key_is_a_group() {
     );
     assert!(one.contains("1 regressed"), "{one}");
 }
+
+#[test]
+fn config_file_should_pivot_the_runs_when_compare_by_is_run() {
+    let c = config_file("run-axis", "c.json", r#"{"version":1,"compare-by":"run"}"#);
+    let from_config = run(&["--config", &c, "--base", BASE, "--head", HEAD]);
+    let from_flag = run(&["--base", BASE, "--head", HEAD, "--compare-by", "run"]);
+    assert!(from_config.status.success(), "{}", stderr(&from_config));
+    let md = stdout(&from_config);
+    assert!(md.contains("2 variants (reference: base)"), "{md}");
+    // The config run lists its sources; apart from that it is the flag run.
+    assert!(md.contains("compare-by"), "{md}");
+    assert!(stdout(&from_flag).contains("2 variants (reference: base)"));
+}

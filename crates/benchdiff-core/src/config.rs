@@ -68,9 +68,9 @@ pub const MATRIX_DOCS: &[FlagDoc] = &[
     FlagDoc {
         key: Some("compare-by"),
         flag: "--compare-by DIM",
-        summary: "pivot one dimension of the head results into columns (N-way)",
+        summary: "pivot one dimension of the head results into columns (N-way); 'run' makes\nbase and head the two columns (needs --base and --head)",
         default: "off",
-        allowed: "a dimension name or group",
+        allowed: "run, group or a dimension name",
     },
     FlagDoc {
         key: Some("group-by"),

@@ -69,7 +69,7 @@ Every input below has a CLI flag and a config key of the same kebab-case name, e
 | Input | Default | |
 |---|---|---|
 | `variants` | | N-way input, one `label=path-or-glob` per line; see [N-way comparison](#n-way-comparison) |
-| `compare-by` | | N-way: the dimension to pivot into columns (a dimension name or group) |
+| `compare-by` | | N-way: the dimension to pivot into columns (a dimension name, `group`, or `run`) |
 | `group-by` | all but the axis | N-way: comma-separated dimensions that identify a row |
 | `dimensions` | | extra `dim=regex` rules, one per line; see [Dimensions](#dimensions) |
 | `dimensions-strict` | `false` | `true` turns data-dependent dimension notices into exit 2 |
@@ -111,6 +111,7 @@ benchdiff --head all.txt --compare-by impl      # pivot a dimension of one resul
 
 * `variants` grammar: the first `=` splits label from path; labels use `A-Za-z0-9._-` (at most 40 characters); one label is exactly one file (a glob that matches several is an error); entries are newline-separated only; it cannot be combined with `head`, `base` or `base-format`.
 * Axis values that become column labels under `compare-by` (for example a Go package `net/http` under `compare-by: group`) are shown with disallowed characters replaced by `_`, cut to 40 characters and made unique with `-2`, `-3`; a notice lists the renamed values. Only explicit `variants` labels must already be valid.
+* `compare-by: run` makes the two runs the columns: `--base B --head H --compare-by run` is the same as `--variant base=B --variant head=H` (reference `base` unless `reference: head`), and needs exactly one `--base` and one `--head`. The Action passes `head`/`base` and `compare-by` unchanged.
 * `compare-by` pivots one [dimension](#dimensions) of the head results into columns; `group-by` names the dimensions that identify a row (default: all others).
 * **Reference.** Every other column is compared against one reference: the variant or axis value named by `reference`. The default is the first variant, and for variants split from benchmark names the first one encountered in the input. Set `reference` explicitly whenever the input order is not under your control.
 * **Ratio, not percent.** N-way cells are ratios against the reference: `0.74x` means a value 26% lower. Two-way reports keep percent. Prose says faster or slower, never higher or lower.

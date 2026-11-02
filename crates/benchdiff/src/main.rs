@@ -203,6 +203,21 @@ impl Args {
         if n_way && self.head_json.is_some() {
             return Err("--head-json is two-way only".into());
         }
+        if matrix.compare_by == RUN_AXIS {
+            if self.base.is_empty() || self.head.is_empty() {
+                return Err("compare-by 'run' needs --base and --head".into());
+            }
+            if self.base.len() > 1 || self.head.len() > 1 {
+                return Err("compare-by 'run' takes one --base and one --head file".into());
+            }
+            if let Reference::Label(label) = &matrix.reference {
+                if label.as_str() != RUN_BASE && label.as_str() != RUN_HEAD {
+                    return Err(format!(
+                        "unknown reference '{label}'; valid: {RUN_BASE}, {RUN_HEAD}"
+                    ));
+                }
+            }
+        }
         if let (Reference::Label(label), false) = (&matrix.reference, self.variants.is_empty()) {
             if !self.variants.iter().any(|(l, _)| l == label) {
                 let valid: Vec<&str> = self.variants.iter().map(|(l, _)| l.as_str()).collect();
@@ -219,6 +234,11 @@ impl Args {
         Ok(())
     }
 }
+
+/// `compare-by: run` pivots the two runs themselves: columns `base` and `head`.
+const RUN_AXIS: &str = "run";
+const RUN_BASE: &str = "base";
+const RUN_HEAD: &str = "head";
 
 /// Config-governed keys in display order.
 const SETTING_KEYS: [&str; 17] = [
@@ -460,12 +480,31 @@ fn push_config_sources<T: Default>(
     }
 }
 
+/// `compare-by: run` is `--variant base=B --variant head=H`; --base/--head stay for the two-way
+/// fallback. Under `--print-config` the flags are left as given.
+fn with_run_variants(mut args: Args, eff: &Effective) -> Args {
+    if eff.matrix.compare_by == RUN_AXIS && !args.print_config {
+        args.variants = vec![
+            (
+                VariantLabel::parse(RUN_BASE).expect("valid label"),
+                args.base[0].clone(),
+            ),
+            (
+                VariantLabel::parse(RUN_HEAD).expect("valid label"),
+                args.head[0].clone(),
+            ),
+        ];
+    }
+    args
+}
+
 fn run() -> Result<bool, String> {
     let Some(args) = parse_args(utf8_args(std::env::args_os().skip(1))?.into_iter())? else {
         print_out(&format!("{}\n", help_text()))?;
         return Ok(false);
     };
     let eff = args.effective()?;
+    let args = with_run_variants(args, &eff);
     if args.print_config {
         print_out(&print_config(&args, &eff))?;
         return Ok(false);
