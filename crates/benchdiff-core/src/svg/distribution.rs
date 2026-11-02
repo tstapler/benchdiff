@@ -252,9 +252,14 @@ fn with_unit(v: f64, unit: &str) -> String {
     if unit.is_empty() {
         fmt_val(v)
     } else {
-        format!("{} {unit}", fmt_val(v))
+        format!("{} {}", fmt_val(v), cut(unit, UNIT_MAX_CHARS))
     }
 }
+
+/// Longest benchmark or variant name embedded in a `<title>` or `<desc>`; keeps the SVG bounded.
+const NAME_MAX_CHARS: usize = 80;
+/// Longest unit string embedded in value labels.
+const UNIT_MAX_CHARS: usize = 16;
 
 fn cut(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
@@ -282,7 +287,7 @@ fn lane_summary(lane: &Lane, unit: &str) -> String {
     let (min, max) = bounds(&lane.values);
     format!(
         "{}: median {} ({}-{}, n={})",
-        lane.name,
+        cut(&lane.name, NAME_MAX_CHARS),
         with_unit(median(&lane.values), unit),
         fmt_val(min),
         fmt_val(max),
@@ -296,7 +301,7 @@ fn desc_text(blocks: &[&Block]) -> String {
         .take(DESC_TOP)
         .map(|b| {
             let lanes: Vec<String> = b.lanes.iter().map(|l| lane_summary(l, &b.unit)).collect();
-            format!("{} ({})", b.name, lanes.join("; "))
+            format!("{} ({})", cut(&b.name, NAME_MAX_CHARS), lanes.join("; "))
         })
         .collect();
     format!(
@@ -384,7 +389,7 @@ fn render(
             };
             d.open_titled_group(&format!(
                 "{} {}",
-                block.label,
+                cut(&block.label, NAME_MAX_CHARS),
                 lane_summary(lane, &block.unit)
             ));
             let name = truncate_to_width(&lane.name, SMALL_PX, GUTTER - PAD - 8.0);

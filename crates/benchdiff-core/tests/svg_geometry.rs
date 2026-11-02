@@ -432,29 +432,9 @@ fn collect(set: &str, names: &[String], variants: &[String]) -> Vec<String> {
 }
 
 fn report_violations(set: &str, names: &[String], variants: &[String], kinds: &[&str]) {
-    report_violations_except(set, names, variants, kinds, false);
-}
-
-/// Overlaps in the ranking chart's axis labels at width 480, kept out of the passing tests and
-/// asserted by the `#[ignore]`d defect test below.
-const KNOWN_RANKING_DEFECTS: [&str; 2] = ["= 1.00x", "\"0.25x\" overlaps \"0.5x\""];
-
-fn is_known_defect(violation: &str) -> bool {
-    KNOWN_RANKING_DEFECTS.iter().any(|d| violation.contains(d))
-}
-
-/// As `report_violations`, ignoring the known ranking axis-label defects when `skip_known`.
-fn report_violations_except(
-    set: &str,
-    names: &[String],
-    variants: &[String],
-    kinds: &[&str],
-    skip_known: bool,
-) {
     let all: Vec<String> = collect(set, names, variants)
         .into_iter()
         .filter(|v| kinds.iter().any(|k| v.contains(&format!("/{k}/"))))
-        .filter(|v| !(skip_known && is_known_defect(v)))
         .collect();
     assert!(
         all.is_empty(),
@@ -501,17 +481,13 @@ fn ranking_chart_should_fit_worst_case_names_when_8_and_10_variants() {
     for (set, names) in sets() {
         for n in [8, 10] {
             let set = format!("{set}-{n}v");
-            report_violations_except(&set, &names, &variants(n), &["ranking"], true);
+            report_violations(&set, &names, &variants(n), &["ranking"]);
         }
     }
 }
 
-/// Defects: at width 480 the ranking chart's reference axis label (`<variant> = 1.00x`) overlaps
-/// the `0.5x` and `2x` tick labels even for the 5-character variant `quick` (9.3 px and 4.2 px),
-/// and with 10 variants the `0.25x` and `0.5x` tick labels overlap each other (7.2 px).
-/// Repro: `ranking_chart` on a matrix with reference `quick`, three variants and width 480.
+/// Regression: ranking axis labels (centre `1.00x` and the thinned ticks) must not overlap at width 480.
 #[test]
-#[ignore = "defect: ranking axis labels overlap at width 480 (reference label vs 0.5x/2x; 0.25x vs 0.5x)"]
 fn ranking_chart_should_not_overlap_reference_label_when_long_variant_label() {
     let names = worst("names-long.txt");
     report_violations("long-variant", &names, &variants(8), &["ranking"]);
@@ -546,10 +522,7 @@ fn charts_should_have_finite_coordinates_when_ordinary_short_names() {
         .to_vec();
     for width in [480, 1600] {
         for (kind, file) in charts(&names, &short, width, Theme::Light) {
-            let v: Vec<_> = violations(&file.svg)
-                .into_iter()
-                .filter(|m| !(kind == "ranking" && is_known_defect(m)))
-                .collect();
+            let v = violations(&file.svg);
             assert!(v.is_empty(), "{kind} w{width}: {v:?}");
         }
     }

@@ -563,11 +563,8 @@ fn delta_and_ranking_should_not_grow_without_bound_when_names_are_10kb() {
     }
 }
 
-/// Defect: the pair and N-way distribution charts repeat the untruncated name in the per-lane
-/// `<title>` and the `<desc>` (about 11 copies, ~116 KB for one 10 KB name).
-/// Repro: `distribution_chart` on a one-row report whose `name` is `"N".repeat(10240)`.
+/// Regression: names and units embedded in titles/desc are bounded, so one 10 KB name stays under budget.
 #[test]
-#[ignore = "defect: distribution charts embed the untruncated benchmark name ~11 times in title/desc"]
 fn distribution_should_not_grow_without_bound_when_names_are_10kb() {
     for (kind, len) in sizes_for_10kb_name("distribution") {
         assert!(

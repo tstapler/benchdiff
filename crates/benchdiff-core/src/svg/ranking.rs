@@ -26,6 +26,8 @@ const END_ROOM: f64 = 84.0;
 const MIN_SPAN: f64 = 1.0;
 const MAX_SPAN: f64 = 5.0;
 const FONT_PX: f64 = 12.0;
+/// Minimum px between axis label centres (widest label `0.125x`/`1.00x` plus a gap).
+const TICK_LABEL_GAP: f64 = 40.0;
 const ALT_MAX_CHARS: usize = 125;
 const ALT_NAME_CHARS: usize = 16;
 const DESC_TOP: usize = 5;
@@ -515,13 +517,17 @@ fn render(plan: &Plan, width: f64, pal: Palette) -> Result<String, NonFiniteErro
         ),
     );
 
-    // Axis: faint ticks at powers of two, the 1.00x reference line in ink.
-    let step = if span > 3.0 { 2 } else { 1 };
-    let mut k = -(span as i32);
-    while k <= span as i32 {
-        if k != 0 {
-            let x = cx + f64::from(k) * per_log;
-            d.line_stroke(x, HEADER_H, x, HEADER_H + rows_h, pal.unchanged, 0.5);
+    // Axis: faint gridlines at powers of two, the 1.00x reference line in ink. Labels are thinned
+    // to every `step`-th power so neighbours (and the centre "1.00x") never touch.
+    let step = (TICK_LABEL_GAP / per_log).ceil().max(1.0) as i32;
+    let reach = span as i32;
+    for k in -reach..=reach {
+        if k == 0 {
+            continue;
+        }
+        let x = cx + f64::from(k) * per_log;
+        d.line_stroke(x, HEADER_H, x, HEADER_H + rows_h, pal.unchanged, 0.5);
+        if k % step == 0 {
             d.text_styled(
                 x,
                 HEADER_H - 4.0,
@@ -531,17 +537,9 @@ fn render(plan: &Plan, width: f64, pal: Palette) -> Result<String, NonFiniteErro
                 &tick_label(k),
             );
         }
-        k += step;
     }
     d.line_stroke(cx, HEADER_H, cx, HEADER_H + rows_h, pal.ink, 1.5);
-    d.text_styled(
-        cx,
-        HEADER_H - 4.0,
-        Anchor::Middle,
-        11.0,
-        pal.ink,
-        &format!("{} = 1.00x", shorten_middle(plan.reference, 16)),
-    );
+    d.text_styled(cx, HEADER_H - 4.0, Anchor::Middle, 11.0, pal.ink, "1.00x");
 
     for (i, c) in plan.clusters.iter().enumerate() {
         let top = HEADER_H + i as f64 * cluster_h + ROW_GAP / 2.0;
@@ -817,7 +815,7 @@ mod tests {
         let f = light(&three());
         assert_eq!(f.name, "ranking");
         assert!(f.svg.contains("viewBox=\"0 0 760 "));
-        assert!(f.svg.contains(">quick = 1.00x</text>"));
+        assert!(f.svg.contains(">1.00x</text>"));
         for want in ["1.30x", "0.80x", "1.50x", "0.90x", "0.50x", "2.00x"] {
             assert!(f.svg.contains(&format!(">{want}</text>")), "{want}");
         }
