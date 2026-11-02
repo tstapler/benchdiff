@@ -767,3 +767,133 @@ test('main: matrix JSON counts and failed reach the outputs unchanged and the ga
   for (const [k, v] of Object.entries(want)) assert.equal(outputOf(s, k), v, k);
   assert.equal(outputOf(s, 'head-json-path'), '');
 });
+
+// ---- Task 4.2.3c: end-to-end `variants` runs through the real dist/benchdiff.wasm (mocked fetch only) ----
+
+const NWAY = path.join(root, 'testdata/nway');
+const nwayVariants = () => ['quick', 'heap', 'merge'].map((n) => `${n}=${path.join(NWAY, `${n}.txt`)}`).join('\n');
+const MATRIX_MD = fs.readFileSync(path.join(NWAY, 'expected/matrix.md'), 'utf8');
+const MATRIX_JSON = JSON.parse(fs.readFileSync(path.join(NWAY, 'expected/matrix.json'), 'utf8'));
+
+/** Real-wasm variants run: no injected runWasm, only fetch is faked. Errors are returned, not thrown. */
+async function runReal(extra = {}, variants = nwayVariants()) {
+  const s = variantSetup(variants, {
+    INPUT_COMMENT: 'true', GITHUB_TOKEN: 'ghs_t', GITHUB_REPOSITORY: 'o/r', GITHUB_SERVER_URL: 'https://github.com',
+    GITHUB_EVENT_NAME: 'pull_request', ...extra,
+  });
+  const eventPath = path.join(path.dirname(s.output), 'event.json');
+  const repo = { full_name: 'o/r' };
+  fs.writeFileSync(eventPath, JSON.stringify({ repository: { private: false }, pull_request: { number: 7, head: { repo }, base: { repo } } }));
+  s.env.GITHUB_EVENT_PATH = eventPath;
+  s.env.GITHUB_WORKSPACE = path.dirname(s.output);
+  const gh = fakeGithub();
+  const logs = [];
+  const orig = process.stdout.write;
+  process.stdout.write = (c) => { logs.push(String(c)); return true; };
+  let error;
+  try {
+    await withEnv(s.env, () => main({ fetchImpl: gh.fetchImpl }));
+  } catch (e) {
+    error = e;
+  } finally {
+    process.stdout.write = orig;
+  }
+  return { s, gh, error, log: logs.join('') };
+}
+
+test('action_variants_should_post_matrix_comment_equal_to_expected_when_three_labelled_lines', async () => {
+  // Documented differences vs expected/matrix.md: none (the golden is generated with the Action's defaults:
+  // title "Benchmark comparison", tag "default"; see plan.md Task 2.2.3a). The sticky marker is the first line.
+  const r = await runReal({ INPUT_REFERENCE: 'quick' });
+  assert.equal(r.error, undefined);
+  const body = commentBody(r.gh);
+  assert.equal(body.split('\n', 1)[0], '<!-- benchdiff:default -->');
+  assert.equal(body, MATRIX_MD);
+  assert.equal(fs.readFileSync(r.s.summary, 'utf8'), `${MATRIX_MD}\n`);
+  for (const k of ['regressed', 'improved', 'unchanged', 'new', 'removed']) assert.equal(outputOf(r.s, k), String(MATRIX_JSON.counts[k]), k);
+  assert.equal(outputOf(r.s, 'failed'), 'false');
+  assert.equal(outputOf(r.s, 'head-json-path'), '');
+  assert.deepEqual(JSON.parse(fs.readFileSync(outputOf(r.s, 'json-path'), 'utf8')).counts, MATRIX_JSON.counts);
+});
+
+test('action_variants_should_fail_with_gate_text_when_fail_on_regression_has_explicit_reference_and_a_cell_regressed', async () => {
+  // merge on Parse (ns/op) is +30.5% vs quick and significant: the only regressed cell.
+  const r = await runReal({ INPUT_REFERENCE: 'quick', 'INPUT_FAIL-ON-REGRESSION': '5' });
+  assert.match(r.error?.message ?? '', /^1 benchmark regression\(s\) exceed the fail-on-regression limit$/);
+  assert.equal(outputOf(r.s, 'failed'), 'true');
+  assert.equal(outputOf(r.s, 'regressed'), '1');
+  const body = commentBody(r.gh);
+  assert.match(body, /gate:/);
+  assert.match(body, /merge/);
+});
+
+test('action_variants_should_fail_with_exit_2_text_when_fail_on_regression_has_no_explicit_reference', async () => {
+  const r = await runReal({ 'INPUT_FAIL-ON-REGRESSION': '5' });
+  assert.equal(r.error?.message, "benchdiff: fail-on-regression in an N-way run needs an explicit 'reference' (the baseline to protect); set 'reference'");
+  assert.equal(r.gh.requests.length, 0, 'nothing is posted on a static error');
+});
+
+test('action_variants_should_post_notice_only_report_and_pass_when_reference_file_is_missing_then_fail_when_strict', async () => {
+  const gone = path.join(os.tmpdir(), 'bd-e2e-no-such-quick.txt');
+  const variants = `quick=${gone}\nheap=${path.join(NWAY, 'heap.txt')}\nmerge=${path.join(NWAY, 'merge.txt')}`;
+  const r = await runReal({ INPUT_REFERENCE: 'quick', 'INPUT_FAIL-ON-REGRESSION': '5' }, variants);
+  assert.equal(r.error, undefined);
+  assert.equal(commentBody(r.gh), fs.readFileSync(NOTICE_GOLDEN, 'utf8'));
+  assert.equal(outputOf(r.s, 'failed'), 'false');
+  const strict = await runReal({ INPUT_REFERENCE: 'quick', 'INPUT_DIMENSIONS-STRICT': 'true' }, variants);
+  assert.equal(strict.error?.message, REF_LOST);
+  assert.equal(strict.gh.requests.length, 0);
+});
+
+test('action_variants_should_drop_empty_variant_post_matrix_and_pass_when_not_strict', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bd-e2e-empty-'));
+  fs.writeFileSync(path.join(dir, 'heap.txt'), '');
+  const variants = `quick=${path.join(NWAY, 'quick.txt')}\nheap=${path.join(dir, 'heap.txt')}\nmerge=${path.join(NWAY, 'merge.txt')}`;
+  const r = await runReal({ INPUT_REFERENCE: 'quick', 'INPUT_FAIL-ON-REGRESSION': '100' }, variants);
+  assert.equal(r.error, undefined);
+  const body = commentBody(r.gh);
+  assert.match(body, /variant 'heap' produced no data/);
+  assert.match(body, /\| Benchmark \| quick \(ref\) \| merge \|/);
+  assert.ok(!/\| heap \|/.test(body), 'dropped variant has no column');
+  assert.equal(outputOf(r.s, 'failed'), 'false');
+});
+
+test('action_variants_should_reject_head_or_base_combined_with_variants_before_any_run', async () => {
+  for (const extra of [{ INPUT_HEAD: path.join(NWAY, 'quick.txt') }, { INPUT_BASE: path.join(NWAY, 'quick.txt') }]) {
+    const r = await runReal(extra);
+    assert.equal(r.error?.message, 'variants cannot be combined with head/base');
+    assert.equal(r.gh.requests.length, 0);
+  }
+});
+
+test('action_variants_should_expose_svgs_and_strip_placeholders_when_charts_ranking_distribution_and_publish_images_false', async () => {
+  const svgDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bd-e2e-svg-')), 'out');
+  const r = await runReal({ INPUT_REFERENCE: 'quick', INPUT_CHARTS: 'ranking,distribution', 'INPUT_PUBLISH-IMAGES': 'false', 'INPUT_SVG-DIR': svgDir });
+  assert.equal(r.error, undefined, r.error?.message);
+  assert.equal(r.gh.publishCalls().length, 0, 'nothing hosted');
+  const body = commentBody(r.gh);
+  assert.ok(!body.includes('benchdiff-svg:'), 'placeholders stripped');
+  assert.ok(body.includes('| Benchmark | quick (ref) | heap | merge | Rank |'), 'table kept');
+  assert.equal(outputOf(r.s, 'svg-dir'), svgDir);
+  const paths = outputOf(r.s, 'svg-paths').split('\n').filter(Boolean);
+  assert.ok(paths.length >= 1, 'svg-paths set');
+  for (const p of paths) assert.ok(fs.existsSync(p), p);
+  assert.ok(fs.readdirSync(svgDir).some((n) => n.endsWith('.svg')));
+  assert.equal(outputOf(r.s, 'failed'), 'false');
+});
+
+test('action_variants_should_pass_the_job_when_chart_hosting_fails_with_a_permission_error', async () => {
+  const s = variantSetup(nwayVariants(), {
+    INPUT_REFERENCE: 'quick', INPUT_CHARTS: 'ranking', INPUT_COMMENT: 'true', GITHUB_TOKEN: 'ghs_t', GITHUB_REPOSITORY: 'o/r',
+    GITHUB_SERVER_URL: 'https://github.com', GITHUB_EVENT_NAME: 'pull_request',
+  });
+  const eventPath = path.join(path.dirname(s.output), 'event.json');
+  const repo = { full_name: 'o/r' };
+  fs.writeFileSync(eventPath, JSON.stringify({ repository: { private: false }, pull_request: { number: 7, head: { repo }, base: { repo } } }));
+  s.env.GITHUB_EVENT_PATH = eventPath;
+  s.env.GITHUB_WORKSPACE = path.dirname(s.output);
+  const gh = fakeGithub({ failStatus: 403 });
+  await withEnv(s.env, () => main({ fetchImpl: gh.fetchImpl }));
+  assert.ok(!commentBody(gh).includes('benchdiff-svg:'));
+  assert.equal(outputOf(s, 'failed'), 'false');
+});
