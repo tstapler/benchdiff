@@ -58,6 +58,115 @@ pub fn extract_defaults(name: &str) -> Extracted {
     }
 }
 
+/// Longest accepted rule pattern, in bytes (ADR-004 item 4).
+const MAX_PATTERN_LEN: usize = 256;
+/// Compiled-program size cap handed to `regex-lite`.
+const REGEX_SIZE_LIMIT: usize = 64 * 1024;
+const REGEX_NEST_LIMIT: u32 = 32;
+
+/// A user extraction rule `"<dim>=<regex>"` (ADR-004 item 4). Named capture
+/// groups become dims; the whole matched span leaves the residual name.
+#[derive(Debug, Clone)]
+pub struct Rule {
+    dim: String,
+    re: regex_lite::Regex,
+}
+
+impl Rule {
+    /// Static validation: pattern length, compilation, at least one named
+    /// group, and `<dim>` equal to one of the named groups. Errors carry the
+    /// rule text.
+    pub fn parse(rule: &str) -> Result<Rule, String> {
+        let (dim, pattern) = rule
+            .split_once('=')
+            .filter(|(d, p)| !d.is_empty() && !p.is_empty())
+            .ok_or_else(|| format!("rule '{rule}' must have the form '<dim>=<pattern>'"))?;
+        let len = pattern.chars().count();
+        if len > MAX_PATTERN_LEN {
+            return Err(format!("pattern too long ({len} > {MAX_PATTERN_LEN})"));
+        }
+        let re = regex_lite::RegexBuilder::new(pattern)
+            .size_limit(REGEX_SIZE_LIMIT)
+            .nest_limit(REGEX_NEST_LIMIT)
+            .build()
+            .map_err(|e| format!("rule '{rule}' has an invalid pattern: {e}"))?;
+        let groups: Vec<&str> = re.capture_names().flatten().collect();
+        if groups.is_empty() {
+            return Err(format!("rule '{dim}=...' has no named capture group"));
+        }
+        if !groups.contains(&dim) {
+            return Err(format!(
+                "rule prefix '{dim}' is not a named group of its pattern (groups: {})",
+                groups.join(", ")
+            ));
+        }
+        Ok(Rule {
+            dim: dim.to_string(),
+            re,
+        })
+    }
+
+    /// The `<dim>` prefix.
+    pub fn dim(&self) -> &str {
+        &self.dim
+    }
+
+    /// Applies the rule to one name; `None` when the pattern does not match.
+    pub fn apply(&self, name: &str) -> Option<Extracted> {
+        self.apply_skipping(name, &Dims::new())
+    }
+
+    /// Like `apply`, but a match whose named groups all name dims already in
+    /// `taken` is ignored (first match per dim wins).
+    fn apply_skipping(&self, name: &str, taken: &Dims) -> Option<Extracted> {
+        let caps = self.re.captures(name)?;
+        let mut dims = Dims::new();
+        for group in self.re.capture_names().flatten() {
+            if taken.contains_key(group) {
+                continue;
+            }
+            if let Some(m) = caps.name(group) {
+                dims.insert(group.to_string(), m.as_str().to_string());
+            }
+        }
+        if dims.is_empty() {
+            return None;
+        }
+        let span = caps.get(0)?;
+        let residual = tidy_residual(&format!("{}{}", &name[..span.start()], &name[span.end()..]));
+        Some(Extracted { dims, residual })
+    }
+}
+
+/// Runs `rules` in order over `name`; each rule sees the residual left by the
+/// previous ones, and the first value per dim wins. No match leaves the name
+/// whole with empty dims.
+pub fn extract_with_rules(rules: &[Rule], name: &str) -> Extracted {
+    let mut out = Extracted {
+        dims: Dims::new(),
+        residual: name.to_string(),
+    };
+    for rule in rules {
+        if let Some(e) = rule.apply_skipping(&out.residual, &out.dims) {
+            out.dims.extend(e.dims);
+            out.residual = e.residual;
+        }
+    }
+    out
+}
+
+/// Collapses doubled separators and whitespace left behind by span removal.
+fn tidy_residual(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.trim().chars() {
+        if c == '/' && out.ends_with('/') {
+            continue;
+        }
+        out.push(c);
+    }
+    collapse_ws(out.trim_matches('/'))
+}
+
 /// Removes bracket groups whose content is entirely `k=v` pairs; groups with
 /// any other content (e.g. `[abc]`) stay in the text.
 fn strip_bracket_groups(segment: &str) -> (String, Vec<(String, String)>) {
@@ -215,5 +324,61 @@ mod tests {
         }
         assert_eq!(extract_defaults("B/a=1/x/b=2/y").residual, "B/x/y");
         assert_eq!(extract_defaults("B (a = 1) tail").residual, "B tail");
+    }
+
+    #[test]
+    fn rule_parse_should_reject_pattern_without_named_group_or_over_256_chars() {
+        assert_eq!(
+            Rule::parse(r"impl=(\w+)Sort").unwrap_err(),
+            "rule 'impl=...' has no named capture group"
+        );
+        assert_eq!(
+            Rule::parse(r"foo=(?P<impl>\w+)").unwrap_err(),
+            "rule prefix 'foo' is not a named group of its pattern (groups: impl)"
+        );
+        let long = format!("(?P<impl>{})", "a".repeat(300 - 10));
+        assert_eq!(long.len(), 300);
+        assert_eq!(
+            Rule::parse(&format!("impl={long}")).unwrap_err(),
+            "pattern too long (300 > 256)"
+        );
+        let ok = format!("(?P<impl>{})", "a".repeat(256 - 10));
+        assert!(Rule::parse(&format!("impl={ok}")).is_ok());
+        assert!(Rule::parse("no-equals").unwrap_err().contains("no-equals"));
+        assert!(Rule::parse("impl=(?P<impl>[")
+            .unwrap_err()
+            .contains("impl=(?P<impl>["));
+        assert!(Rule::parse(r"=(?P<impl>\w+)").is_err());
+    }
+
+    #[test]
+    fn rule_apply_should_extract_named_group_and_remove_span_when_slash_impl_rule() {
+        let rule = Rule::parse(r"impl=/impl=(?P<impl>\w+)").unwrap();
+        let e = rule.apply("BenchmarkSort/impl=quick").unwrap();
+        assert_eq!(e.dims, dims(&[("impl", "quick")]));
+        assert_eq!(e.residual, "BenchmarkSort");
+        assert!(rule.apply("BenchmarkSort/size=10").is_none());
+    }
+
+    #[test]
+    fn rule_apply_should_remove_whole_match_span_when_pattern_has_trailing_literal() {
+        let rule = Rule::parse(r"impl=(?P<impl>[A-Za-z]+)Sort$").unwrap();
+        let e = rule.apply("BenchmarkQuickSort").unwrap();
+        assert_eq!(e.dims, dims(&[("impl", "BenchmarkQuick")]));
+    }
+
+    #[test]
+    fn extract_with_rules_should_let_first_match_per_dim_win_and_run_in_order() {
+        let rules = [
+            Rule::parse(r"impl=/impl=(?P<impl>\w+)").unwrap(),
+            Rule::parse(r"impl=-(?P<impl>\w+)$").unwrap(),
+            Rule::parse(r"size=/n(?P<size>\d+)").unwrap(),
+        ];
+        let e = extract_with_rules(&rules, "Sort/impl=quick/n10-heap");
+        assert_eq!(e.dims, dims(&[("impl", "quick"), ("size", "10")]));
+        assert_eq!(e.residual, "Sort-heap");
+        let e = extract_with_rules(&rules, "Plain");
+        assert!(e.dims.is_empty());
+        assert_eq!(e.residual, "Plain");
     }
 }
