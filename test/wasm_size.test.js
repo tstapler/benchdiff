@@ -20,17 +20,17 @@ const tmpFile = (size) => {
 test('wasm_size_should_exit_0_and_print_ratio_when_file_within_budget', () => {
   const r = run(tmpFile(330650));
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^330650 \/ 480000 bytes\n?/);
+  assert.match(r.stdout, /^330650 \/ 820000 bytes\n?/);
 });
 
 test('wasm_size_should_exit_1_when_file_exceeds_budget', () => {
-  const r = run(tmpFile(500000));
+  const r = run(tmpFile(820001));
   assert.equal(r.status, 1);
-  assert.match(r.stdout + r.stderr, /500000 \/ 480000 bytes/);
+  assert.match(r.stdout + r.stderr, /820001 \/ 820000 bytes/);
 });
 
 test('wasm_size_should_pass_at_exact_budget', () => {
-  assert.equal(run(tmpFile(480000)).status, 0);
+  assert.equal(run(tmpFile(820000)).status, 0);
 });
 
 test('wasm_size_should_fail_when_file_missing', () => {
@@ -40,5 +40,5 @@ test('wasm_size_should_fail_when_file_missing', () => {
 test('wasm_size_should_default_to_committed_dist_wasm', () => {
   const r = run();
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^\d+ \/ 480000 bytes/);
+  assert.match(r.stdout, /^\d+ \/ 820000 bytes/);
 });

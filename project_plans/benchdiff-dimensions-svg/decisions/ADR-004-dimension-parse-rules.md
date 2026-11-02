@@ -27,3 +27,4 @@ Name conventions collide: Go `BenchmarkSort/impl=quick-8` (trailing `-8` is GOMA
 ## Consequences
 - wasm grows about 55 KB (budgeted in task 0.1.2).
 - A fuzz-ish table test covers Go, JMH, Criterion, GBench name shapes and the `-8` collisions.
+- Budget note (2026-11-01): budget raised 480,000 -> 820,000 bytes: the measured wasm at HEAD (3.3.1b) is 799,198; matrix wiring (+194 KB, 2.2.2b) and SVG wiring (+116 KB, 3.3.1b) exceeded the 450-480 KB estimate, which counted unreachable code only (regex-lite alone is about 41 KB reachable); opt-level=z (-12%) and wasm-opt -Oz (about 610 KB) were measured and not adopted to keep the committed wasm reproducible; revisit if headroom drops under 20,000. The "about 55 KB" figure above is the superseded estimate for regex-lite.
