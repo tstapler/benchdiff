@@ -1,6 +1,6 @@
 # `make wasm` rebuilds the committed dist/benchdiff.wasm. It calls the rustup toolchain's cargo
 # directly because a Homebrew rustc earlier on PATH has no wasm32-wasip1 standard library.
-RUSTUP_BIN := $(HOME)/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin
+RUSTUP_BIN := $(HOME)/.rustup/toolchains/1.98.1-x86_64-unknown-linux-gnu/bin
 
 .PHONY: test perf wasm golden ready wasm-size wasm-fresh
 test:
