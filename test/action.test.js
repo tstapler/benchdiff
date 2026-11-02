@@ -946,6 +946,7 @@ test('release_workflow_should_upload_svg_paths_and_never_set_publish_images_when
   assert.match(wf, /SVG_PATHS: \$\{\{ steps\.diff\.outputs\.svg-paths \}\}/);
   assert.match(wf, /gh release upload "\$TAG" "\$\{assets\[@\]\}" --clobber/);
   assert.match(wf, /assets\+=\("\$svg"\)/);
+  assert.match(wf, /svg-embed: \$\{\{ inputs\.charts != '' && 'false' \|\| '' \}\}/);
   const code = wf.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
   assert.ok(!/publish-images/.test(code), 'workflow never sets publish-images');
 });

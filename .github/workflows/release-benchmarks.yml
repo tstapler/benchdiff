@@ -122,6 +122,8 @@ jobs:
           tag: release
           comment: 'false'
           charts: ${{ inputs.charts }}
+          # The release uploads the SVG files as assets, so skip embedding/hosting on the benchdiff-assets branch.
+          svg-embed: ${{ inputs.charts != '' && 'false' || '' }}
           config: ${{ inputs.config }}
       - name: Attach to the release
         env:
