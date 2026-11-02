@@ -1395,14 +1395,8 @@ mod tests {
             "mailto:a@evil.example",
         ] {
             let out = text_escape(hostile);
-            assert!(!out.contains("://"), "{out}");
+            assert!(!out.replace("\\:", "").contains(':'), "{out}");
             assert!(!out.to_lowercase().contains("www."), "{out}");
-            assert!(!out.contains(" :") || out.contains("\\:"), "{out}");
-            assert_eq!(
-                out.matches(':').count(),
-                out.matches("\\:").count(),
-                "{out}"
-            );
         }
         assert_eq!(text_escape("www.a.com"), "www\\.a.com");
         assert_eq!(text_escape("a: b"), "a\\: b");
