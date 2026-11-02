@@ -1,13 +1,11 @@
 //! Two-way delta chart: diverging bars around a 0% line (task 3.2.1a).
 //!
-//! `SvgWriter` only emits class attributes and the Light card must carry no
-//! `<style>` (AC-S2-12), so this module writes its own elements with literal-hex
-//! `fill`/`stroke` attributes. Every number goes through `fmt_coord` and every
-//! text through `xml_escape`, the same two choke points the writer uses.
+//! The Light card must carry no `<style>` (AC-S2-12), so this module draws with the
+//! writer's attribute-based primitives (literal-hex `fill`/`stroke`), not its class ones.
 
 use super::style::{Palette, Theme};
 use super::text::{text_width, truncate_to_width};
-use super::writer::{fmt_coord, xml_escape, NonFiniteError};
+use super::writer::{Anchor, NonFiniteError, PathBuilder, SvgWriter};
 use super::{ChartTheme, SkipReason, SvgFile, SvgOptions};
 use crate::compare::{Report, Row, Verdict};
 use crate::markdown::fmt_pct;
@@ -172,86 +170,26 @@ fn desc_text(bars: &[Bar]) -> String {
     )
 }
 
-struct Doc {
-    buf: String,
-    err: Option<NonFiniteError>,
-}
-
-impl Doc {
-    fn n(&mut self, v: f64) -> String {
-        fmt_coord(v).unwrap_or_else(|e| {
-            self.err = Some(e);
-            "0".into()
-        })
-    }
-
-    fn rect(&mut self, x: f64, y: f64, w: f64, h: f64, rx: f64, fill: &str) {
-        let (x, y, w, h, rx) = (self.n(x), self.n(y), self.n(w), self.n(h), self.n(rx));
-        self.buf.push_str(&format!(
-            "<rect x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" rx=\"{rx}\" fill=\"{fill}\"/>\n"
-        ));
-    }
-
-    fn line(&mut self, x1: f64, y1: f64, x2: f64, y2: f64, stroke: &str) {
-        let (x1, y1, x2, y2) = (self.n(x1), self.n(y1), self.n(x2), self.n(y2));
-        self.buf.push_str(&format!(
-            "<line x1=\"{x1}\" y1=\"{y1}\" x2=\"{x2}\" y2=\"{y2}\" stroke=\"{stroke}\" stroke-width=\"1\"/>\n"
-        ));
-    }
-
-    /// `anchor` is one of `start`, `middle`, `end`.
-    fn text(&mut self, x: f64, y: f64, anchor: &str, size: f64, fill: &str, content: &str) {
-        let (x, y, size) = (self.n(x), self.n(y), self.n(size));
-        self.buf.push_str(&format!(
-            "<text x=\"{x}\" y=\"{y}\" text-anchor=\"{anchor}\" font-size=\"{size}\" fill=\"{fill}\">{}</text>\n",
-            xml_escape(content)
-        ));
-    }
-
-    fn path(&mut self, d: &str, fill: &str, stroke: &str) {
-        self.buf.push_str(&format!(
-            "<path d=\"{d}\" fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"1.5\"/>\n"
-        ));
-    }
-
-    fn cap(&mut self, cap: Cap, cx: f64, cy: f64, color: &str) {
-        let d = match cap_path(cap, cx, cy, CAP_R) {
-            Ok(d) => d,
-            Err(e) => {
-                self.err = Some(e);
-                return;
-            }
-        };
-        match cap {
-            Cap::Hollow => self.path(&d, "none", color),
-            _ => self.path(&d, color, color),
-        }
-    }
-}
-
-fn cap_path(cap: Cap, cx: f64, cy: f64, r: f64) -> Result<String, NonFiniteError> {
-    let pts = match cap {
-        Cap::Up => [(0.0, -r), (r, r * 0.8), (-r, r * 0.8)],
-        Cap::Down => [(0.0, r), (r, -r * 0.8), (-r, -r * 0.8)],
+fn draw_cap(w: &mut SvgWriter, cap: Cap, cx: f64, cy: f64, color: &str) {
+    let r = CAP_R;
+    let mut p = PathBuilder::new();
+    match cap {
         Cap::Hollow => {
-            let (x0, x1, y, rr) = (
-                fmt_coord(cx - r)?,
-                fmt_coord(cx + r)?,
-                fmt_coord(cy)?,
-                fmt_coord(r)?,
-            );
-            return Ok(format!(
-                "M{x0} {y}A{rr} {rr} 0 1 0 {x1} {y}A{rr} {rr} 0 1 0 {x0} {y}Z"
-            ));
+            p.move_to(cx - r, cy)
+                .arc(r, r, true, false, cx + r, cy)
+                .arc(r, r, true, false, cx - r, cy)
+                .close();
+            w.path_styled(&p, "none", color, 1.5);
         }
-    };
-    let mut d = String::new();
-    for (k, (x, y)) in pts.iter().enumerate() {
-        d.push(if k == 0 { 'M' } else { 'L' });
-        d.push_str(&format!("{} {}", fmt_coord(cx + x)?, fmt_coord(cy + y)?));
+        Cap::Up | Cap::Down => {
+            let s = if cap == Cap::Up { 1.0 } else { -1.0 };
+            p.move_to(cx, cy - s * r)
+                .line_to(cx + r, cy + s * r * 0.8)
+                .line_to(cx - r, cy + s * r * 0.8)
+                .close();
+            w.path_styled(&p, color, color, 1.5);
+        }
     }
-    d.push('Z');
-    Ok(d)
 }
 
 fn render(bars: &[Bar], width: f64, pal: Palette) -> Result<String, NonFiniteError> {
@@ -262,40 +200,41 @@ fn render(bars: &[Bar], width: f64, pal: Palette) -> Result<String, NonFiniteErr
     let rows_h = bars.len() as f64 * ROW_H;
     let height = HEADER_H + rows_h + FOOTER_H;
 
-    let mut d = Doc {
-        buf: String::new(),
-        err: None,
-    };
-    let (ws, hs) = (d.n(width), d.n(height));
-    d.buf.push_str(&format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{ws}\" height=\"{hs}\" viewBox=\"0 0 {ws} {hs}\" role=\"img\" aria-labelledby=\"t d\" font-family=\"Helvetica, Arial, sans-serif\">\n"
-    ));
-    d.buf.push_str(&format!(
-        "<title id=\"t\">{}</title>\n<desc id=\"d\">{}</desc>\n",
-        xml_escape(&alt_text(bars)),
-        xml_escape(&desc_text(bars))
-    ));
-    d.rect(0.0, 0.0, width, height, 8.0, pal.card);
+    let mut d = SvgWriter::new_accessible(
+        width,
+        height,
+        "Helvetica, Arial, sans-serif",
+        &alt_text(bars),
+        &desc_text(bars),
+    );
+    d.rect_fill(0.0, 0.0, width, height, 8.0, pal.card);
 
     let (reg, imp, unch) = counts(bars);
-    d.text(
+    d.text_styled(
         PAD,
         24.0,
-        "start",
+        Anchor::Start,
         13.0,
         pal.ink,
         "Benchmark change, head vs base",
     );
-    d.text(
+    d.text_styled(
         PAD,
         42.0,
-        "start",
+        Anchor::Start,
         FONT_PX,
         pal.secondary,
         &format!("{reg} regressed · {imp} improved · {unch} unchanged"),
     );
-    d.text(cx, HEADER_H - 4.0, "middle", 11.0, pal.secondary, "0%");
-    d.line(cx, HEADER_H, cx, HEADER_H + rows_h, pal.secondary);
+    d.text_styled(
+        cx,
+        HEADER_H - 4.0,
+        Anchor::Middle,
+        11.0,
+        pal.secondary,
+        "0%",
+    );
+    d.line_stroke(cx, HEADER_H, cx, HEADER_H + rows_h, pal.secondary, 1.0);
 
     for (i, bar) in bars.iter().enumerate() {
         let top = HEADER_H + i as f64 * ROW_H;
@@ -310,38 +249,32 @@ fn render(bars: &[Bar], width: f64, pal: Palette) -> Result<String, NonFiniteErr
         let label = format!("{}. {}", i + 1, bar.row.label());
         let shown = truncate_to_width(&label, FONT_PX, GUTTER - PAD - 8.0);
 
-        d.buf.push_str("<g>\n");
-        d.buf.push_str(&format!(
-            "<title>{}</title>\n",
-            xml_escape(&format!("{label}: {}", fmt_pct(bar.pct)))
-        ));
-        d.text(PAD, mid + 4.0, "start", FONT_PX, pal.ink, &shown);
+        d.open_titled_group(&format!("{label}: {}", fmt_pct(bar.pct)));
+        d.text_styled(PAD, mid + 4.0, Anchor::Start, FONT_PX, pal.ink, &shown);
         if len > 0.0 {
-            d.rect(cx.min(end), mid - BAR_H / 2.0, len, BAR_H, 0.0, color);
+            d.rect_fill(cx.min(end), mid - BAR_H / 2.0, len, BAR_H, 0.0, color);
         }
         if bar.pct.abs() > CLIP_PCT {
             // Two outward chevrons in card colour: the bar is cut at the clip.
             let s = bar.side;
-            let mut chev = String::new();
+            let mut chev = PathBuilder::new();
             for off in [-12.0, -6.0] {
                 let x = end + s * off;
-                chev.push_str(&format!(
-                    "M{} {}L{} {}L{} {}",
-                    d.n(x - s * 3.0),
-                    d.n(mid - 4.0),
-                    d.n(x),
-                    d.n(mid),
-                    d.n(x - s * 3.0),
-                    d.n(mid + 4.0)
-                ));
+                chev.move_to(x - s * 3.0, mid - 4.0)
+                    .line_to(x, mid)
+                    .line_to(x - s * 3.0, mid + 4.0);
             }
-            d.path(&chev, "none", pal.card);
+            d.path_styled(&chev, "none", pal.card, 1.5);
         }
         let cap_cx = end + bar.side * (CAP_R + 2.0);
-        d.cap(bar.cap, cap_cx, mid, color);
+        draw_cap(&mut d, bar.cap, cap_cx, mid, color);
         let label_x = cap_cx + bar.side * (CAP_R + 6.0);
-        let anchor = if bar.side > 0.0 { "start" } else { "end" };
-        d.text(
+        let anchor = if bar.side > 0.0 {
+            Anchor::Start
+        } else {
+            Anchor::End
+        };
+        d.text_styled(
             label_x,
             mid + 4.0,
             anchor,
@@ -349,7 +282,7 @@ fn render(bars: &[Bar], width: f64, pal: Palette) -> Result<String, NonFiniteErr
             pal.ink,
             &fmt_pct(bar.pct),
         );
-        d.buf.push_str("</g>\n");
+        d.close_group();
     }
 
     let fy = HEADER_H + rows_h + 22.0;
@@ -359,30 +292,26 @@ fn render(bars: &[Bar], width: f64, pal: Palette) -> Result<String, NonFiniteErr
         (Cap::Down, pal.improved, "improved"),
         (Cap::Hollow, pal.unchanged, "no significant change"),
     ] {
-        d.cap(cap, x + CAP_R, fy - 4.0, color);
-        d.text(
+        draw_cap(&mut d, cap, x + CAP_R, fy - 4.0, color);
+        d.text_styled(
             x + 2.0 * CAP_R + 6.0,
             fy,
-            "start",
+            Anchor::Start,
             FONT_PX,
             pal.secondary,
             text,
         );
         x += 2.0 * CAP_R + 6.0 + text_width(text, FONT_PX) + 16.0;
     }
-    d.text(
+    d.text_styled(
         PAD,
         fy + 18.0,
-        "start",
+        Anchor::Start,
         FONT_PX,
         pal.secondary,
         &format!("Worst change first. Bars clip at {CLIP_PCT:.0}%; labels show the true change."),
     );
-    d.buf.push_str("</svg>\n");
-    match d.err {
-        Some(e) => Err(e),
-        None => Ok(d.buf),
-    }
+    d.finish()
 }
 
 #[cfg(test)]
@@ -568,7 +497,7 @@ mod tests {
         let svg = light(&r).svg;
         assert!(svg.contains('…'), "{svg}");
         assert!(svg.contains("/impl=quick</text>"));
-        let esc = xml_escape(&name);
+        let esc = crate::svg::writer::xml_escape(&name);
         assert!(svg.contains(&format!("<title>1. {esc}: +8.0%</title>")));
         assert!(!svg.contains("<script") && !svg.contains("Bench<&"));
     }
