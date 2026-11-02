@@ -31,6 +31,9 @@ const FONT_PX: f64 = 12.0;
 const SMALL_PX: f64 = 11.0;
 const ALT_MAX_CHARS: usize = 125;
 const DESC_TOP: usize = 5;
+/// Most dots drawn in one lane; longer lanes draw every `stride`th sample (median and range
+/// still use all of them), which keeps the SVG bounded.
+const MAX_DOTS_PER_LANE: usize = 500;
 
 struct Lane {
     name: String,
@@ -39,6 +42,13 @@ struct Lane {
     hollow: bool,
     /// Finite samples only, in input order (jitter follows this order).
     values: Vec<f64>,
+}
+
+impl Lane {
+    /// Draw every `stride`th sample; 1 when the lane fits under the dot cap.
+    fn stride(&self) -> usize {
+        self.values.len().div_ceil(MAX_DOTS_PER_LANE).max(1)
+    }
 }
 
 struct Block {
@@ -390,8 +400,12 @@ fn alt_text(blocks: &[&Block], mode: Mode, constant: usize) -> String {
 
 fn lane_summary(lane: &Lane, unit: &str) -> String {
     let (min, max) = bounds(&lane.values);
+    let thinned = match lane.stride() {
+        1 => String::new(),
+        stride => format!(", every {stride}th dot drawn"),
+    };
     format!(
-        "{}: median {} ({}-{}, n={})",
+        "{}: median {} ({}-{}, n={}{thinned})",
         cut(&lane.name, NAME_MAX_CHARS),
         with_unit(crate::stats::median(&lane.values), unit),
         fmt_val(min),
@@ -438,7 +452,20 @@ fn render(
     let plot_r = width - PAD;
     let block_h = |b: &Block| TITLE_H + b.lanes.len() as f64 * LANE_H + AXIS_H + BLOCK_GAP;
     let body_h: f64 = blocks.iter().map(|b| block_h(b)).sum();
-    let extra_lines = usize::from(more.is_some()) + usize::from(const_line.is_some());
+    let thinned_lanes = blocks
+        .iter()
+        .flat_map(|b| &b.lanes)
+        .filter(|l| l.stride() > 1)
+        .count();
+    let thin_line = (thinned_lanes > 0).then(|| {
+        format!(
+            "{thinned_lanes} {} with more than {MAX_DOTS_PER_LANE} samples draw an evenly spaced subset; median and range use every sample",
+            if thinned_lanes == 1 { "lane" } else { "lanes" }
+        )
+    });
+    let extra_lines = usize::from(more.is_some())
+        + usize::from(const_line.is_some())
+        + usize::from(thin_line.is_some());
     let footer_h = FOOTER_H + extra_lines as f64 * MORE_LINE_H;
     let height = HEADER_H + body_h + footer_h;
 
@@ -474,6 +501,9 @@ fn render(
             .collect();
         let (min, max) = bounds(&all);
         let span = max - min;
+        if !span.is_finite() {
+            return Err(NonFiniteError);
+        }
         let x_of = |v: f64| {
             if span > 0.0 {
                 plot_l + PLOT_INSET + (v - min) / span * (plot_r - plot_l - 2.0 * PLOT_INSET)
@@ -508,7 +538,7 @@ fn render(
                 &name,
             );
             let mut dots = PathBuilder::new();
-            for (i, v) in lane.values.iter().enumerate() {
+            for (i, v) in lane.values.iter().enumerate().step_by(lane.stride()) {
                 dot(&mut dots, x_of(*v), mid + jitter(i));
             }
             let fill = if lane.hollow { "none" } else { color };
@@ -570,7 +600,11 @@ fn render(
         "Largest change first. Lanes in a benchmark share one axis.",
     );
     let mut note_y = fy + 36.0;
-    for line in more.into_iter().chain(const_line) {
+    for line in more
+        .into_iter()
+        .chain(const_line)
+        .chain(thin_line.as_deref())
+    {
         let line = truncate_to_width(line, FONT_PX, width - 2.0 * PAD);
         d.text_styled(PAD, note_y, Anchor::Start, FONT_PX, pal.secondary, &line);
         note_y += MORE_LINE_H;
@@ -823,6 +857,49 @@ mod tests {
             .filter(|l| l.starts_with("<path") && l.matches('A').count() == 20)
             .count();
         assert_eq!(lanes, 3);
+    }
+
+    #[test]
+    fn distribution_chart_should_skip_as_non_finite_when_the_axis_span_overflows() {
+        let r = report(vec![row(
+            "Sort",
+            Some(-20.0),
+            vec![-1e308, 0.0, 1e308],
+            vec![-1e308, 1e308],
+        )]);
+        assert_eq!(
+            distribution_chart(&r, &opts(ChartTheme::Light)).unwrap_err(),
+            SkipReason::NonFinite
+        );
+    }
+
+    #[test]
+    fn distribution_chart_should_thin_dots_past_the_lane_cap_and_say_so() {
+        let many: Vec<f64> = (0..2000).map(f64::from).collect();
+        let r = report(vec![row("Sort", Some(-20.0), many.clone(), ten(0.0))]);
+        let f = distribution_chart(&r, &opts(ChartTheme::Light)).unwrap();
+        // 2000 samples at stride 4 -> 500 dots (1000 arcs); the other lane keeps all 10; the
+        // third path is the legend dot
+        let arcs: Vec<usize> = f
+            .svg
+            .lines()
+            .filter(|l| l.starts_with("<path") && l.contains('A'))
+            .map(|l| l.matches('A').count())
+            .collect();
+        assert_eq!(arcs[..2], [1000, 20], "{}", f.svg);
+        assert!(f.svg.contains("n=2000, every 4th dot drawn"), "{}", f.svg);
+        assert!(f.svg.contains("evenly spaced subset"), "{}", f.svg);
+        // median and range come from every sample, not the drawn ones
+        assert!(
+            f.svg.contains("median 1000 ns (0-1999, n=2000"),
+            "{}",
+            f.svg
+        );
+        // at the cap exactly nothing is thinned
+        let at_cap: Vec<f64> = (0..500).map(f64::from).collect();
+        let r = report(vec![row("Sort", Some(-20.0), at_cap, ten(0.0))]);
+        let f = distribution_chart(&r, &opts(ChartTheme::Light)).unwrap();
+        assert!(!f.svg.contains("every") && !f.svg.contains("subset"));
     }
 
     #[test]
