@@ -880,6 +880,9 @@ test('action_variants_should_expose_svgs_and_strip_placeholders_when_charts_rank
   for (const p of paths) assert.ok(fs.existsSync(p), p);
   assert.ok(fs.readdirSync(svgDir).some((n) => n.endsWith('.svg')));
   assert.equal(outputOf(r.s, 'failed'), 'false');
+  // Both requested kinds are produced through the wasm (distribution needs samples; main.rs sets keep_samples for it).
+  assert.match(r.log, /charts: requested=ranking,distribution produced=2 skipped=0\n/);
+  assert.deepEqual(fs.readdirSync(svgDir).filter((n) => n.endsWith('.svg')).sort(), ['distribution.svg', 'ranking.svg']);
 });
 
 test('action_variants_should_pass_the_job_when_chart_hosting_fails_with_a_permission_error', async () => {
@@ -896,4 +899,53 @@ test('action_variants_should_pass_the_job_when_chart_hosting_fails_with_a_permis
   await withEnv(s.env, () => main({ fetchImpl: gh.fetchImpl }));
   assert.ok(!commentBody(gh).includes('benchdiff-svg:'));
   assert.equal(outputOf(s, 'failed'), 'false');
+});
+
+// ---- config input through the real wasm (WASI preopen of the staged config) ----
+
+/** One benchmark that is +6.0% slower in head (single sample each, so only the threshold decides). */
+function configSetup(configJson, extra = {}) {
+  const s = setup('', undefined);
+  const dir = path.dirname(s.output);
+  fs.writeFileSync(path.join(dir, 'base.txt'), 'BenchmarkX-8 \t 1000 \t 1000.0 ns/op\n');
+  fs.writeFileSync(path.join(dir, 'head.txt'), 'BenchmarkX-8 \t 1000 \t 1060.0 ns/op\n');
+  fs.writeFileSync(path.join(dir, 'bd.config.json'), typeof configJson === 'string' ? configJson : JSON.stringify({ version: 1, ...configJson }));
+  Object.assign(s.env, { INPUT_HEAD: path.join(dir, 'head.txt'), INPUT_BASE: path.join(dir, 'base.txt'), INPUT_CONFIG: path.join(dir, 'bd.config.json'), ...extra });
+  return s;
+}
+const regressedOf = async (s) => {
+  await withEnv(s.env, () => main());
+  return outputOf(s, 'regressed');
+};
+
+test('action_config_should_apply_threshold_from_file_when_input_unset', async () => {
+  assert.equal(await regressedOf(configSetup({ threshold: 7 })), '0', 'config 7 hides a +6% change');
+  assert.equal(await regressedOf(configSetup({ threshold: 3 })), '1', 'config 3 flags it');
+  const noConfig = configSetup({ threshold: 7 }, { INPUT_CONFIG: '' });
+  assert.equal(await regressedOf(noConfig), '1', 'default threshold 5 flags it, so the config really reached the binary');
+});
+
+test('action_config_should_let_threshold_input_override_the_file_value', async () => {
+  assert.equal(await regressedOf(configSetup({ threshold: 3 }, { INPUT_THRESHOLD: '7' })), '0', 'input 7 beats config 3');
+  assert.equal(await regressedOf(configSetup({ threshold: 7 }, { INPUT_THRESHOLD: '3' })), '1', 'input 3 beats config 7');
+});
+
+test('action_config_should_fail_the_step_naming_file_and_key_when_config_has_an_unknown_key', async () => {
+  const s = configSetup({ thresold: 3 });
+  await withEnv(s.env, async () => {
+    await assert.rejects(main(), /bd\.config\.json: unknown key 'thresold'; did you mean 'threshold'\?/);
+  });
+});
+
+// ---- release workflow (plan Story 5.1.4) ----
+
+test('release_workflow_should_upload_svg_paths_and_never_set_publish_images_when_charts_input', () => {
+  const wf = fs.readFileSync(path.join(root, '.github/workflows/release-benchmarks.yml'), 'utf8');
+  assert.match(wf, /charts: \$\{\{ inputs\.charts \}\}/);
+  assert.match(wf, /config: \$\{\{ inputs\.config \}\}/);
+  assert.match(wf, /SVG_PATHS: \$\{\{ steps\.diff\.outputs\.svg-paths \}\}/);
+  assert.match(wf, /gh release upload "\$TAG" "\$\{assets\[@\]\}" --clobber/);
+  assert.match(wf, /assets\+=\("\$svg"\)/);
+  const code = wf.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
+  assert.ok(!/publish-images/.test(code), 'workflow never sets publish-images');
 });
