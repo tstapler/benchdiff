@@ -267,7 +267,9 @@ async function main() {
   if (report.failed) throw new Error(`${report.counts.regressed} benchmark regression(s) exceed the fail-on-regression limit`);
 }
 
-module.exports = { expand, runWasm, stage, buildArgs, stageConfig, parseFailOnRegression, validateTag, upsertComment, clip, main };
+const { publishImages, rewritePlaceholders } = require('./lib/images');
+
+module.exports = { publishImages, rewritePlaceholders, expand, runWasm, stage, buildArgs, stageConfig, parseFailOnRegression, validateTag, upsertComment, clip, main };
 
 if (require.main === module) {
   main().catch((e) => {
