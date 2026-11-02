@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="282" viewBox="0 0 760 282" role="img" aria-labelledby="t d" font-family="Helvetica, Arial, sans-serif">
+<title id="t">Ratio vs ref: ref has the best geomean; largest gap: v8 14.8x on BenchmarkParse/size=1000</title>
+<desc id="d">1 benchmark, 8 variants against reference ref; log2 axis, bars start at 1.00x. ref has the best geomean; no variant is better overall. Largest gaps: v8 14.8x on BenchmarkParse/size=1000; v7 10.5x on BenchmarkParse/size=1000; v6 7.53x on BenchmarkParse/size=1000; v5 5.38x on BenchmarkParse/size=1000; v4 3.84x on BenchmarkParse/size=1000. 1 more not shown: v9.</desc>
+<rect x="0" y="0" width="760" height="282" rx="8" fill="#fcfcfb"/>
+<text x="16" y="24" text-anchor="start" font-size="13" fill="#0b0b0b">Ratio vs ref</text>
+<text x="16" y="42" text-anchor="start" font-size="12" fill="#52514e">1 benchmark · 8 variants · log2 scale</text>
+<line x1="304" y1="64" x2="304" y2="202" stroke="#8a8a86" stroke-width="0.5"/>
+<text x="304" y="60" text-anchor="middle" font-size="11" fill="#52514e">0.0625x</text>
+<line x1="393" y1="64" x2="393" y2="202" stroke="#8a8a86" stroke-width="0.5"/>
+<text x="393" y="60" text-anchor="middle" font-size="11" fill="#52514e">0.25x</text>
+<line x1="571" y1="64" x2="571" y2="202" stroke="#8a8a86" stroke-width="0.5"/>
+<text x="571" y="60" text-anchor="middle" font-size="11" fill="#52514e">4x</text>
+<line x1="660" y1="64" x2="660" y2="202" stroke="#8a8a86" stroke-width="0.5"/>
+<text x="660" y="60" text-anchor="middle" font-size="11" fill="#52514e">16x</text>
+<line x1="482" y1="64" x2="482" y2="202" stroke="#0b0b0b" stroke-width="1.5"/>
+<text x="482" y="60" text-anchor="middle" font-size="11" fill="#0b0b0b">ref = 1.00x</text>
+<g>
+<title>BenchmarkParse/size=1000: v1 1.40x, v2 1.96x, v3 2.74x, v4 3.84x, v5 5.38x, v6 7.53x, v7 10.5x, v8 14.8x</title>
+<text x="16" y="81" text-anchor="start" font-size="12" fill="#0b0b0b">BenchmarkParse/size=1000</text>
+<path d="M482 73L503.6 73L503.6 81L482 81Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5"/>
+<path d="M498.6 77A5 5 0 1 0 508.6 77A5 5 0 1 0 498.6 77Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5"/>
+<text x="512.6" y="81" text-anchor="start" font-size="12" fill="#0b0b0b">1.40x</text>
+<path d="M482 89L525.2 89L525.2 97L482 97Z" fill="#eb6834" stroke="#eb6834" stroke-width="1.5"/>
+<path d="M520.2 88L530.2 88L530.2 98L520.2 98Z" fill="#eb6834" stroke="#eb6834" stroke-width="1.5"/>
+<text x="534.2" y="97" text-anchor="start" font-size="12" fill="#0b0b0b">1.96x</text>
+<path d="M482 105L546.8 105L546.8 113L482 113Z" fill="#1baf7a" stroke="#52514e" stroke-width="1.5"/>
+<path d="M546.8 104L551.8 109L546.8 114L541.8 109Z" fill="#1baf7a" stroke="#52514e" stroke-width="1.5"/>
+<text x="555.8" y="113" text-anchor="start" font-size="12" fill="#0b0b0b">2.74x</text>
+<path d="M482 121L568.41 121L568.41 129L482 129Z" fill="#eda100" stroke="#52514e" stroke-width="1.5"/>
+<path d="M568.41 120L573.41 130L563.41 130Z" fill="#eda100" stroke="#52514e" stroke-width="1.5"/>
+<text x="577.41" y="129" text-anchor="start" font-size="12" fill="#0b0b0b">3.84x</text>
+<path d="M482 137L590.01 137L590.01 145L482 145Z" fill="#e87ba4" stroke="#52514e" stroke-width="1.5"/>
+<path d="M588.34 136L591.67 136L591.67 139.33L595.01 139.33L595.01 142.67L591.67 142.67L591.67 146L588.34 146L588.34 142.67L585.01 142.67L585.01 139.33L588.34 139.33Z" fill="#e87ba4" stroke="#52514e" stroke-width="1.5"/>
+<text x="599.01" y="145" text-anchor="start" font-size="12" fill="#0b0b0b">5.38x</text>
+<path d="M482 153L611.61 153L611.61 161L482 161Z" fill="#6250d6" stroke="#6250d6" stroke-width="1.5"/>
+<path d="M611.61 152L612.78 155.38L616.36 155.45L613.51 157.62L614.55 161.05L611.61 159L608.67 161.05L609.71 157.62L606.85 155.45L610.43 155.38Z" fill="#6250d6" stroke="#6250d6" stroke-width="1.5"/>
+<text x="620.61" y="161" text-anchor="start" font-size="12" fill="#0b0b0b">7.53x</text>
+<path d="M482 169L633.21 169L633.21 177L482 177Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5"/>
+<path d="M628.21 173A5 5 0 1 0 638.21 173A5 5 0 1 0 628.21 173Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5"/>
+<text x="642.21" y="177" text-anchor="start" font-size="12" fill="#0b0b0b">10.5x</text>
+<path d="M482 185L654.81 185L654.81 193L482 193Z" fill="#eb6834" stroke="#eb6834" stroke-width="1.5"/>
+<path d="M649.81 184L659.81 184L659.81 194L649.81 194Z" fill="#eb6834" stroke="#eb6834" stroke-width="1.5"/>
+<text x="663.81" y="193" text-anchor="start" font-size="12" fill="#0b0b0b">14.8x</text>
+</g>
+<line x1="21" y1="215" x2="21" y2="225" stroke="#0b0b0b" stroke-width="1.5"/>
+<text x="32" y="224" text-anchor="start" font-size="12" fill="#52514e">ref (reference)</text>
+<path d="M133.62 220A5 5 0 1 0 143.62 220A5 5 0 1 0 133.62 220Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5"/>
+<text x="149.62" y="224" text-anchor="start" font-size="12" fill="#52514e">v1</text>
+<path d="M181.56 215L191.56 215L191.56 225L181.56 225Z" fill="#eb6834" stroke="#eb6834" stroke-width="1.5"/>
+<text x="197.56" y="224" text-anchor="start" font-size="12" fill="#52514e">v2</text>
+<path d="M234.5 215L239.5 220L234.5 225L229.5 220Z" fill="#1baf7a" stroke="#52514e" stroke-width="1.5"/>
+<text x="245.5" y="224" text-anchor="start" font-size="12" fill="#52514e">v3</text>
+<path d="M282.44 215L287.44 225L277.44 225Z" fill="#eda100" stroke="#52514e" stroke-width="1.5"/>
+<text x="293.44" y="224" text-anchor="start" font-size="12" fill="#52514e">v4</text>
+<path d="M328.71 215L332.05 215L332.05 218.33L335.38 218.33L335.38 221.67L332.05 221.67L332.05 225L328.71 225L328.71 221.67L325.38 221.67L325.38 218.33L328.71 218.33Z" fill="#e87ba4" stroke="#52514e" stroke-width="1.5"/>
+<text x="341.38" y="224" text-anchor="start" font-size="12" fill="#52514e">v5</text>
+<path d="M378.32 215L379.49 218.38L383.07 218.45L380.22 220.62L381.26 224.05L378.32 222L375.38 224.05L376.42 220.62L373.56 218.45L377.14 218.38Z" fill="#6250d6" stroke="#6250d6" stroke-width="1.5"/>
+<text x="389.32" y="224" text-anchor="start" font-size="12" fill="#52514e">v6</text>
+<path d="M421.26 220A5 5 0 1 0 431.26 220A5 5 0 1 0 421.26 220Z" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5"/>
+<text x="437.26" y="224" text-anchor="start" font-size="12" fill="#52514e">v7</text>
+<path d="M469.2 215L479.2 215L479.2 225L469.2 225Z" fill="#eb6834" stroke="#eb6834" stroke-width="1.5"/>
+<text x="485.2" y="224" text-anchor="start" font-size="12" fill="#52514e">v8</text>
+<text x="16" y="242" text-anchor="start" font-size="12" fill="#52514e">Bars: value ÷ ref, log2 scale; left of the line is smaller.</text>
+<text x="16" y="260" text-anchor="start" font-size="12" fill="#52514e">+ 1 more not shown: v9</text>
+</svg>
